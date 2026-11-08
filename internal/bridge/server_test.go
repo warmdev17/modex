@@ -177,3 +177,54 @@ func TestServeAnswersDecisionWhileRequestIsWaiting(t *testing.T) {
 		t.Fatalf("output=%s", output.String())
 	}
 }
+
+func TestThreadStartUsesFixedWorkspaceAndOptionalModel(t *testing.T) {
+	for _, tc := range []struct{ name, params, model string }{
+		{"inherited", `{}`, ""}, {"selected", `{"model":"gpt-6.1-sol"}`, "gpt-6.1-sol"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			call := func(_ context.Context, method string, params any) (json.RawMessage, error) {
+				calls++
+				p := params.(map[string]any)
+				if method != "thread/start" || p["cwd"] != "/work" {
+					t.Fatalf("method=%s params=%v", method, p)
+				}
+				if tc.model == "" {
+					if len(p) != 1 {
+						t.Fatalf("overrode config: %v", p)
+					}
+				} else if len(p) != 2 || p["model"] != tc.model {
+					t.Fatalf("params=%v", p)
+				}
+				return json.RawMessage(`{"thread":{"id":"new-thread","cwd":"/work","modelProvider":"custom","preview":"private"},"model":"runtime-model","secret":"never-emit"}`), nil
+			}
+			result, err := Handle(context.Background(), "/work", Command{Method: "threads/start", Params: json.RawMessage(tc.params)}, call)
+			raw, _ := json.Marshal(result)
+			if err != nil || calls != 1 || !strings.Contains(string(raw), `"id":"new-thread"`) || !strings.Contains(string(raw), `"model":"runtime-model"`) || strings.Contains(string(raw), "never-emit") || strings.Contains(string(raw), "private") {
+				t.Fatalf("result=%s calls=%d err=%v", raw, calls, err)
+			}
+		})
+	}
+}
+
+func TestThreadStartRejectsInvalidParamsBeforeUpstream(t *testing.T) {
+	call := func(context.Context, string, any) (json.RawMessage, error) {
+		t.Fatal("unexpected upstream call")
+		return nil, nil
+	}
+	for _, params := range []string{`{"cwd":"/other"}`, `{"modelProvider":"other"}`, `{"approvalPolicy":"never"}`, `{"model":null}`, `{"model":42}`, `{"model":""}`, `{"model":"   "}`, `{"model":"model\nname"}`} {
+		if _, err := Handle(context.Background(), "/work", Command{Method: "threads/start", Params: json.RawMessage(params)}, call); err == nil {
+			t.Fatalf("accepted %s", params)
+		}
+	}
+}
+
+func TestThreadStartRejectsInvalidUpstreamMetadata(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"thread":{"id":"","cwd":"/work"}}`, `{"thread":{"id":"x","cwd":"/other"}}`} {
+		call := func(context.Context, string, any) (json.RawMessage, error) { return json.RawMessage(raw), nil }
+		if _, err := Handle(context.Background(), "/work", Command{Method: "threads/start"}, call); err == nil {
+			t.Fatalf("accepted %s", raw)
+		}
+	}
+}

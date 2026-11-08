@@ -45,6 +45,15 @@ Send one JSON object per line, with a positive integer ID. Replies have the same
 {"id":5,"method":"threads/resume","params":{"thread_id":"existing-thread-id"}}
 ```
 
+Create a fresh chat through Modex (not a fork of another session):
+
+```json
+{"id":9,"method":"threads/start"}
+{"id":10,"method":"threads/start","params":{"model":"gpt-6.1-sol"}}
+```
+
+The first form inherits the configured model. The second selects a model for the new thread only. Both inherit the target provider and permissions, use the connection's fixed workspace, and return allowlisted `thread` metadata plus the model reported by Codex. The command cannot override cwd, provider, sandbox or approval policy. Use the returned ID with `turn/start`; an uncertain creation is never retried automatically.
+
 `threads/read` returns metadata only, not chat history. Lists return `data` and `next_cursor`; limit is 1–100. Only threads with the exact selected workspace are exposed or resumed. Resume preserves the original thread ID and does not override model, provider or approvals. Codex can reject a locked or incompatible thread; Modex never forks automatically. Resuming may initialize that thread's configured MCP servers.
 
 The bridge owns one app-server for the lifetime of its stdio connection and closes it at EOF. Each Codex exchange has a 20-second deadline. Protocol failures/timeouts close the Codex connection without replay; normal RPC rejections leave it usable. Text turns and supported approval/question responses are exposed below. Arbitrary Codex methods remain unavailable. This is not a detached daemon: disconnecting SSH stops its child. Native SSH/mobile integration remains unimplemented.
@@ -88,7 +97,7 @@ Review context intentionally contains task content (command, permissions, questi
 
 ### Opt-in real-provider verification
 
-This test makes paid requests using the target's existing Codex credentials. It creates a temporary read-only test workspace/thread, verifies direct inference, same-ID handoff, Modex streaming, and one real command approval. Only the exact `printf MODEX_APPROVAL_OK` command (optionally wrapped by a known Bash invocation) can be accepted; other approval requests are canceled. It verifies the command's exit code and stdout, decision acknowledgement and final turn status. It leaves global model/provider configuration unchanged.
+This test makes paid requests using the target's existing Codex credentials. It creates a temporary read-only test workspace/thread, verifies direct inference, same-ID handoff, Modex streaming, one real command approval, and creating a new chat entirely through Modex. Only the exact `printf MODEX_APPROVAL_OK` command (optionally wrapped by a known Bash invocation) can be accepted; other approval requests are canceled. It verifies the command's exit code and stdout, decision acknowledgement and final turn status. It leaves global model/provider configuration unchanged.
 
 ```sh
 GOCACHE=/tmp/modex-go-cache go build -o /tmp/modex-host ./cmd/modex-host

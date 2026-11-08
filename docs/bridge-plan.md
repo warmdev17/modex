@@ -31,3 +31,10 @@ Limits: connection-scoped lifecycle, not a background daemon surviving SSH loss;
 - [ ] Validate real provider approval/question flow; protocol/subprocess doubles do not prove live support.
 
 Ruling: keep existing uncommitted workspace and no auto-commits; use PROJECT_STATE.md as the single progress snapshot. No subagents, per user instruction. Legacy approvals, permissions requests, MCP elicitation, secret questions and automatic decision grants remain unsupported and receive a generic JSON-RPC rejection. Review context is task content and must travel only over the future authenticated SSH channel.
+
+## New chat slice (2026-11-09)
+
+- [x] `threads/start` accepts only optional `model`, fixes cwd to the connection workspace, and inherits provider/permissions.
+- [x] Project returned thread metadata and runtime model; reject malformed or out-of-workspace responses.
+- [x] Test model inheritance, explicit selection, invalid parameters, forbidden overrides and metadata projection.
+- [x] Real provider validation: new Modex-created thread with `gpt-6.1-sol` streamed the exact marker and completed successfully. Existing-thread handoff and one-time command approval also passed in the same live run.

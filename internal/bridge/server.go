@@ -37,6 +37,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	allowed := map[string]bool{}
 	switch cmd.Method {
 	case "status":
+	case "threads/start":
+		allowed["model"] = true
 	case "threads/list":
 		allowed["limit"] = true
 		allowed["cursor"] = true
@@ -68,6 +70,30 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		return r, nil
 	}
 	switch cmd.Method {
+	case "threads/start":
+		params := map[string]any{"cwd": cwd}
+		if raw, ok := p["model"]; ok {
+			var model string
+			if json.Unmarshal(raw, &model) != nil || strings.TrimSpace(model) == "" || len(model) > 256 || strings.ContainsAny(model, "\r\n\x00") {
+				return nil, errors.New("model must be a nonempty single-line string up to 256 bytes")
+			}
+			params["model"] = model
+		}
+		raw, err := fetch("thread/start", params)
+		if err != nil {
+			return nil, err
+		}
+		var result struct {
+			Thread Thread `json:"thread"`
+			Model  string `json:"model"`
+		}
+		if json.Unmarshal(raw, &result) != nil || result.Thread.ID == "" {
+			return nil, errors.New("invalid thread response")
+		}
+		if result.Thread.Cwd != cwd {
+			return nil, errors.New("thread outside workspace")
+		}
+		return result, nil
 	case "status":
 		raw, err := fetch("config/read", map[string]any{"cwd": cwd, "includeLayers": false})
 		if err != nil {

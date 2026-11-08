@@ -190,9 +190,19 @@ def run(args, report):
                       "Do not run other commands or edit files. After execution reply exactly "
                       "MODEX_APPROVAL_OK with no other text."})
             report["bridge_approval"] = wait_turn(host, MARKER, workspace, approval=True)
+            creation = host.call("threads/start", {"model": args.model} if args.model else {})
+            new_thread = creation["thread"]
+            report["new_thread_isolated"] = (
+                new_thread["id"] != thread_id and new_thread["cwd"] == directory)
+            report["new_thread_model"] = creation.get("model")
+            host.call("turn/start", {"thread_id": new_thread["id"], "text":
+                      "Reply exactly MODEX_NEW_CHAT_OK. Do not call any tools."})
+            report["new_chat_stream"] = wait_turn(host, "MODEX_NEW_CHAT_OK", workspace)
             report["passed"] = (report["same_thread_resume"] and
                                 report["bridge_stream"]["passed"] and
-                                report["bridge_approval"]["passed"])
+                                report["bridge_approval"]["passed"] and
+                                report["new_thread_isolated"] and
+                                report["new_chat_stream"]["passed"])
         finally:
             if seed:
                 seed.close()

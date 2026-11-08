@@ -26,3 +26,9 @@ func TestEncodeErrorDoesNotEchoSensitiveDetails(t *testing.T) {
 		t.Fatalf("bad response=%s", b)
 	}
 }
+
+func TestDecodeThreadStart(t *testing.T) {
+	if _, err := DecodeCommand([]byte(`{"id":1,"method":"threads/start","params":{"model":"gpt-6.1-sol"}}`)); err != nil {
+		t.Fatal(err)
+	}
+}
