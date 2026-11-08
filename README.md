@@ -85,3 +85,15 @@ For a question, preserve its IDs and send all answers:
 Each decision has a connection-local token. Invalid responses leave it pending; a valid response consumes it before writing to Codex, so uncertain delivery cannot be replayed. Completion/resolution notifications invalidate stale decisions. Unknown request methods and secret questions receive a generic unsupported-request error; no automatic approval occurs.
 
 Review context intentionally contains task content (command, permissions, question text) needed by the authenticated client. It is not a credential redactor for user-authored text. Raw configuration and upstream errors remain suppressed. There is no decision persistence across disconnects yet. If Codex awaits a decision before its RPC acknowledgement, the existing 20-second RPC deadline still applies; decisions after the acknowledgement have no additional timer in this milestone.
+
+### Opt-in real-provider verification
+
+This test makes paid requests using the target's existing Codex credentials. It creates a temporary read-only test workspace/thread, verifies direct inference, same-ID handoff, Modex streaming, and one real command approval. Only the exact `printf MODEX_APPROVAL_OK` command (optionally wrapped by a known Bash invocation) can be accepted; other approval requests are canceled. It verifies the command's exit code and stdout, decision acknowledgement and final turn status. It leaves global model/provider configuration unchanged.
+
+```sh
+GOCACHE=/tmp/modex-go-cache go build -o /tmp/modex-host ./cmd/modex-host
+python3 scripts/live_provider_smoke.py --host /tmp/modex-host --model gpt-6.1-sol
+python3 -m unittest discover -s scripts -p 'test_*.py'
+```
+
+Python 3 standard library only. Omit `--model` to use the configured model; `--report /path/to/report.json` writes a sanitized summary. The fixture workspace is removed after the run; Codex may retain ordinary test session records in its own home. This approval fixture requires Linux/Bash; host cross-compilation is not runtime validation on Windows or macOS.

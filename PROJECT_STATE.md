@@ -1,46 +1,31 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: main; no commits. All source and documents are uncommitted.
+Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `test/live-approval`; base commit `eab0a63`. This snapshot accompanies the live-test commit; Git records its final hash.
 
 ## Objective
 
-Native Android access to the user's actual Codex environment on Linux, Windows and macOS, including custom API providers and existing sessions. [Design](docs/design.md); [initial milestone plan](docs/plan.md).
+Native Android access to the user's actual Codex environment on Linux, Windows and macOS, preserving custom API providers, existing sessions, skills and MCP. [Design](docs/design.md); [milestone plan](docs/next-milestone-plan.md); [bridge contract](docs/bridge-plan.md).
 
 ## Implemented
 
-Initial Go host diagnostic: explicit workspace, optional executable/CODEX_HOME, stdio app-server initialize/config/read/thread/list, safe output projection, 4 MiB frame cap, 20-second process timeout. The --serve host now keeps an asynchronous app-server reader and handles supported approval/question server requests. No external Go dependencies. Named profile selection fails explicitly rather than silently ignoring the request.
+Go standard-library host: diagnostic mode and connection-scoped `--serve` bridge with status, paginated workspace-filtered thread list/read/resume, text turn/start, persistent app-server reader, late event streaming, and one-time command/file approval and non-secret question responses. No automatic fork, writer-lock bypass, session-wide permission grants or uncertain operation replay. Frames capped at 4 MiB; each RPC has a 20-second deadline. Pending decisions are memory-only, capped at 128; ordinary command queue capped at 16.
 
-Primary agent owns architecture and implementation. Go and milestone order are provisional builder choices. Connection-scoped bridge, persistent event streaming and in-memory approval/question responses are implemented; Android, native SSH transport, detached host supervisor, shared live sessions and push relay are not implemented. License and monetization are undecided.
+`scripts/live_provider_smoke.py` reproduces paid direct inference, same-thread handoff, streaming and a real approval in a temporary workspace. The command allowlist is tested separately. Review context intentionally contains task content; it is not a generic credential redactor. Raw upstream errors/configuration are suppressed.
 
-## Evidence on current uncommitted revision
+## Verified evidence
 
-- `GOCACHE=/tmp/modex-go-cache go test ./...`: PASS; config summary redaction/malformed data and RPC ID/error/frame boundary tests.
-- `GOCACHE=/tmp/modex-go-cache go vet ./...`: PASS.
-- `CGO_ENABLED=0 GOARCH=amd64 GOOS=<linux|windows|darwin> go build ... ./cmd/modex-host`: PASS for all three targets; runtime tested on Linux only.
-- `go run ./cmd/modex-host --workspace /home/warmdev/Workspace/modex --codex-home <temporary isolated home>`: PASS with Codex 0.167.0, configured provider `modex-test`, model `test-model`, empty thread list. No inference and no real API key used.
-- Executable boundary checks for missing workspace, nonexistent workspace and unsupported profile: PASS.
-- Persistent reader/event pump test for notifications arriving after the response: PASS; safe upstream rejection categories are covered without exposing raw error text.
+On the current live-test working tree:
 
-## Connection-scoped bridge milestone
+- `python3 -m unittest discover -s scripts -p 'test_*.py'`: PASS; direct/wrapped printf allowlist and shell-injection rejection.
+- `python3 scripts/live_provider_smoke.py --host /tmp/modex-host-linux --model gpt-6.1-sol --report /tmp/modex-live-approval-verified.json`: PASS against real `third-party` provider. Configured model was `gpt-5.5`; only the test thread used `gpt-6.1-sol`. Global config was not changed.
+- Direct provider and Modex text turns returned exact markers, streamed `item/agentMessage/delta`, and ended `completed`. Same thread ID survived closing the first app-server and resuming through Modex.
+- Real approval: one `decision/required`, one delivered `accept`, `serverRequest/resolved`, exact printf command stdout, exit code 0, final text and completed turn all verified. No raw logs, keys or endpoint values stored here.
+- At base `eab0a63`: Go tests, race tests, vet and amd64 cross-builds for Linux/Windows/macOS PASS. Runtime/live integration tested on Linux only.
 
-`--serve` retains one app-server for multiple stdio requests. Implements status, paginated threads/list, metadata-only threads/read, same-ID threads/resume, and workspace-validated text `turn/start` with notification forwarding. No arbitrary methods, permissions overrides or automatic fork/replay. See [bridge contract and plan](docs/bridge-plan.md).
+Earlier attempts with configured `gpt-5.5` returned HTTP 403 in both direct Codex and Modex; `gpt-6.1-sol` succeeded. Do not describe that earlier 403 as proven transient or a proven auth failure. The original approval harness failed because Codex supplied a Bash-wrapped command and offered accept/cancel rather than decline; the corrected harness checks the shell wrapper and actual execution instead of assuming failure was in the bridge.
 
-Verified on current uncommitted files: `go test ./...` PASS; `go test -race ./...` PASS; `go vet ./...` PASS; cross-build Linux/Windows/macOS PASS; real Codex 0.167.0 status, empty list, missing-thread rejection and continued requests PASS. Same-ID resume and cursor forwarding verified with protocol doubles only: a no-turn thread/start fixture was not durable, so real stored-thread resume is still unverified. Runtime child timeout/crash, late notification forwarding and request-rejection recovery are covered by subprocess tests.
+## In progress and next
 
-## Limits and next steps
+Primary agent is sole builder/state writer; execution is inline, no subagents. Next: expose workspace-bound thread creation through Modex so a new mobile chat needs no external seed. Then detached host lifecycle, reconnect/event cursors, SSH transport, Kotlin/Compose client, notification relay.
 
-Diagnostic mode lists one page (20 threads) and does not mutate sessions; --serve additionally supports text turns, streaming, resume and decision responses. Neither mode exposes stored message history or archived threads. Config/read is not proof of a provider request or resolved runtime model. No direct confirmation of named-profile selection; no lock bypass or silent fork permitted. Child stderr/errors are suppressed rather than exposed because they may contain credentials.
-
-The process now has a persistent app-server reader/event pump: responses are routed by request ID and notifications remain forwardable after `turn/start` returns. Safe rejection categories are exposed (`thread_not_found`, `active_writer`, `unauthorized`, `approval_required`, `model_provider_mismatch`, or `request_rejected`). The real provider turn remains unverified; the live smoke test was rejected as `thread_not_found` for the rendered thread ID.
-
-Next: finish live decision validation, then follow [the next milestone plan](docs/next-milestone-plan.md): detached lifecycle, SSH framing, Kotlin/Compose session browser and reconnect cursors. Connection ends at EOF; it does not survive SSH loss. The full product's continuous synchronization requirement remains open, including compatibility with the official Desktop writer ownership.
-
-## Multi-agent execution note
-
-The requested delegated workflow was attempted on 2026-11-09, but every specialist stream disconnected before producing a result; no delegated edits were accepted or treated as complete. The primary agent remains responsible for integration. The persisted UI direction is in `design-system/modex/MASTER.md`.
-
-## Decision protocol milestone (2026-11-09)
-
-Implemented inline per user request; no subagents, commits or publishing. Inspected installed Codex schema via `codex app-server generate-json-schema --experimental`. Supported server requests: command approval, file-change approval, non-secret user questions. The bridge emits projected `decision/required` review context and handles one `decision/respond`; original string/integer upstream IDs are preserved. Unsupported methods receive a generic JSON-RPC rejection. Ordinary commands are queued in order (capacity 16); decisions can be answered while an ordinary RPC is pending. Pending decisions are capped at 128 and invalidated by matching server resolution or turn completion. Policy amendments and session-wide grants are unavailable.
-
-Evidence on uncommitted source: `GOCACHE=/tmp/modex-go-cache go test ./...`, `go test -race ./...`, `go vet ./...` and Linux/Windows/macOS cross-builds PASS, including early server request handling, late events, unknown fields, invalid answers, unavailable approval choices, duplicate IDs, consumed responses, cancellation, turn completion, server resolution and uncertain-write replay prevention. Live provider inference is now verified in an isolated temporary workspace: direct Codex and Modex both used `third-party`, the test thread was configured with `gpt-6.1-sol`, same-ID resume succeeded, and both turns returned the exact requested text with `item/agentMessage/delta` and `turn/completed`. Live approval response is still unverified; the first approval harness attempt was rejected because its scripted command context did not match the exact allowlist. Decision state is memory-only and lost on disconnect. Review context intentionally contains task content; it is not a generic secret redactor. If an approval arrives before the RPC response, the existing 20-second deadline still applies.
+Android, native SSH, detached supervisor and push relay remain unimplemented. Phone disconnect currently ends the connection and stops its child; simultaneous official Desktop/CLI ownership is unresolved. Stored message history UI, named profiles, live file approvals/questions, legacy approvals, MCP elicitation and secret questions are not validated/supported. No license, billing or release decisions. No publishing or push performed.
