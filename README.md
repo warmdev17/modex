@@ -106,3 +106,46 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 Python 3 standard library only. Omit `--model` to use the configured model; `--report /path/to/report.json` writes a sanitized summary. The fixture workspace is removed after the run; Codex may retain ordinary test session records in its own home. This approval fixture requires Linux/Bash; host cross-compilation is not runtime validation on Windows or macOS.
+
+## Background supervisor (Linux/macOS)
+
+Build a stable executable first (do not use an ephemeral `go run` binary for a long-lived supervisor):
+
+```sh
+go build -o /tmp/modex-host ./cmd/modex-host
+/tmp/modex-host --background --workspace /absolute/path/to/project --state-dir /private/path/modex-state
+/tmp/modex-host --attach --state-dir /private/path/modex-state
+```
+
+`--background` waits until its persistent bridge answers status, then returns. `--supervise` runs the same supervisor in the foreground for service managers. The supervisor keeps one Codex app-server and its stdin open when a client disconnects. There is no automatic restart, prompt retry or fork. Use one state directory per workspace/supervisor. An existing state directory must belong to the current user with permissions `0700`; its endpoint file is `0600`. Keep that directory on a trusted local filesystem and never share its token.
+
+The attach acknowledgement includes a non-secret instance ID:
+
+```json
+{"instance":"supervisor-instance-id","ready":true}
+{"seq":1,"message":{"id":2147483647,"result":{"workspace":"/project","config":{"provider":"custom","model":"configured-model"}}}}
+```
+
+The supervisor journal wraps every bridge response/event in `{seq,message}`. The first status response is the supervisor's internal readiness probe. Send ordinary Modex JSON commands on stdin; the supervisor forwards each submitted command once. Keep stdin open while observing events; EOF detaches immediately. Only one controlling client may attach at a time.
+
+Save the last fully handled `seq` together with `instance`. Reconnect without resending prompts:
+
+```sh
+/tmp/modex-host --attach --state-dir /private/path/modex-state --cursor 42 --instance supervisor-instance-id
+/tmp/modex-host --stop --state-dir /private/path/modex-state
+```
+
+The cursor is required to be from the same supervisor instance. Replay is bounded to 1024 frames / 16 MiB in RAM; an expired cursor produces an explicit gap error. A slow client cannot stall journal collection; it may be disconnected or encounter a retention gap. A supervisor restart loses the journal and creates a new instance/token. Decisions remain in the live bridge across client disconnects, but cannot be answered twice; reconnect by cursor to receive missed requests. If submission delivery is uncertain, observe the journal rather than resubmitting the operation.
+
+The transport listens on `127.0.0.1` only and requires a random token read from private state. Never expose that socket directly to the internet. Authenticated `--stop` requests shutdown and removes the owned endpoint/lock. Hard crashes may leave stale state: there is intentionally no lock deletion, PID-based kill or automatic recovery. Verify the old supervisor is stopped before manually recovering stale state.
+
+Windows builds still support `--serve`; supervisor modes currently fail closed until private-state Windows ACL support is implemented. Linux has integration/runtime coverage; macOS currently has cross-build coverage only. This milestone does not install startup services, survive reboot or implement native mobile SSH.
+
+Verification:
+
+```sh
+MODEX_HOST_BINARY=/tmp/modex-host python3 -m unittest discover -s scripts -p test_supervisor.py -v
+python3 scripts/live_supervisor_smoke.py --host /tmp/modex-host --model gpt-6.1-sol
+```
+
+The first uses a fake Codex process and checks auth, exclusive ownership, disconnect/replay, CLI attach, orphan cleanup and stop. The second makes a paid real-provider turn, detaches after acknowledgement, reconnects by instance/cursor, verifies exact streamed output, then stops the fixture supervisor.

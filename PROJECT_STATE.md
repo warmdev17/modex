@@ -1,6 +1,6 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/thread-start`; base commit `0668e2d`. This snapshot accompanies the thread-start commit; Git records its final hash. Previous live-approval harness committed separately as `0668e2d`.
+Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/background-supervisor`; base commit `187cb87`. This snapshot accompanies the supervisor milestone; Git records the final hash. Prior milestones: live approval `0668e2d`, new chat `187cb87`.
 
 ## Objective
 
@@ -14,7 +14,7 @@ Go standard-library host: diagnostic mode and connection-scoped `--serve` bridge
 
 ## Verified evidence
 
-On the current thread-start working tree:
+Previous live-provider evidence at `187cb87`:
 
 - `python3 -m unittest discover -s scripts -p 'test_*.py'`: PASS; direct/wrapped printf allowlist and shell-injection rejection.
 - `python3 scripts/live_provider_smoke.py --host /tmp/modex-host-linux --model gpt-6.1-sol --report /tmp/modex-new-thread-verified.json`: PASS against real `third-party` provider. Configured model was `gpt-5.5`; only the test thread used `gpt-6.1-sol`. Global config was not changed.
@@ -27,6 +27,14 @@ Earlier attempts with configured `gpt-5.5` returned HTTP 403 in both direct Code
 
 ## In progress and next
 
-Primary agent is sole builder/state writer; execution is inline, no subagents. Completed: workspace-bound thread creation through Modex, verified with real inference. Next: detached host lifecycle, reconnect/event cursors, SSH transport, Kotlin/Compose client, notification relay.
+Primary agent is sole builder/state writer; execution is inline, no subagents. Completed: workspace-bound thread creation and background supervisor with bounded cursor replay, verified with real inference. Next: native SSH transport, Kotlin/Compose client, Windows supervisor ACL support, notification relay.
 
-Android, native SSH, detached supervisor and push relay remain unimplemented. Phone disconnect currently ends the connection and stops its child; simultaneous official Desktop/CLI ownership is unresolved. Stored message history UI, named profiles, live file approvals/questions, legacy approvals, MCP elicitation and secret questions are not validated/supported. No license, billing or release decisions. No publishing or push performed.
+Android, native SSH and push relay remain unimplemented. Direct --serve is connection-scoped; --background/--supervise keep the bridge alive across attach disconnects; simultaneous official Desktop/CLI ownership is unresolved. Stored message history UI, named profiles, live file approvals/questions, legacy approvals, MCP elicitation and secret questions are not validated/supported. No license, billing or release decisions. No publishing or push performed.
+
+## Background supervisor milestone
+
+Design/contract: [supervisor plan](docs/supervisor-plan.md). Linux/macOS detached launcher plus foreground mode, authenticated loopback attach and stop, random instance/token in private owned 0700/0600 state, exclusive owner lock and no automatic stale recovery. Journal retains 1024 frames/16 MiB, reports gaps, checks instance on resume; one client controls at a time. No automatic operation replay, model override, Codex restart, on-disk transcript or boot service. Windows supervisor modes fail closed pending native ACL validation; --serve remains available. macOS is cross-build-only.
+
+Tests: journal retention/count/byte gaps, wakeups, invalid JSON, auth, competing clients, stale instance, offline replay, explicit stop, private/exclusive/stale state; black-box detached fake app-server test verifies CLI attach, disconnected turn completion, state cleanup and no orphan child. Provider test `python3 scripts/live_supervisor_smoke.py --host /tmp/modex-supervisor-host --model gpt-6.1-sol --report /tmp/modex-supervisor-live.json` PASS with `third-party`: submitted once, disconnected after acknowledgement, reattached same instance/cursor, exact delta-streamed reply and completed turn, authenticated stop and cleaned state. Linux runtime only. Pending decisions persist while bridge is alive but their original notification must remain within journal retention to replay. A hard crash loses RAM journal and can leave stale private state; do not bypass locks.
+
+Final supervisor checks on the working tree: `GOCACHE=/tmp/modex-go-cache go test -race ./...` PASS; `go vet ./...` PASS; Linux/Windows/macOS amd64 cross-builds PASS. `MODEX_HOST_BINARY=/tmp/modex-supervisor-host PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py' -v` PASS (4 tests, including failed-start cleanup). Live reconnect smoke PASS twice. Self-review only, per no-subagent instruction; no SSH/mobile runtime claim. All fixture supervisors were stopped; no service installed. New source and related docs committed together as one supervisor feature.
