@@ -14,10 +14,11 @@ fun remoteCommand(binary: String, state: String, cursor: Long, instance: String?
     return "exec ${quote(binary)} --attach --state-dir ${quote(state)} --cursor $cursor" + (instance?.let { " --instance ${quote(it)}" } ?: "")
 }
 
-class JournalState {
-    var instance: String? = null
+class JournalState(instance: String? = null, cursor: Long = 0) {
+    init { require(cursor >= 0 && (cursor == 0L || !instance.isNullOrBlank())) }
+    var instance: String? = instance
         private set
-    var cursor = 0L
+    var cursor = cursor
         private set
     fun hello(frame: JSONObject) {
         require(frame.optBoolean("ready") && frame.optString("instance").isNotBlank()) { "Supervisor did not acknowledge attach" }

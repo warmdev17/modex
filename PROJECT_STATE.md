@@ -1,6 +1,7 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/android-approval-review`; base commit `82e799c`. This snapshot accompanies readable approval review; Git records its final commit. Prior milestones: live approval `0668e2d`, new chat `187cb87`, supervisor `31e06f4`, OpenSSH `4f535d6`.
+Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/android-session-continuity`; host history commit `7c93ba5`, base `21ff46a`. This snapshot accompanies the Android continuity milestone; Git records the final Android commit.
+
 
 ## Objective
 
@@ -27,11 +28,11 @@ Earlier attempts with configured `gpt-5.5` returned HTTP 403 in both direct Code
 
 ## In progress and next
 
-Primary agent owns integration/state. Latest user authorized subagent workflow if available: planner probe and retry failed with stream disconnect; later read-only reviewer also failed before returning findings. Implementation and review therefore completed inline; no independent review is claimed.
+Primary owns integration/state. Backend and reviewer subagent probes for continuity both failed immediately with stream disconnect; no delegated edits/findings accepted. Inline fallback.
 
-Completed: first native Kotlin/Compose Android client, built debug APK, emulator UI launch and Android-native SSH integration (fake provider). [Android plan](docs/android-plan.md). Next: full Android UI-to-real-provider smoke, stored session history, file diff review, secure saved connections, then foreground/relay notifications and bubbles. Windows supervisor ACL support remains outstanding.
+Current milestone: black native chat UI, stored text history and encrypted connection/session restoration with a foreground connection service. Host API implemented at `7c93ba5`; Android build/tests/lint and emulator restore checks pass. Plan: [session continuity](docs/superpowers/plans/2026-11-09-session-continuity.md); [history contract](docs/history-contract.md).
 
-No Android background service/push, license, billing or release decisions; no publishing/push performed. Desktop/CLI simultaneous writer ownership remains unresolved. Legacy approvals, MCP elicitation and secret questions remain unsupported. Android supports one-time command approval/question UI; file-change acceptance is intentionally disabled pending a diff viewer.
+Next after this milestone: physical phone verification of saved host + history + multitasking; session titles, full file-diff review, done/decision notifications and push relay/bubbles. Windows supervisor ACL remains outstanding. No billing/license/release decision; no publish/push.
 
 ## Background supervisor milestone
 
@@ -78,3 +79,14 @@ User reported physical-phone success with `gpt-6.1-sol`: response streaming, dis
 UI improvement: approval dialog displays exact selectable monospace command, working directory, reason, action type and all supplied extra filesystem/network scope, with fixed labels. Nested permission values become readable field/value lines rather than a JSON envelope; unknown fields remain visible. Offered one-time buttons and response payloads unchanged; file-change acceptance remains disabled with an explicit explanation until a diff viewer exists.
 
 Verification before commit on uncommitted milestone tree: Gradle `:app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --offline --no-daemon` PASS; 7 unit tests, 0 failures/lint errors (existing warnings remain). Formatter regression initially failed compilation for absent helper, then passed. `adb shell am instrument -w -e preview approval dev.modex.test/dev.modex.TransportSmoke` PASS: light/dark screenshots captured and manually inspected on Pixel 4 XL emulator. No SSH connection/command executes in this preview. Initial fixture text-node assertion failed despite successful screenshot rendering; fixture now captures images for manual inspection and makes no accessibility-assertion claim. Test runner remains TransportSmoke, with opt-in preview mode; default SSH fixture behavior preserved. No Go source changes or repeated Go tests. New UI not yet verified on physical phone, tablet, landscape, large fonts or screen reader. No independent reviewer used for this narrow change; no push/publication.
+
+
+## Session continuity milestone
+
+User requested black clean native UI, durable history and connection across app exit/multitasking. Implemented host `threads/read include_turns=true`, exact workspace/ID verification, text-only user/assistant messages and active-turn status; default metadata/resume contracts unchanged. No system/developer/tool details exposed. Frame limit 4MiB still applies; no history pagination. Go tests/race/vet PASS; read existing phone thread returned 15 messages across both roles without resume/prompt.
+
+Android: fixed neutral black theme, gray user bubble/unboxed assistant; encrypted single-host profile/private key/messages/decisions/pending-request IDs/selected thread/journal via Keystore AES-GCM in noBackupFilesDir, atomic write, tamper detection. Forget removes ciphertext/key and invalidates delayed saves. App-owned ViewModel preserves Activity recreation; foreground dataSync service begins on explicit visible connection and provides ongoing notification + Disconnect. Foreground return attaches saved connection if disconnected; no automatic prompt retry. Process restore reads encrypted snapshot then loads stored history. Reset cursor keeps host/key; Forget removes them. Notification permission requested on Android 13+. Services are OS-limited and not restarted after force-stop/reboot; no claim of indefinite background survival.
+
+Evidence before Android commit: Gradle assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (8 tests, lint 0 errors, warnings remain). Emulator storage instrumentation PASS: encrypted round-trip, ciphertext excludes marker, tamper rejected, forget; continuity fixture over native SSH + real supervisor/fake provider PASS for initial stored-history display then force-stop and fresh-process auto-attach/history restoration. Screenshot inspected: black chat with restored user/assistant messages. First attempts hit notification permission dialog and stale fixture profile; fixture initial stage now clears only emulator test profile, grants notification in test setup, then verifies restoration in a distinct process. No paid turn sent in continuity test. Physical phone still needs updated APK and first import once; no device/battery endurance, Android 8 runtime, tablet, landscape, large-font or screen-reader proof. Reviewer unavailable, self-review only.
+
+Phone host was updated/restarted with history-capable `/tmp/modex-host` preserving `/tmp/modex-codex-approval` read-only/on-request/user/gpt-6.1-sol wrapper and same workspace/state dir; no history/config deletion. Instance changed; old phone cursor needs one Reset session cursor. /tmp host/wrapper remain temporary, no boot service installed.

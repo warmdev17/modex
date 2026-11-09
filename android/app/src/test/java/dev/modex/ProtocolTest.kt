@@ -50,6 +50,14 @@ class ProtocolTest {
         assertFalse(fields.getValue("Additional permissions").contains("{"))
         assertEquals(emptyList<Pair<String, String>>(), approvalDetails(JSONObject()))
     }
+    @Test fun restoresJournalWithoutReplayingHandledFrames() {
+        val journal = JournalState("saved-instance", 8)
+        journal.hello(JSONObject("""{"ready":true,"instance":"saved-instance"}"""))
+        assertNull(journal.frame(JSONObject("""{"seq":8,"message":{}}""")))
+        journal.frame(JSONObject("""{"seq":9,"message":{}}"""))
+        assertEquals(9L, journal.cursor)
+        assertThrows(IllegalArgumentException::class.java) { JournalState(null, 8) }
+    }
     @Test fun computesPinnedSHA256Fingerprint() {
         assertEquals("SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU", fingerprint(byteArrayOf()))
     }

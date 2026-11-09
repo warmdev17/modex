@@ -10,6 +10,30 @@ class TransportSmoke : Instrumentation() {
     private lateinit var args: Bundle
     override fun onCreate(arguments: Bundle) { super.onCreate(arguments); args = arguments; start() }
     override fun onStart() {
+        if (args.getString("preview") == "continuity") { continuitySmoke(args); return }
+        if (args.getString("preview") == "storage") {
+            val result = Bundle()
+            val store = SavedHost(targetContext, "test-only")
+            try {
+                store.save(JSONObject().put("key", "PRIVATE_TEST_MARKER").put("cursor", 12))
+                check(store.load()!!.getLong("cursor") == 12L)
+                val raw = File(targetContext.noBackupFilesDir, "test-only.enc").readBytes()
+                check(!String(raw, Charsets.ISO_8859_1).contains("PRIVATE_TEST_MARKER"))
+                raw[raw.lastIndex] = (raw.last().toInt() xor 1).toByte()
+                File(targetContext.noBackupFilesDir, "test-only.enc").writeBytes(raw)
+                var rejected = false
+                try { store.load() } catch (_: Exception) { rejected = true }
+                check(rejected)
+                val oldRevision = store.revision()
+                store.clear(); check(store.load() == null)
+                store.save(JSONObject().put("key", "stale"), oldRevision)
+                check(store.load() == null)
+                result.putString("result", "PASS: Keystore encryption, restore, tamper rejection, forget")
+                finish(-1, result)
+            } catch (_: Throwable) { result.putString("result", "FAIL: encrypted persistence"); finish(0, result) }
+            finally { store.clear() }
+            return
+        }
         if (args.getString("preview") == "approval") { approvalPreview(); return }
         val result = Bundle()
         try {

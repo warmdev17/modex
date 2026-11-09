@@ -22,6 +22,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.Alignment
+import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -29,20 +35,31 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            val colors = if (isSystemInDarkTheme()) darkColorScheme(primary = Color(0xFFC4B5FD)) else lightColorScheme(primary = Color(0xFF7C3AED), background = Color(0xFFFAF5FF))
+            val colors = darkColorScheme(primary = Color.White, onPrimary = Color.Black, background = Color(0xFF101010), surface = Color(0xFF101010), onSurface = Color(0xFFF4F4F4), surfaceContainer = Color(0xFF202020), surfaceContainerHighest = Color(0xFF2B2B2B), primaryContainer = Color(0xFF303030), onPrimaryContainer = Color.White)
             MaterialTheme(colorScheme = colors) { Surface(Modifier.fillMaxSize()) { ModexApp() } }
         }
     }
 }
 
 @Composable
-private fun ModexApp(vm: ModexViewModel = viewModel()) {
-    var host by rememberSaveable { mutableStateOf("") }; var port by rememberSaveable { mutableStateOf("22") }
-    var user by rememberSaveable { mutableStateOf("") }; var pin by rememberSaveable { mutableStateOf("") }
-    var binary by rememberSaveable { mutableStateOf("/opt/modex/modex-host") }; var state by rememberSaveable { mutableStateOf("") }
+private fun ModexApp() {
+    val context = LocalContext.current
+    val app = context.applicationContext as ModexApplication
+    val vm: ModexViewModel = viewModel(viewModelStoreOwner = app, factory = ViewModelProvider.AndroidViewModelFactory.getInstance(app))
+    val saved = vm.savedConnection
+    var host by rememberSaveable { mutableStateOf(saved?.host.orEmpty()) }; var port by rememberSaveable { mutableStateOf(saved?.port?.toString() ?: "22") }
+    var user by rememberSaveable { mutableStateOf(saved?.user.orEmpty()) }; var pin by rememberSaveable { mutableStateOf(saved?.pin.orEmpty()) }
+    var binary by rememberSaveable { mutableStateOf(saved?.binary ?: "/tmp/modex-host") }; var state by rememberSaveable { mutableStateOf(saved?.state.orEmpty()) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_START) vm.foreground() }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
     var text by rememberSaveable { mutableStateOf("") }; var model by rememberSaveable { mutableStateOf("") }
     var sessions by rememberSaveable { mutableStateOf(false) }; var importError by rememberSaveable { mutableStateOf("") }
-    val context = LocalContext.current
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) try {
             val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
@@ -73,17 +90,20 @@ private fun ModexApp(vm: ModexViewModel = viewModel()) {
                 OutlinedTextField(binary, { binary = it }, label = { Text("Remote modex-host path") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(state, { state = it }, label = { Text("Remote supervisor state directory") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedButton(onClick = { keyPicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH private key") }
-                Text("Key stays in memory. Encrypted key/passphrase support and saved profiles are not available yet.", style = MaterialTheme.typography.bodySmall)
+                Text("Your key and connection are encrypted on this device. Use Forget saved host to remove them. Passphrase keys are not supported yet.", style = MaterialTheme.typography.bodySmall)
                 if (importError.isNotEmpty()) Text(importError, color = MaterialTheme.colorScheme.error)
                 Button(onClick = { vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary, state)) }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
-                TextButton(onClick = vm::reset) { Text("Reset local session and cursor") }
+                Row {
+                    TextButton(onClick = vm::reset) { Text("Reset session cursor") }
+                    TextButton(onClick = { vm.forget(); host = ""; user = ""; pin = ""; state = "" }) { Text("Forget saved host") }
+                }
             }
         } else if (vm.connecting) {
             LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 16.dp))
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 TextButton(onClick = { sessions = true; vm.refreshThreads() }) { Text(if (vm.selected.isEmpty()) "Choose session" else "Sessions · ${vm.selected.take(8)}") }
-                Text(if (vm.busy) "Working…" else "Ready", modifier = Modifier.padding(12.dp))
+                Text(if (vm.historyLoading) "Loading…" else if (vm.busy) "Working…" else "Ready", modifier = Modifier.padding(12.dp))
             }
             if (sessions || vm.selected.isEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -96,23 +116,25 @@ private fun ModexApp(vm: ModexViewModel = viewModel()) {
                 }
                 if (vm.threads.isEmpty()) Text("No sessions loaded for this workspace. Refresh or create a new chat.")
                 LazyColumn(Modifier.weight(1f)) {
-                    items(vm.threads) { id -> TextButton(onClick = { vm.select(id); sessions = false }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text(id) } }
+                    items(vm.threads) { id -> TextButton(onClick = { vm.select(id); sessions = false }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text(vm.titles[id] ?: id, maxLines = 2) } }
                     if (vm.nextCursor != null) item { TextButton(onClick = vm::more) { Text("Load more") } }
                 }
             } else {
-                Text("Live messages only · stored history is not loaded", style = MaterialTheme.typography.labelSmall)
+                if (vm.historyLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 val scroll = androidx.compose.foundation.lazy.rememberLazyListState()
                 LaunchedEffect(vm.messages.lastOrNull()?.second) { if (vm.messages.isNotEmpty()) scroll.animateScrollToItem(vm.messages.lastIndex) }
                 LazyColumn(Modifier.weight(1f), state = scroll, verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
                     items(vm.messages) { (role, body) ->
-                        Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (role == "You") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer)) {
-                            Column(Modifier.padding(16.dp)) { Text(role, style = MaterialTheme.typography.labelLarge); SelectionContainer { Text(body) } }
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = if (role == "You") Alignment.End else Alignment.Start) {
+                            if (role == "You") Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = MaterialTheme.shapes.large, modifier = Modifier.widthIn(max = 320.dp)) {
+                                SelectionContainer { Text(body, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyLarge) }
+                            } else SelectionContainer { Text(body, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), style = MaterialTheme.typography.bodyLarge) }
                         }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(text, { text = it }, label = { Text("Message Codex") }, modifier = Modifier.weight(1f), maxLines = 5)
-                    Button(onClick = { vm.send(text); text = "" }, enabled = !vm.busy && text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Send") }
+                    Button(onClick = { vm.send(text); text = "" }, enabled = !vm.busy && !vm.historyLoading && text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Send") }
                 }
             }
         }
