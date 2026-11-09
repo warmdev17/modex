@@ -149,3 +149,36 @@ python3 scripts/live_supervisor_smoke.py --host /tmp/modex-host --model gpt-6.1-
 ```
 
 The first uses a fake Codex process and checks auth, exclusive ownership, disconnect/replay, CLI attach, orphan cleanup and stop. The second makes a paid real-provider turn, detaches after acknowledgement, reconnects by instance/cursor, verifies exact streamed output, then stops the fixture supervisor.
+
+## OpenSSH client transport
+
+The desktop/CLI transport uses the system OpenSSH executable; it does not install SSH or upload the host. Start the supervisor on the target first, then build the client locally:
+
+```sh
+go build -o /tmp/modex ./cmd/modex
+/tmp/modex --target user@server \
+  --host-binary /opt/modex/modex-host \
+  --state-dir /home/user/.local/state/modex
+```
+
+It runs only the remote host's `--attach` command over an exec channel, with no PTY. JSON commands go to stdin and journal envelopes come from stdout. Provider credentials and the supervisor token remain on the target. Client stdin EOF detaches; SSH loss does not stop the background supervisor. Retain the last fully handled sequence/instance and reconnect explicitly:
+
+```sh
+/tmp/modex --target user@server \
+  --host-binary /opt/modex/modex-host \
+  --state-dir /home/user/.local/state/modex \
+  --cursor 42 --instance supervisor-instance-id
+```
+
+Optional flags: `--port 2222`, `--identity /local/private-key`, `--known-hosts /local/verified-known_hosts`, `--ssh /path/to/ssh`. Authentication uses existing OpenSSH keys/agent/config with `BatchMode=yes`; no password prompt enters the JSON stream. Host key checking is always strict. Verify and install the remote host key through your normal trusted process before connecting; the client never learns host keys automatically. No provider keys or supervisor tokens appear in SSH arguments.
+
+SSH options include connection timeout and keepalives. Failed SSH/remote attach returns a generic error on stderr and never retries commands. To diagnose OpenSSH separately, use your normal terminal SSH connection. Remote exec uses POSIX shell quoting and requires absolute remote binary/state paths. Client binaries cross-build for Linux/Windows/macOS with OpenSSH installed; Windows **targets** remain unsupported for supervisor mode until private ACL support and shell-specific exec quoting are implemented. Android native SSH is still pending.
+
+Real loopback SSH verification uses an isolated sshd, ephemeral host/client keys and known_hosts, without changing system SSH configuration:
+
+```sh
+MODEX_CLIENT_BINARY=/tmp/modex MODEX_HOST_BINARY=/tmp/modex-host \
+  python3 -m unittest discover -s scripts -p test_ssh_transport.py -v
+```
+
+It checks quoting of shell metacharacters, exact JSON transport, rejection of mismatched host keys, and two authenticated attachments with cursor continuity against a real supervisor using a fake provider. This is Linux loopback integration, not remote VPS or Android runtime validation.

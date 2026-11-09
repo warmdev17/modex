@@ -1,6 +1,6 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/background-supervisor`; base commit `187cb87`. This snapshot accompanies the supervisor milestone; Git records the final hash. Prior milestones: live approval `0668e2d`, new chat `187cb87`.
+Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/ssh-transport`; base commit `31e06f4`. This snapshot accompanies the SSH transport milestone; Git records the final hash. Prior milestones: live approval `0668e2d`, new chat `187cb87`.
 
 ## Objective
 
@@ -27,9 +27,9 @@ Earlier attempts with configured `gpt-5.5` returned HTTP 403 in both direct Code
 
 ## In progress and next
 
-Primary agent is sole builder/state writer; execution is inline, no subagents. Completed: workspace-bound thread creation and background supervisor with bounded cursor replay, verified with real inference. Next: native SSH transport, Kotlin/Compose client, Windows supervisor ACL support, notification relay.
+Primary agent is sole builder/state writer; execution is inline, no subagents. Completed: workspace-bound thread creation and background supervisor with bounded cursor replay, verified with real inference. Completed: initial system OpenSSH client transport. Next: Kotlin/Compose client with native SSH, Windows supervisor ACL support, notification relay.
 
-Android, native SSH and push relay remain unimplemented. Direct --serve is connection-scoped; --background/--supervise keep the bridge alive across attach disconnects; simultaneous official Desktop/CLI ownership is unresolved. Stored message history UI, named profiles, live file approvals/questions, legacy approvals, MCP elicitation and secret questions are not validated/supported. No license, billing or release decisions. No publishing or push performed.
+Android, Android-native SSH and push relay remain unimplemented; the Go CLI now provides system OpenSSH transport. Direct --serve is connection-scoped; --background/--supervise keep the bridge alive across attach disconnects; simultaneous official Desktop/CLI ownership is unresolved. Stored message history UI, named profiles, live file approvals/questions, legacy approvals, MCP elicitation and secret questions are not validated/supported. No license, billing or release decisions. No publishing or push performed.
 
 ## Background supervisor milestone
 
@@ -38,3 +38,9 @@ Design/contract: [supervisor plan](docs/supervisor-plan.md). Linux/macOS detache
 Tests: journal retention/count/byte gaps, wakeups, invalid JSON, auth, competing clients, stale instance, offline replay, explicit stop, private/exclusive/stale state; black-box detached fake app-server test verifies CLI attach, disconnected turn completion, state cleanup and no orphan child. Provider test `python3 scripts/live_supervisor_smoke.py --host /tmp/modex-supervisor-host --model gpt-6.1-sol --report /tmp/modex-supervisor-live.json` PASS with `third-party`: submitted once, disconnected after acknowledgement, reattached same instance/cursor, exact delta-streamed reply and completed turn, authenticated stop and cleaned state. Linux runtime only. Pending decisions persist while bridge is alive but their original notification must remain within journal retention to replay. A hard crash loses RAM journal and can leave stale private state; do not bypass locks.
 
 Final supervisor checks on the working tree: `GOCACHE=/tmp/modex-go-cache go test -race ./...` PASS; `go vet ./...` PASS; Linux/Windows/macOS amd64 cross-builds PASS. `MODEX_HOST_BINARY=/tmp/modex-supervisor-host PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py' -v` PASS (4 tests, including failed-start cleanup). Live reconnect smoke PASS twice. Self-review only, per no-subagent instruction; no SSH/mobile runtime claim. All fixture supervisors were stopped; no service installed. New source and related docs committed together as one supervisor feature.
+
+## OpenSSH transport milestone
+
+`cmd/modex` + `internal/sshtransport`: use installed OpenSSH to exec remote `modex-host --attach`; fixed strict host key checking, key/agent-only noninteractive authentication, no PTY, timeouts/keepalives, shell-quoted absolute POSIX remote paths and cursor/instance reconnect. No token or provider key leaves the target; no prompt replay or automatic host deployment. SSH config aliases are allowed and remain trusted local configuration.
+
+Verification on working tree: Go tests/race/vet PASS; client cross-builds Linux/Windows/macOS PASS. Linux real loopback sshd test uses ephemeral keys and isolated config: JSON round-trip and metacharacter paths PASS, wrong host key rejected, real supervisor status and same-instance cursor continuity across two SSH attachments PASS (fake provider). No remote VPS, Android, Windows client runtime or macOS runtime validation. Supervisor real-provider test was already validated at `31e06f4`; combined SSH plus paid inference is not claimed. Related contract in docs/ssh-transport-plan.md. Self-review only, no subagents per user instruction.
