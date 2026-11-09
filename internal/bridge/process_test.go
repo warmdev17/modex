@@ -1,12 +1,28 @@
 package bridge
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestReadFrameAllowsLargeUpstreamHistory(t *testing.T) {
+	frame, err := readFrame(bufio.NewReader(strings.NewReader(strings.Repeat("x", 5*1024*1024) + "\n")))
+	if err != nil || len(frame) != 5*1024*1024 {
+		t.Fatalf("len=%d err=%v", len(frame), err)
+	}
+}
+
+func TestReadFrameRejectsHistoryAboveUpstreamLimit(t *testing.T) {
+	_, err := readFrame(bufio.NewReader(strings.NewReader(strings.Repeat("x", maxUpstreamFrame+1) + "\n")))
+	if err == nil {
+		t.Fatal("accepted oversized upstream frame")
+	}
+}
 
 func TestChildProtocol(t *testing.T) {
 	if os.Getenv("MODEX_FAKE_CHILD") != "1" {

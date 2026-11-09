@@ -19,7 +19,7 @@ internal fun explainHostRejection(method: String, detail: String): String {
         detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
         detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
         detail.contains("model_provider_mismatch", ignoreCase = true) -> "This session belongs to a different Codex provider or model configuration."
-        else -> "Host rejected $method. Review session state before retrying."
+        else -> "Host rejected $method (request_rejected). Review session state before retrying."
     }
 }
 
@@ -172,6 +172,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             val result = frame.optJSONObject("result") ?: return
             when (operation.first) {
                 "threads/list" -> {
+                    if (error.startsWith("Host rejected threads/list")) error = ""
                     val list = result.optJSONArray("data") ?: JSONArray()
                     titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("preview").ifBlank { t.getString("id") } }
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }

@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/android-session-continuity`; host history commit `7c93ba5`, base `21ff46a`. This snapshot accompanies the Android continuity milestone; Git records the final Android commit.
+Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `fix/session-titles-resume-errors`; base `cb127c7`. This snapshot accompanies the large-history correction; Git records its final commit.
+
+## Current troubleshooting
+
+Phone screenshot confirms the desktop session `01a1b731…` is listed with its preview. Earlier workspace/active-writer explanations were hypotheses, not verified causes. Read-only live probe reproduced the actual history failure: this session's upstream includeTurns response was 4,408,427 bytes (81 turns), exceeding the bridge's 4MiB frame cap and closing its Codex reader. Raised only upstream cap to 16MiB; downstream remains 4MiB. Fixed bridge read this exact session into 281 text messages (167,034 bytes) and then successfully listed all six sessions without resume, fork or prompt. Resume ownership on this currently running session has not been tested. History above either cap remains unsupported pending pagination.
+
+Precommit working-tree checks: full Go tests and race tests PASS; large-frame regression observed failing at old cap before fix; 16MiB rejection boundary test PASS. Gradle :app:testDebugUnitTest :app:assembleDebug --offline --no-daemon PASS. Error-display follow-up preserves safe categories in legacy event reader and clears stale list errors after a successful list. Updated/restarted phone supervisor with /tmp/modex-host, same workspace/state directory/approval wrapper; ready confirmed. Phone must reset session cursor once for new instance. No on-device validation of this build yet. UI redesign approved: left session drawer, Catppuccin Mocha blue, restrained corners; design spec remains untracked and unimplemented while this bug is addressed.
 
 
 ## Objective

@@ -13,6 +13,14 @@ class ProtocolTest {
         )
     }
 
+    @Test
+    fun unknownRejectionKeepsSafeCategoryForDiagnostics() {
+        assertEquals(
+            "Host rejected threads/list (request_rejected). Review session state before retrying.",
+            explainHostRejection("threads/list", "request_rejected")
+        )
+    }
+
     @Test fun quotesRemotePaths() {
         assertEquals("exec '/opt/host'\"'\"'s app' --attach --state-dir '/state $(id)' --cursor 0", remoteCommand("/opt/host's app", "/state $(id)", 0, null))
     }

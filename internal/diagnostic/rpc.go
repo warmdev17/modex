@@ -140,7 +140,7 @@ func readResponseEvents(reader *bufio.Reader, id int, onNotification func(string
 			return nil, errors.New("unexpected app-server response ID")
 		}
 		if len(message.Error) > 0 && !bytes.Equal(message.Error, []byte("null")) {
-			return nil, &RPCError{}
+			return nil, NewRPCError(message.Error)
 		}
 		if len(message.Result) == 0 {
 			return nil, errors.New("app-server response has no result")

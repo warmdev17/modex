@@ -12,6 +12,8 @@ import (
 	"github.com/warmdev/modex/internal/diagnostic"
 )
 
+const maxUpstreamFrame = 16 * 1024 * 1024
+
 // Process owns one app-server. A failed/timed-out exchange closes it rather than
 // retrying an operation whose outcome may be unknown.
 type Process struct {
@@ -230,8 +232,8 @@ func readFrame(reader *bufio.Reader) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(line)+len(chunk) > 4*1024*1024 {
-			return nil, errors.New("app-server frame exceeds 4 MiB limit")
+		if len(line)+len(chunk) > maxUpstreamFrame {
+			return nil, errors.New("app-server frame exceeds 16 MiB limit")
 		}
 		line = append(line, chunk...)
 		if !prefix {

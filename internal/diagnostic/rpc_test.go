@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,14 @@ func TestCallEventsForwardsNotificationsBeforeResponse(t *testing.T) {
 		t.Fatalf("result=%s events=%v err=%v", result, events, err)
 	}
 	_ = out
+}
+
+func TestCallEventsPreservesRPCErrorCategory(t *testing.T) {
+	_, err := readResponseEvents(bufio.NewReader(strings.NewReader(`{"id":4,"error":{"code":"active_writer","message":"thread already has an active writer"}}`+"\n")), 4, nil)
+	var rpc *RPCError
+	if !errors.As(err, &rpc) || rpc.Category() != "active_writer" {
+		t.Fatalf("err=%v", err)
+	}
 }
 
 func TestRPCErrorClassifiesSafeCategories(t *testing.T) {
