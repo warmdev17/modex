@@ -1,6 +1,6 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/android-client`; base commit `4f535d6`. This snapshot accompanies the native Android milestone; Git records its final commit. Prior milestones: live approval `0668e2d`, new chat `187cb87`, supervisor `31e06f4`, OpenSSH `4f535d6`.
+Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `fix/android-turn-feedback`; base commit `107008a`. This snapshot accompanies Android turn-error feedback; Git records its final commit. Prior milestones: live approval `0668e2d`, new chat `187cb87`, supervisor `31e06f4`, OpenSSH `4f535d6`.
 
 ## Objective
 
@@ -60,3 +60,12 @@ Verified on this milestone's uncommitted working tree before commit:
 - `GOCACHE=/tmp/modex-go-cache go test ./...`: PASS; Go behavior unchanged.
 
 APK: `android/app/build/outputs/apk/debug/app-debug.apk` (ignored build output). No physical phone, remote VPS, full UI chat/approval automation or Android-to-paid-provider inference checked; previous Go host provider evidence above still applies only to the host path. UI implementation is a first functional slice, not a finished visual design. No persistent Android storage of private keys; selected original key file remains wherever the user imported it from.
+
+
+## Physical-phone troubleshooting: turn feedback
+
+User reached the session/new-chat UI after correcting remote host path to `/tmp/modex-host`. SSH key authentication succeeded. Existing phone session (prefix `01a1bdba`) recorded `gpt-5.5`, then provider HTTP 403 explicitly rejecting model access; no agent message was produced. Android ignored asynchronous turn errors. No global model/provider config changed and the user prompt was not replayed.
+
+Fix: classify failed-turn and non-retrying error events into fixed safe UI messages (HTTP 403 gets model/key-permission guidance), never display raw provider URL/error. Session picker now refreshes on open and exposes Refresh/count/empty state. The cause of an empty list on the physical phone is not independently proven; no claim that full stored-session support is fixed.
+
+Verification on uncommitted fix tree before commit: regression test initially failed compilation for missing error classifier; final Gradle `:app:assembleDebug :app:testDebugUnitTest :app:lintDebug --offline --no-daemon` PASS, 6 tests / 0 failures, lint 0 errors (existing warnings remain). One separate real-provider turn through `/tmp/modex-host --serve` in a temporary workspace with explicit `gpt-6.1-sol`: exact marker, streamed delta and completed status PASS. This does not validate physical-phone rendering; user needs to install updated APK and create a chat with an allowed model. Existing session was not resumed or mutated by troubleshooting. No Go source changed; Go tests not repeated for this Android-only fix. Self-review only; prior reviewer transport unavailable. No publish/push.

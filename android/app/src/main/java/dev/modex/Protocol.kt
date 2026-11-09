@@ -36,3 +36,18 @@ class JournalState {
         return message
     }
 }
+
+// Never display raw upstream errors: they can include credential-bearing URLs.
+fun turnFailure(params: JSONObject): String? {
+    if (params.optBoolean("willRetry")) return null
+    val turn = params.optJSONObject("turn")
+    val failure = turn?.optJSONObject("error") ?: params.optJSONObject("error")
+    if (failure == null && turn?.optString("status") != "failed") return null
+    val details = failure?.optJSONObject("codexErrorInfo") ?: failure?.optJSONObject("codex_error_info")
+    val connection = details?.optJSONObject("httpConnectionFailed") ?: details?.optJSONObject("http_connection_failed")
+    val status = connection?.optInt("httpStatusCode", 0)?.takeIf { it != 0 } ?: connection?.optInt("http_status_code", 0)
+    if (status == 403 || failure?.optString("message")?.contains("403") == true) {
+        return "Provider rejected this turn (HTTP 403). Check model access and API key permissions; choose an allowed model for a new chat."
+    }
+    return "Codex turn failed. Check the model/provider on the host before retrying."
+}

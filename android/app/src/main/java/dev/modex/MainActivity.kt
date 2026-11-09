@@ -81,7 +81,7 @@ private fun ModexApp(vm: ModexViewModel = viewModel()) {
             LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 16.dp))
         } else {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { sessions = !sessions }) { Text(if (vm.selected.isEmpty()) "Choose session" else "Sessions · ${vm.selected.take(8)}") }
+                TextButton(onClick = { sessions = true; vm.refreshThreads() }) { Text(if (vm.selected.isEmpty()) "Choose session" else "Sessions · ${vm.selected.take(8)}") }
                 Text(if (vm.busy) "Working…" else "Ready", modifier = Modifier.padding(12.dp))
             }
             if (sessions || vm.selected.isEmpty()) {
@@ -89,6 +89,11 @@ private fun ModexApp(vm: ModexViewModel = viewModel()) {
                     OutlinedTextField(model, { model = it }, label = { Text("Model (optional)") }, singleLine = true, modifier = Modifier.weight(1f))
                     Button(onClick = { vm.create(model); sessions = false }, enabled = !vm.busy) { Text("New chat") }
                 }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("${vm.threads.size} sessions loaded", modifier = Modifier.padding(12.dp))
+                    TextButton(onClick = vm::refreshThreads) { Text("Refresh") }
+                }
+                if (vm.threads.isEmpty()) Text("No sessions loaded for this workspace. Refresh or create a new chat.")
                 LazyColumn(Modifier.weight(1f)) {
                     items(vm.threads) { id -> TextButton(onClick = { vm.select(id); sessions = false }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text(id) } }
                     if (vm.nextCursor != null) item { TextButton(onClick = vm::more) { Text("Load more") } }

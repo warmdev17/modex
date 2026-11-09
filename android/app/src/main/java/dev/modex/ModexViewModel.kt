@@ -52,7 +52,7 @@ class ModexViewModel : ViewModel() {
                 current.open(value, copy, journal, onHello = {
                     kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) {
                         connecting = false; connected = true
-                        request("threads/list", JSONObject().put("limit", 50))
+                        refreshThreads()
                     } }
                 }, onFrame = { frame ->
                     kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) {
@@ -73,6 +73,7 @@ class ModexViewModel : ViewModel() {
         if (busy || switching()) return
         request("threads/resume", JSONObject().put("thread_id", id), id)
     }
+    fun refreshThreads() { request("threads/list", JSONObject().put("limit", 50)) }
     fun more() { nextCursor?.let { request("threads/list", JSONObject().put("limit", 50).put("cursor", it), "more") } }
     fun send(text: String) {
         if (!connected || busy || switching() || selected.isEmpty() || text.isBlank()) return
@@ -107,6 +108,7 @@ class ModexViewModel : ViewModel() {
                     nextCursor = if (result.isNull("next_cursor")) null else result.optString("next_cursor").ifEmpty { null }
                 }
                 "threads/start", "threads/resume" -> {
+                    error = ""
                     selected = result.getJSONObject("thread").getString("id")
                     threads = (listOf(selected) + threads).distinct(); messages = emptyList()
                 }
@@ -122,8 +124,14 @@ class ModexViewModel : ViewModel() {
                 val text = params.optString("delta")
                 messages = if (messages.lastOrNull()?.first == "Codex") messages.dropLast(1) + ("Codex" to (messages.last().second + text)) else messages + ("Codex" to text)
             }
+            "error" -> if (params.optString("threadId") == selected) {
+                turnFailure(params)?.let { error = it }
+            }
             "turn/completed" -> {
-                if (params.optString("threadId") == selected) busy = false
+                if (params.optString("threadId") == selected) {
+                    busy = false
+                    turnFailure(params)?.let { error = it }
+                }
                 decisions = decisions.filterNot { it.optString("thread_id") == params.optString("threadId") && it.optString("turn_id") == params.optJSONObject("turn")?.optString("id") }
             }
         }
