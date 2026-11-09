@@ -228,3 +228,24 @@ func TestThreadStartRejectsInvalidUpstreamMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestStoredHistoryTextAndWorkspace(t *testing.T) {
+	call := func(_ context.Context, method string, params any) (json.RawMessage, error) {
+		p := params.(map[string]any)
+		if method != "thread/read" || p["includeTurns"] != true {
+			t.Fatalf("unexpected call %s %#v", method, p)
+		}
+		return json.RawMessage(`{"thread":{"id":"one","cwd":"/work","turns":[{"status":"completed","items":[{"id":"u","type":"userMessage","content":[{"type":"text","text":"hello"}]},{"id":"a","type":"agentMessage","text":"hi"},{"type":"commandExecution","command":"private"}]}]}}`), nil
+	}
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true}`)}, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(result)
+	if !strings.Contains(string(raw), `"role":"user"`) || !strings.Contains(string(raw), `"text":"hi"`) || strings.Contains(string(raw), "private") {
+		t.Fatalf("unexpected history %s", raw)
+	}
+	if _, err = Handle(context.Background(), "/elsewhere", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true}`)}, call); err == nil {
+		t.Fatal("outside workspace allowed")
+	}
+}

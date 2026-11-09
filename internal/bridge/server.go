@@ -44,6 +44,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["cursor"] = true
 	case "threads/read", "threads/resume":
 		allowed["thread_id"] = true
+		if cmd.Method == "threads/read" {
+			allowed["include_turns"] = true
+		}
 	case "turn/start":
 		allowed["thread_id"] = true
 		allowed["text"] = true
@@ -176,6 +179,68 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		var id string
 		if json.Unmarshal(p["thread_id"], &id) != nil || id == "" {
 			return nil, errors.New("thread_id is required")
+		}
+
+		include := false
+		if raw, ok := p["include_turns"]; ok {
+			if string(raw) == "null" || json.Unmarshal(raw, &include) != nil {
+				return nil, errors.New("include_turns must be boolean")
+			}
+		}
+		if include {
+			raw, err := fetch("thread/read", map[string]any{"threadId": id, "includeTurns": true})
+			if err != nil {
+				return nil, err
+			}
+			var response struct {
+				Thread struct {
+					Thread
+					Turns []struct {
+						Status string `json:"status"`
+						Items  []struct {
+							ID      string `json:"id"`
+							Type    string `json:"type"`
+							Text    string `json:"text"`
+							Content []struct {
+								Type string `json:"type"`
+								Text string `json:"text"`
+							} `json:"content"`
+						} `json:"items"`
+					} `json:"turns"`
+				} `json:"thread"`
+			}
+			if json.Unmarshal(raw, &response) != nil || response.Thread.ID != id {
+				return nil, errors.New("invalid thread response")
+			}
+			if response.Thread.Cwd != cwd {
+				return nil, errors.New("thread outside workspace")
+			}
+			messages := []map[string]string{}
+			active := false
+			for _, turn := range response.Thread.Turns {
+				if turn.Status == "inProgress" {
+					active = true
+				}
+				for _, item := range turn.Items {
+					role, text := "", ""
+					switch item.Type {
+					case "userMessage":
+						role = "user"
+						for _, part := range item.Content {
+							if part.Type == "text" {
+								text += part.Text
+							}
+						}
+					case "agentMessage":
+						role = "assistant"
+						text = item.Text
+					}
+					if role != "" && text != "" {
+						messages = append(messages, map[string]string{"id": item.ID, "role": role, "text": text})
+					}
+				}
+			}
+			return map[string]any{"thread": response.Thread.Thread, "messages": messages, "active_turn": active}, nil
 		}
 		read := func(method string, params any) (Thread, error) {
 			raw, err := fetch(method, params)
