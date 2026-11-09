@@ -24,6 +24,7 @@ type Thread struct {
 type threadListItem struct {
 	Thread
 	Preview string `json:"preview,omitempty"`
+	Name    string `json:"name,omitempty"`
 }
 
 func safePreview(value string) string {
@@ -156,6 +157,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 		for i := range page.Data {
 			page.Data[i].Preview = safePreview(page.Data[i].Preview)
+			page.Data[i].Name = safePreview(page.Data[i].Name)
 		}
 		return struct {
 			Data []threadListItem `json:"data"`

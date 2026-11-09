@@ -279,3 +279,14 @@ func TestStoredHistoryTextAndWorkspace(t *testing.T) {
 		t.Fatal("outside workspace allowed")
 	}
 }
+
+func TestListPreservesCodexSessionName(t *testing.T) {
+	caller := func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+		return json.RawMessage(`{"data":[{"id":"one","cwd":"/work","name":"Modex mobile","preview":"my first question"}],"nextCursor":null}`), nil
+	}
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/list"}, caller)
+	raw, _ := json.Marshal(result)
+	if err != nil || !strings.Contains(string(raw), `"name":"Modex mobile"`) {
+		t.Fatalf("result=%s err=%v", raw, err)
+	}
+}
