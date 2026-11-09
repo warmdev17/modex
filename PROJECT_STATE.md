@@ -1,12 +1,23 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `fix/session-titles-resume-errors`; base `cb127c7`. This snapshot accompanies the large-history correction; Git records its final commit.
+Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `feat/android-mocha-chat-ui`; base `9022eb7`. This snapshot accompanies the native UI redesign; Git records final commits.
 
 ## Current troubleshooting
 
 Phone screenshot confirms the desktop session `01a1b731…` is listed with its preview. Earlier workspace/active-writer explanations were hypotheses, not verified causes. Read-only live probe reproduced the actual history failure: this session's upstream includeTurns response was 4,408,427 bytes (81 turns), exceeding the bridge's 4MiB frame cap and closing its Codex reader. Raised only upstream cap to 16MiB; downstream remains 4MiB. Fixed bridge read this exact session into 281 text messages (167,034 bytes) and then successfully listed all six sessions without resume, fork or prompt. Resume ownership on this currently running session has not been tested. History above either cap remains unsupported pending pagination.
 
-Precommit working-tree checks: full Go tests and race tests PASS; large-frame regression observed failing at old cap before fix; 16MiB rejection boundary test PASS. Gradle :app:testDebugUnitTest :app:assembleDebug --offline --no-daemon PASS. Error-display follow-up preserves safe categories in legacy event reader and clears stale list errors after a successful list. Updated/restarted phone supervisor with /tmp/modex-host, same workspace/state directory/approval wrapper; ready confirmed. Phone must reset session cursor once for new instance. No on-device validation of this build yet. UI redesign approved: left session drawer, Catppuccin Mocha blue, restrained corners; design spec remains untracked and unimplemented while this bug is addressed.
+Large-history correction committed at `9022eb7`; user confirmed this session now loads on phone. Existing 16MiB upstream / 4MiB downstream bounds remain.
+
+## Current UI milestone
+
+Approved [UI design](docs/superpowers/specs/2026-11-09-android-chat-ui-design.md) and [implementation plan](docs/superpowers/plans/2026-11-09-mocha-chat-ui.md). Native Catppuccin Mocha blue theme, left conversation drawer with search/refresh/load-more and selected session, compact header, new-chat model dialog, 48dp arrow send control with 10dp corners, matching system bars. Connection settings and approvals preserve existing behavior. Per-session drafts survive drawer switches; ViewModel send reports local acceptance before composer clears. Drafts are UI saved state, not a durable encrypted draft store.
+
+Codex schema/live metadata verified `name` is the user-facing title and `preview` is usually the first question; this session reports `name=modex`. Bridge list forwards bounded optional name; Android prioritizes name, then preview, then untitled + short ID. Workspace filtering unchanged.
+
+CommonMark 0.24.0 + GFM table parser; native Compose headings/emphasis/lists/quotes/safe HTTP(S) links/tables, inline code and fenced/indented code with language label, horizontal scroll, selection and Copy code. HTML remains inert; no remote images, upload, MCP/skill picker, syntax highlighting or math/Mermaid in this slice.
+
+Checks on final production working tree: full Go suite PASS; Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (17 unit tests, zero errors; existing warnings). Emulator chat/drawer visually inspected; code copy and session selection PASS. Keyboard screenshot confirms visible draft and reachable blue send control. Extended draft/table smoke PASS: emulator fixture verified code copy, drawer selection, rejected-send draft retained, keyboard composer and Markdown table screenshot. Temporary Gradle cache reset required redownloading dependencies; previous TLS dependency issue recovered. Independent reviewer probe failed with stream disconnect, so self-review only. No physical-phone validation of this new UI yet; no paid model turn. Host binary built at /tmp/modex-ui-host; existing phone supervisor not changed this session.
+
 
 
 ## Objective

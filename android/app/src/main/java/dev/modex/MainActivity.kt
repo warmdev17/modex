@@ -1,14 +1,13 @@
 package dev.modex
 
 import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.SystemBarStyle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -16,7 +15,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -34,9 +32,9 @@ import org.json.JSONObject
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(0xFF1E1E2E.toInt()), navigationBarStyle = SystemBarStyle.dark(0xFF1E1E2E.toInt()))
         setContent {
-            val colors = darkColorScheme(primary = Color.White, onPrimary = Color.Black, background = Color(0xFF101010), surface = Color(0xFF101010), onSurface = Color(0xFFF4F4F4), surfaceContainer = Color(0xFF202020), surfaceContainerHighest = Color(0xFF2B2B2B), primaryContainer = Color(0xFF303030), onPrimaryContainer = Color.White)
-            MaterialTheme(colorScheme = colors) { Surface(Modifier.fillMaxSize()) { ModexApp() } }
+            ModexTheme { Surface(Modifier.fillMaxSize()) { ModexApp() } }
         }
     }
 }
@@ -58,8 +56,7 @@ private fun ModexApp() {
     }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
-    var text by rememberSaveable { mutableStateOf("") }; var model by rememberSaveable { mutableStateOf("") }
-    var sessions by rememberSaveable { mutableStateOf(false) }; var importError by rememberSaveable { mutableStateOf("") }
+    var connectionSettings by rememberSaveable { mutableStateOf(false) }; var importError by rememberSaveable { mutableStateOf("") }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) try {
             val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
@@ -70,12 +67,23 @@ private fun ModexApp() {
             vm.importKey(bytes); importError = ""
         } catch (_: Exception) { importError = "Could not import key. Select an unencrypted private key under 256 KiB." }
     }
-    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(16.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Column { Text("modex", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text(if (vm.connected) "Connected · SSH" else if (vm.connecting) "Connecting…" else "Your Codex, wherever you are", style = MaterialTheme.typography.labelLarge) }
-            if (vm.connected || vm.connecting) TextButton(onClick = vm::disconnect) { Text("Disconnect") }
+    if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
+        ChatWorkspace(
+            host = vm.savedConnection?.host.orEmpty(), connected = vm.connected, connecting = vm.connecting,
+            selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
+            busy = vm.busy, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error,
+            onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
+            onCreate = vm::create, onSend = vm::send, onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect
+        )
+    } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(20.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Connection", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Your Codex host", color = Mocha.Subtext, modifier = Modifier.padding(top = 4.dp))
+            }
+            if (vm.savedConnection != null) TextButton(onClick = { connectionSettings = false }) { Text("Back to chat") }
         }
+        Spacer(Modifier.height(20.dp))
         if (vm.error.isNotBlank()) Text(vm.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
         if (!vm.connected && !vm.connecting) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -92,56 +100,16 @@ private fun ModexApp() {
                 OutlinedButton(onClick = { keyPicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH private key") }
                 Text("Your key and connection are encrypted on this device. Use Forget saved host to remove them. Passphrase keys are not supported yet.", style = MaterialTheme.typography.bodySmall)
                 if (importError.isNotEmpty()) Text(importError, color = MaterialTheme.colorScheme.error)
-                Button(onClick = { vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary, state)) }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
+                Button(onClick = { vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary, state)); connectionSettings = false }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
                 Row {
                     TextButton(onClick = vm::reset) { Text("Reset session cursor") }
                     TextButton(onClick = { vm.forget(); host = ""; user = ""; pin = ""; state = "" }) { Text("Forget saved host") }
                 }
             }
-        } else if (vm.connecting) {
-            LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 16.dp))
         } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(onClick = { sessions = true; vm.refreshThreads() }) { Text(if (vm.selected.isEmpty()) "Choose session" else "Sessions · ${vm.selected.take(8)}") }
-                Text(if (vm.historyLoading) "Loading…" else if (vm.busy) "Working…" else "Ready", modifier = Modifier.padding(12.dp))
-            }
-            if (sessions || vm.selected.isEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(model, { model = it }, label = { Text("Model (optional)") }, singleLine = true, modifier = Modifier.weight(1f))
-                    Button(onClick = { vm.create(model); sessions = false }, enabled = !vm.busy) { Text("New chat") }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("${vm.threads.size} sessions loaded", modifier = Modifier.padding(12.dp))
-                    TextButton(onClick = vm::refreshThreads) { Text("Refresh") }
-                }
-                if (vm.threads.isEmpty()) Text("No sessions loaded for this workspace. Refresh or create a new chat.")
-                LazyColumn(Modifier.weight(1f)) {
-                    items(vm.threads) { id -> TextButton(onClick = { vm.select(id); sessions = false }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Text(vm.titles[id]?.ifBlank { "Untitled session" } ?: "Untitled session", maxLines = 2)
-                            Text(id.take(8), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    } }
-                    if (vm.nextCursor != null) item { TextButton(onClick = vm::more) { Text("Load more") } }
-                }
-            } else {
-                if (vm.historyLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                val scroll = androidx.compose.foundation.lazy.rememberLazyListState()
-                LaunchedEffect(vm.messages.lastOrNull()?.second) { if (vm.messages.isNotEmpty()) scroll.animateScrollToItem(vm.messages.lastIndex) }
-                LazyColumn(Modifier.weight(1f), state = scroll, verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
-                    items(vm.messages) { (role, body) ->
-                        Column(Modifier.fillMaxWidth(), horizontalAlignment = if (role == "You") Alignment.End else Alignment.Start) {
-                            if (role == "You") Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = MaterialTheme.shapes.large, modifier = Modifier.widthIn(max = 320.dp)) {
-                                SelectionContainer { Text(body, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), style = MaterialTheme.typography.bodyLarge) }
-                            } else SelectionContainer { Text(body, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), style = MaterialTheme.typography.bodyLarge) }
-                        }
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(text, { text = it }, label = { Text("Message Codex") }, modifier = Modifier.weight(1f), maxLines = 5)
-                    Button(onClick = { vm.send(text); text = "" }, enabled = !vm.busy && !vm.historyLoading && text.isNotBlank(), modifier = Modifier.heightIn(min = 48.dp)) { Text("Send") }
-                }
-            }
+            Text(if (vm.connecting) "Connecting…" else "Connected to $host", color = Mocha.Blue)
+            TextButton(onClick = vm::disconnect) { Text("Disconnect") }
+            TextButton(onClick = { connectionSettings = false }) { Text("Back to chat") }
         }
     }
     vm.decisions.firstOrNull()?.takeIf { vm.connected }?.let { decision -> DecisionDialog(decision) { vm.answer(decision, it) } }

@@ -22,6 +22,8 @@ dependencies {
     implementation("com.github.mwiede:jsch:0.2.24")
     // Android lacks the Java 15 Ed25519 implementation used by desktop JSch.
     implementation("org.bouncycastle:bcprov-jdk18on:1.80")
+    implementation("org.commonmark:commonmark:0.24.0")
+    implementation("org.commonmark:commonmark-ext-gfm-tables:0.24.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

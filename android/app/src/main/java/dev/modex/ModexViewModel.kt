@@ -144,10 +144,11 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun refreshThreads() { request("threads/list", JSONObject().put("limit", 50)) }
     fun more() { nextCursor?.let { request("threads/list", JSONObject().put("limit", 50).put("cursor", it), "more") } }
-    fun send(text: String) {
-        if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank()) return
+    fun send(text: String): Boolean {
+        if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank()) return false
         messages = messages + ("You" to text); busy = true
         request("turn/start", JSONObject().put("thread_id", selected).put("text", text))
+        return true
     }
     fun answer(decision: JSONObject, result: JSONObject) {
         val id = decision.getString("decision_id")
@@ -174,7 +175,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 "threads/list" -> {
                     if (error.startsWith("Host rejected threads/list")) error = ""
                     val list = result.optJSONArray("data") ?: JSONArray()
-                    titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("preview").ifBlank { t.getString("id") } }
+                    titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }
                     threads = if (operation.second == "more") (threads + ids).distinct() else ids
                     nextCursor = if (result.isNull("next_cursor")) null else result.optString("next_cursor").ifEmpty { null }
