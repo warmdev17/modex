@@ -1,0 +1,7 @@
+# Android native first client
+
+User authorized execution; planner subagent probe failed twice before work. Proceed inline. Kotlin/Compose Android min API 26, SDK 36, Java 17 bytecode. Native Java SSH via maintained mwiede JSch, strict SHA256 host fingerprint pin supplied out of band; key imported through Android document picker and held in RAM only. No provider key entry or trust-all host verifier.
+
+Slice: connection form, key import, connect/disconnect/reconnect; paginated session list; new chat with optional model; same-ID resume; streamed transcript; command approval review with offered one-time choices; file-change requests can only be declined/cancelled until a diff viewer exists; non-secret question response; same-instance cursor replay in the same ViewModel lifetime. Cursor advances after applying event, no prompt replay; connection parameters cannot change without resetting local journal state. App process death loses local state and key; no background mobile service or push in this slice. Transcript is current observed events, not full stored history (host lacks history API).
+
+Files: android/ build and app sources only; no Go behavior changes. Tests: strict shell quoting and path validation; host-key pin algorithm; journal gap/instance handling and duplicate replay. Build debug APK and JVM tests; device/emulator verification if environment permits. Never call an unbuilt scaffold a tested Android app.

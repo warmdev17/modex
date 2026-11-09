@@ -1,6 +1,6 @@
 # Modex project state
 
-Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/ssh-transport`; base commit `31e06f4`. This snapshot accompanies the SSH transport milestone; Git records the final hash. Prior milestones: live approval `0668e2d`, new chat `187cb87`.
+Updated: 2026-11-09, Asia/Ho_Chi_Minh. Branch: `feat/android-client`; base commit `4f535d6`. This snapshot accompanies the native Android milestone; Git records its final commit. Prior milestones: live approval `0668e2d`, new chat `187cb87`, supervisor `31e06f4`, OpenSSH `4f535d6`.
 
 ## Objective
 
@@ -27,9 +27,11 @@ Earlier attempts with configured `gpt-5.5` returned HTTP 403 in both direct Code
 
 ## In progress and next
 
-Primary agent is sole builder/state writer; execution is inline, no subagents. Completed: workspace-bound thread creation and background supervisor with bounded cursor replay, verified with real inference. Completed: initial system OpenSSH client transport. Next: Kotlin/Compose client with native SSH, Windows supervisor ACL support, notification relay.
+Primary agent owns integration/state. Latest user authorized subagent workflow if available: planner probe and retry failed with stream disconnect; later read-only reviewer also failed before returning findings. Implementation and review therefore completed inline; no independent review is claimed.
 
-Android, Android-native SSH and push relay remain unimplemented; the Go CLI now provides system OpenSSH transport. Direct --serve is connection-scoped; --background/--supervise keep the bridge alive across attach disconnects; simultaneous official Desktop/CLI ownership is unresolved. Stored message history UI, named profiles, live file approvals/questions, legacy approvals, MCP elicitation and secret questions are not validated/supported. No license, billing or release decisions. No publishing or push performed.
+Completed: first native Kotlin/Compose Android client, built debug APK, emulator UI launch and Android-native SSH integration (fake provider). [Android plan](docs/android-plan.md). Next: full Android UI-to-real-provider smoke, stored session history, file diff review, secure saved connections, then foreground/relay notifications and bubbles. Windows supervisor ACL support remains outstanding.
+
+No Android background service/push, license, billing or release decisions; no publishing/push performed. Desktop/CLI simultaneous writer ownership remains unresolved. Legacy approvals, MCP elicitation and secret questions remain unsupported. Android supports one-time command approval/question UI; file-change acceptance is intentionally disabled pending a diff viewer.
 
 ## Background supervisor milestone
 
@@ -44,3 +46,17 @@ Final supervisor checks on the working tree: `GOCACHE=/tmp/modex-go-cache go tes
 `cmd/modex` + `internal/sshtransport`: use installed OpenSSH to exec remote `modex-host --attach`; fixed strict host key checking, key/agent-only noninteractive authentication, no PTY, timeouts/keepalives, shell-quoted absolute POSIX remote paths and cursor/instance reconnect. No token or provider key leaves the target; no prompt replay or automatic host deployment. SSH config aliases are allowed and remain trusted local configuration.
 
 Verification on working tree: Go tests/race/vet PASS; client cross-builds Linux/Windows/macOS PASS. Linux real loopback sshd test uses ephemeral keys and isolated config: JSON round-trip and metacharacter paths PASS, wrong host key rejected, real supervisor status and same-instance cursor continuity across two SSH attachments PASS (fake provider). No remote VPS, Android, Windows client runtime or macOS runtime validation. Supervisor real-provider test was already validated at `31e06f4`; combined SSH plus paid inference is not claimed. Related contract in docs/ssh-transport-plan.md. Self-review only, no subagents per user instruction.
+
+
+## Native Android milestone
+
+Kotlin/Compose min API 26, target/compile 36; Gradle wrapper 8.14.3. Native mwiede JSch with Bouncy Castle Ed25519, strict out-of-band SHA256 host pin, SAF key import held in RAM. Connection form, paginated IDs, new chat/model, same-ID resume, live deltas, offered command decisions and non-secret questions. Same-instance journal cursor advances only after apply succeeds; no automatic prompt retry. Connection metadata survives rotation; ViewModel key/journal do not survive process death. No stored history loading or file approval acceptance.
+
+Verified on this milestone's uncommitted working tree before commit:
+
+- Gradle `:app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --no-daemon`: PASS; five JVM protocol tests, zero test failures/lint errors. Lint warns about newer dependencies, default icon and backup-rule metadata; no production release readiness claim. Used installed Gradle 8.14.3/JDK 21/SDK 36 with `/tmp/modex-gradle` cache. Wrapper generated, but fresh wrapper download not separately tested.
+- Emulator Pixel 4 XL: APK installed, activity launched, connection screen visually inspected; no AndroidRuntime crash observed at launch.
+- `python3 scripts/test_android_transport.py --host /tmp/modex-android-host --adb /opt/android-sdk/platform-tools/adb`: PASS on Android emulator with ephemeral Ed25519 keys and isolated loopback sshd, real supervisor/fake provider. Two status round-trips, same-instance cursor continuity and wrong-pin rejection checked. Fixture stopped and private test key deleted. Initial test timed out; traced to JSch returning a new buffered output stream on each getter. Keeping write/flush on the same stream fixed the reproduced failure.
+- `GOCACHE=/tmp/modex-go-cache go test ./...`: PASS; Go behavior unchanged.
+
+APK: `android/app/build/outputs/apk/debug/app-debug.apk` (ignored build output). No physical phone, remote VPS, full UI chat/approval automation or Android-to-paid-provider inference checked; previous Go host provider evidence above still applies only to the host path. UI implementation is a first functional slice, not a finished visual design. No persistent Android storage of private keys; selected original key file remains wherever the user imported it from.

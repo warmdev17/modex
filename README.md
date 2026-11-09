@@ -172,7 +172,7 @@ It runs only the remote host's `--attach` command over an exec channel, with no 
 
 Optional flags: `--port 2222`, `--identity /local/private-key`, `--known-hosts /local/verified-known_hosts`, `--ssh /path/to/ssh`. Authentication uses existing OpenSSH keys/agent/config with `BatchMode=yes`; no password prompt enters the JSON stream. Host key checking is always strict. Verify and install the remote host key through your normal trusted process before connecting; the client never learns host keys automatically. No provider keys or supervisor tokens appear in SSH arguments.
 
-SSH options include connection timeout and keepalives. Failed SSH/remote attach returns a generic error on stderr and never retries commands. To diagnose OpenSSH separately, use your normal terminal SSH connection. Remote exec uses POSIX shell quoting and requires absolute remote binary/state paths. Client binaries cross-build for Linux/Windows/macOS with OpenSSH installed; Windows **targets** remain unsupported for supervisor mode until private ACL support and shell-specific exec quoting are implemented. Android native SSH is still pending.
+SSH options include connection timeout and keepalives. Failed SSH/remote attach returns a generic error on stderr and never retries commands. To diagnose OpenSSH separately, use your normal terminal SSH connection. Remote exec uses POSIX shell quoting and requires absolute remote binary/state paths. Client binaries cross-build for Linux/Windows/macOS with OpenSSH installed; Windows **targets** remain unsupported for supervisor mode until private ACL support and shell-specific exec quoting are implemented. The native Android client is described below.
 
 Real loopback SSH verification uses an isolated sshd, ephemeral host/client keys and known_hosts, without changing system SSH configuration:
 
@@ -182,3 +182,38 @@ MODEX_CLIENT_BINARY=/tmp/modex MODEX_HOST_BINARY=/tmp/modex-host \
 ```
 
 It checks quoting of shell metacharacters, exact JSON transport, rejection of mismatched host keys, and two authenticated attachments with cursor continuity against a real supervisor using a fake provider. This is Linux loopback integration, not remote VPS or Android runtime validation.
+
+
+## Native Android client (first slice)
+
+`android/` is a Kotlin/Jetpack Compose app, Android 8.0/API 26 or newer. It uses native Java SSH (mwiede JSch plus Bouncy Castle for Ed25519), pins the verified SSH host fingerprint and imports an **unencrypted private key** through the system file picker. Use a dedicated SSH key for this prototype. Key material and connection state stay in app memory; they are lost on process death. Importing a file does not delete its original copy.
+
+Build with JDK 17 or 21, Android SDK 36 and installed build tools:
+
+```sh
+cd android
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+```
+
+APK: `android/app/build/outputs/apk/debug/app-debug.apk` from the repository root. Install with Android Studio or `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`. The wrapper pins Gradle 8.14.3; first build needs internet to download tools and dependencies.
+
+Start the host supervisor as documented above. In the app enter hostname/IP, SSH port/user, absolute remote binary and state-directory paths, then import the key. Obtain the SSH server's SHA256 fingerprint **on the target or through another trusted channel**, for example `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` on Linux. Do not trust an unverified network scan. The pin must match the host key algorithm negotiated with the server.
+
+Connect, choose an existing workspace session or create a new one (optional model), then send a message. The UI shows streamed live messages and one-time command approvals/non-secret questions. Disconnect leaves the target supervisor working. Reconnect uses the same instance and last handled cursor, without resending prompts. Reset clears local session/cursor state; observe remote state before retrying an uncertain operation.
+
+Current limits: live messages only, no stored transcript display; file-change requests can be declined/cancelled but **cannot be accepted** until a diff viewer exists. No encrypted-key/passphrase UI, saved profiles, SSH agent/config aliases, automatic host installation, background Android service, notifications, push relay or bubbles yet. Android may terminate the process in the background; reconnect state then needs to be rebuilt. Windows supervisor targets remain unavailable. This is a development APK, not a published release.
+
+
+Opt-in Android SSH integration (Linux host with `sshd`, running `emulator-5554`):
+
+```sh
+go build -o /tmp/modex-android-host ./cmd/modex-host
+cd android
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest
+cd ..
+adb -s emulator-5554 install -r android/app/build/outputs/apk/debug/app-debug.apk
+adb -s emulator-5554 install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+python3 scripts/test_android_transport.py --host /tmp/modex-android-host
+```
+
+This uses temporary Ed25519 keys, an isolated loopback sshd and a real supervisor with a fake Codex provider. It verifies Android SSH status round-trips, same-instance cursor reconnect and rejection of a wrong fingerprint. It force-stops only the test app and removes its temporary key/host fixtures. It does not test paid inference or all UI actions.
