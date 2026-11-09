@@ -116,7 +116,12 @@ private fun ModexApp() {
                 }
                 if (vm.threads.isEmpty()) Text("No sessions loaded for this workspace. Refresh or create a new chat.")
                 LazyColumn(Modifier.weight(1f)) {
-                    items(vm.threads) { id -> TextButton(onClick = { vm.select(id); sessions = false }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) { Text(vm.titles[id] ?: id, maxLines = 2) } }
+                    items(vm.threads) { id -> TextButton(onClick = { vm.select(id); sessions = false }, enabled = !vm.busy, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Text(vm.titles[id]?.ifBlank { "Untitled session" } ?: "Untitled session", maxLines = 2)
+                            Text(id.take(8), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    } }
                     if (vm.nextCursor != null) item { TextButton(onClick = vm::more) { Text("Load more") } }
                 }
             } else {

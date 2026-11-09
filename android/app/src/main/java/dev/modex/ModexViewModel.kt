@@ -14,6 +14,15 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal fun explainHostRejection(method: String, detail: String): String {
+    return when {
+        detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
+        detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
+        detail.contains("model_provider_mismatch", ignoreCase = true) -> "This session belongs to a different Codex provider or model configuration."
+        else -> "Host rejected $method. Review session state before retrying."
+    }
+}
+
 // State survives rotations, but not process death. No automatic command retries.
 class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private val saved = SavedHost(application)
@@ -159,7 +168,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private fun apply(frame: JSONObject) {
         if (frame.has("id")) {
             val operation = pending.remove(frame.getLong("id")) ?: return
-            if (frame.has("error")) { if (operation.first == "turn/start") busy = false; if (operation.first == "threads/read") historyLoading = false; error = "Host rejected ${operation.first}. Review session state before retrying."; return }
+            if (frame.has("error")) { if (operation.first == "turn/start") busy = false; if (operation.first == "threads/read") historyLoading = false; error = explainHostRejection(operation.first, frame.optJSONObject("error")?.optString("message").orEmpty()); return }
             val result = frame.optJSONObject("result") ?: return
             when (operation.first) {
                 "threads/list" -> {

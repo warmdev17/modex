@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/warmdev/modex/internal/diagnostic"
 )
 
 func TestServeMultipleRequestsAndRejectMutation(t *testing.T) {
@@ -53,7 +55,35 @@ func TestListPaginationAndMetadataProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, _ := json.Marshal(result)
-	if strings.Contains(string(b), "private chat") || !strings.Contains(string(b), `"next_cursor":"after"`) {
+	if !strings.Contains(string(b), `"preview":"private chat"`) || !strings.Contains(string(b), `"next_cursor":"after"`) {
+		t.Fatalf("result=%s", b)
+	}
+}
+
+func TestResumePreservesActiveWriterCategory(t *testing.T) {
+	caller := func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+		if method == "thread/resume" {
+			return nil, diagnostic.NewRPCError(json.RawMessage(`{"message":"thread already has an active writer"}`))
+		}
+		return json.RawMessage(`{"thread":{"id":"one","cwd":"/work"}}`), nil
+	}
+	_, err := Handle(context.Background(), "/work", Command{Method: "threads/resume", Params: json.RawMessage(`{"thread_id":"one"}`)}, caller)
+	if err == nil || !strings.Contains(err.Error(), "active_writer") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestListPreviewIsTrimmedAndBounded(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	caller := func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+		return json.RawMessage(fmt.Sprintf(`{"data":[{"id":"one","cwd":"/work","preview":"  %s  "}],"nextCursor":null}`, long)), nil
+	}
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/list"}, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(result)
+	if strings.Contains(string(b), "  x") || !strings.Contains(string(b), strings.Repeat("x", 160)+"…") {
 		t.Fatalf("result=%s", b)
 	}
 }

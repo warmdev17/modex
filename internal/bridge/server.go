@@ -21,6 +21,20 @@ type Thread struct {
 	Provider string `json:"modelProvider"`
 }
 
+type threadListItem struct {
+	Thread
+	Preview string `json:"preview,omitempty"`
+}
+
+func safePreview(value string) string {
+	value = strings.TrimSpace(value)
+	runes := []rune(value)
+	if len(runes) > 160 {
+		return string(runes[:160]) + "…"
+	}
+	return value
+}
+
 func Handle(ctx context.Context, cwd string, cmd Command, call Caller) (any, error) {
 	return HandleEvents(ctx, cwd, cmd, func(ctx context.Context, method string, params any, _ func(string, json.RawMessage)) (json.RawMessage, error) {
 		return call(ctx, method, params)
@@ -129,8 +143,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, err
 		}
 		var page struct {
-			Data []Thread `json:"data"`
-			Next *string  `json:"nextCursor"`
+			Data []threadListItem `json:"data"`
+			Next *string          `json:"nextCursor"`
 		}
 		if json.Unmarshal(raw, &page) != nil || page.Data == nil {
 			return nil, errors.New("invalid thread list response")
@@ -140,9 +154,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("thread outside workspace")
 			}
 		}
+		for i := range page.Data {
+			page.Data[i].Preview = safePreview(page.Data[i].Preview)
+		}
 		return struct {
-			Data []Thread `json:"data"`
-			Next *string  `json:"next_cursor"`
+			Data []threadListItem `json:"data"`
+			Next *string          `json:"next_cursor"`
 		}{page.Data, page.Next}, nil
 	case "turn/start":
 		var id, text string

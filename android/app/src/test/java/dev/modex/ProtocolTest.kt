@@ -5,6 +5,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtocolTest {
+    @Test
+    fun activeWriterRejectionExplainsDesktopOwnership() {
+        assertEquals(
+            "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry.",
+            explainHostRejection("threads/resume", "Codex request failed: active_writer")
+        )
+    }
+
     @Test fun quotesRemotePaths() {
         assertEquals("exec '/opt/host'\"'\"'s app' --attach --state-dir '/state $(id)' --cursor 0", remoteCommand("/opt/host's app", "/state $(id)", 0, null))
     }
