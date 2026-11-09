@@ -51,3 +51,16 @@ fun turnFailure(params: JSONObject): String? {
     }
     return "Codex turn failed. Check the model/provider on the host before retrying."
 }
+
+fun approvalDetails(context: JSONObject): List<Pair<String, String>> {
+    fun readable(value: Any): String = when (value) {
+        is JSONObject -> value.keys().asSequence().map { key -> "$key: ${readable(value.get(key))}" }.joinToString("\n")
+        is org.json.JSONArray -> (0 until value.length()).joinToString("\n") { "• ${readable(value.get(it))}" }
+        else -> value.toString()
+    }
+    val labels = linkedMapOf("command" to "Command", "cwd" to "Working directory", "reason" to "Why approval is needed",
+        "kind" to "Action type", "additionalPermissions" to "Additional permissions", "networkApprovalContext" to "Network access", "grantRoot" to "Requested directory access")
+    val keys = (labels.keys + context.keys().asSequence().toList()).distinct()
+    return keys.filter { it != "availableDecisions" && context.has(it) && !context.isNull(it) }
+        .map { (labels[it] ?: it) to readable(context.get(it)) }
+}

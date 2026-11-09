@@ -199,7 +199,7 @@ APK: `android/app/build/outputs/apk/debug/app-debug.apk` from the repository roo
 
 Start the host supervisor as documented above. In the app enter hostname/IP, SSH port/user, absolute remote binary and state-directory paths, then import the key. Obtain the SSH server's SHA256 fingerprint **on the target or through another trusted channel**, for example `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` on Linux. Do not trust an unverified network scan. The pin must match the host key algorithm negotiated with the server.
 
-Connect, choose an existing workspace session or create a new one (optional model), then send a message. A blank model uses the host default; HTTP 403 may mean that model is not allowed for your provider key. Choose an allowed model explicitly for a new chat. The session picker offers Refresh and a loaded-session count; failed turns show fixed error guidance without raw provider details. The UI shows streamed live messages and one-time command approvals/non-secret questions. Disconnect leaves the target supervisor working. Reconnect uses the same instance and last handled cursor, without resending prompts. Reset clears local session/cursor state; observe remote state before retrying an uncertain operation.
+Connect, choose an existing workspace session or create a new one (optional model), then send a message. A blank model uses the host default; HTTP 403 may mean that model is not allowed for your provider key. Choose an allowed model explicitly for a new chat. The session picker offers Refresh and a loaded-session count; failed turns show fixed error guidance without raw provider details. The UI shows streamed live messages and one-time command approvals/non-secret questions. Approval review separates the exact command, working directory, reason and any extra filesystem/network permissions; command text can be selected and copied. Disconnect leaves the target supervisor working. Reconnect uses the same instance and last handled cursor, without resending prompts. Reset clears local session/cursor state; observe remote state before retrying an uncertain operation.
 
 Current limits: live messages only, no stored transcript display; file-change requests can be declined/cancelled but **cannot be accepted** until a diff viewer exists. No encrypted-key/passphrase UI, saved profiles, SSH agent/config aliases, automatic host installation, background Android service, notifications, push relay or bubbles yet. Android may terminate the process in the background; reconnect state then needs to be rebuilt. Windows supervisor targets remain unavailable. This is a development APK, not a published release.
 
@@ -217,3 +217,12 @@ python3 scripts/test_android_transport.py --host /tmp/modex-android-host
 ```
 
 This uses temporary Ed25519 keys, an isolated loopback sshd and a real supervisor with a fake Codex provider. It verifies Android SSH status round-trips, same-instance cursor reconnect and rejection of a wrong fingerprint. It force-stops only the test app and removes its temporary key/host fixtures. It does not test paid inference or all UI actions.
+
+
+Approval UI screenshot fixture (installed debug + test APKs, no SSH/command execution):
+
+```sh
+adb -s emulator-5554 shell am instrument -w -e preview approval dev.modex.test/dev.modex.TransportSmoke
+adb -s emulator-5554 exec-out run-as dev.modex cat files/approval-light.png > /tmp/approval-light.png
+adb -s emulator-5554 exec-out run-as dev.modex cat files/approval-dark.png > /tmp/approval-dark.png
+```

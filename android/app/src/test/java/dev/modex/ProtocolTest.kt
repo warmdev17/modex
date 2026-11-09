@@ -38,6 +38,18 @@ class ProtocolTest {
         assertNull(turnFailure(JSONObject("""{"turn":{"status":"completed"}}""")))
         assertNull(turnFailure(JSONObject("""{"error":{"message":"temporary"},"willRetry":true}""")))
     }
+    @Test fun approvalDetailsPreservePermissionContextWithoutJSONEnvelopes() {
+        val context = JSONObject("""{"command":"printf MODEX_APPROVAL_OK","cwd":"/work/space","reason":"Harmless test","kind":"exec","additionalPermissions":{"fileSystem":{"write":["/tmp/example"]}},"networkApprovalContext":{"host":"example.com","port":443},"optional":null}""")
+        val fields = approvalDetails(context).toMap()
+        assertEquals("printf MODEX_APPROVAL_OK", fields["Command"])
+        assertEquals("/work/space", fields["Working directory"])
+        assertEquals("Harmless test", fields["Why approval is needed"])
+        assertTrue(fields.getValue("Additional permissions").contains("/tmp/example"))
+        assertTrue(fields.getValue("Network access").contains("example.com"))
+        assertFalse(fields.containsKey("optional"))
+        assertFalse(fields.getValue("Additional permissions").contains("{"))
+        assertEquals(emptyList<Pair<String, String>>(), approvalDetails(JSONObject()))
+    }
     @Test fun computesPinnedSHA256Fingerprint() {
         assertEquals("SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU", fingerprint(byteArrayOf()))
     }

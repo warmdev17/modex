@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.json.JSONArray
@@ -120,14 +121,15 @@ private fun ModexApp(vm: ModexViewModel = viewModel()) {
 }
 
 @Composable
-private fun DecisionDialog(decision: JSONObject, respond: (JSONObject) -> Unit) {
+internal fun DecisionDialog(decision: JSONObject, respond: (JSONObject) -> Unit) {
     val context = decision.getJSONObject("context")
+    val fileMode = decision.optString("method") == "item/fileChange/requestApproval"
     val questionMode = decision.optString("method") == "item/tool/requestUserInput"
     val questions = context.optJSONArray("questions") ?: JSONArray()
     val answers = remember(decision.optString("decision_id")) { mutableStateMapOf<String, String>() }
     val offered = context.optJSONArray("availableDecisions")
     fun offered(choice: String): Boolean = offered == null || (0 until offered.length()).any { offered.opt(it) == choice }
-    AlertDialog(onDismissRequest = {}, title = { Text(if (questionMode) "Codex needs your input" else "Review requested action") }, text = {
+    AlertDialog(onDismissRequest = {}, title = { Text(if (questionMode) "Codex needs your input" else if (fileMode) "Review file access" else "Allow this command?") }, text = {
         Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Session ${decision.optString("thread_id").take(8)}")
             if (questionMode) {
@@ -142,7 +144,17 @@ private fun DecisionDialog(decision: JSONObject, respond: (JSONObject) -> Unit) 
                     }
                     OutlinedTextField(answers[id].orEmpty(), { answers[id] = it }, label = { Text("Your answer") })
                 }
-            } else SelectionContainer { Text(context.toString(2)) }
+            } else {
+                Text(if (fileMode) "File changes cannot be allowed until a diff viewer is available. You can decline or cancel this request." else "Codex is waiting for your permission. Allowing this request does not approve future commands.", style = MaterialTheme.typography.bodyMedium)
+                for ((label, value) in approvalDetails(context)) {
+                    Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (label == "Command") Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = MaterialTheme.shapes.small) {
+                            SelectionContainer { Text(value, modifier = Modifier.fillMaxWidth().padding(12.dp), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium) }
+                        } else SelectionContainer { Text(value, style = MaterialTheme.typography.bodyMedium) }
+                    }
+                }
+            }
         }
     }, confirmButton = {
         if (questionMode) Button(enabled = (0 until questions.length()).all { !answers[questions.getJSONObject(it).getString("id")].isNullOrBlank() }, onClick = {

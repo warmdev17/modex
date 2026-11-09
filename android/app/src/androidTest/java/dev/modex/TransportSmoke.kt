@@ -10,6 +10,7 @@ class TransportSmoke : Instrumentation() {
     private lateinit var args: Bundle
     override fun onCreate(arguments: Bundle) { super.onCreate(arguments); args = arguments; start() }
     override fun onStart() {
+        if (args.getString("preview") == "approval") { approvalPreview(); return }
         val result = Bundle()
         try {
             val config = Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,
