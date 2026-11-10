@@ -107,6 +107,23 @@ python3 -m unittest discover -s scripts -p 'test_*.py'
 
 Python 3 standard library only. Omit `--model` to use the configured model; `--report /path/to/report.json` writes a sanitized summary. The fixture workspace is removed after the run; Codex may retain ordinary test session records in its own home. This approval fixture requires Linux/Bash; host cross-compilation is not runtime validation on Windows or macOS.
 
+## Thread permissions
+
+Android's New conversation dialog offers Host default, Read-only, Workspace write
+and Full access. Host default sends no override and may inherit full access.
+Read-only and Workspace write request `on-request` approvals routed to the user;
+Full access explicitly requests unrestricted sandbox access and `never` command
+approvals. Host policy can reject a mode; file-change acceptance still requires
+a future diff viewer. This does not change the global Codex configuration.
+
+The conversation menu's Session settings shows model/provider and sandbox,
+approval policy and reviewer reported by Codex at create/resume. Unknown fields
+remain unknown, including restored history before resume. These labels summarize
+the legacy sandbox policy, not a complete permission-profile or tool-scope audit.
+Opening an existing session sends no permission overrides. A new host build is
+required; old hosts reject explicit modes. Rebuild/restart the supervisor only
+when ready to detach existing clients, then reset the phone cursor as needed.
+
 ## Background supervisor (Linux/macOS)
 
 From the repository root, use:

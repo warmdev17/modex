@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `fix/android-key-import-errors`; base `15d7276`. Git records final commits.
+Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `feat/thread-permission-modes`; base `f02bc45`. Git records final commits.
+
+## Explicit new-thread permissions
+
+Continuing the Codex companion direction after user evaluated T3. [Plan](docs/superpowers/plans/2026-11-10-thread-permissions.md), [contract](docs/bridge-plan.md#thread-permission-extension-2026-11-10). New chat offers Host default (unchanged inherited permissions), Read-only, Workspace write, Full access with warning. Explicit sandboxed modes request on-request/user, full access never/user. Host policy can reject choices. No global configuration changes; no overrides on resume/turn. Session settings menu projects Codex-returned provider/model/legacy sandbox type/approval/reviewer; missing policy labels remain Unknown. Metadata cleared during switching/reconnect/reset/disconnect and not persisted as authoritative. Settings report create/resume time; full active permission-profile/tool-scope display remains unimplemented. Read-only may request permission escalation, not an immutable no-write guarantee; file approvals cannot be accepted without a diff viewer.
+
+Evidence on final uncommitted milestone: Go suite PASS; bridge race PASS; go vet PASS. Android assembleDebug/testDebugUnitTest/lintDebug --offline PASS, 25 tests/0 failures/0 errors, existing warnings. Go and Kotlin new tests observed fail before implementation. Installed Codex schema validated request/response fields. Real Codex creates returned expected permissions for all three explicit modes; one short paid third-party gpt-6.1-sol marker turn in temporary workspace followed by fresh bridge same-ID resume returned readOnly/on-request/user. Empty-thread resume probe rejected before that; no existing user session touched. Independent reviewer attempted but stream disconnected, so self-review only. New dialog not visually verified on emulator/phone; APK built but not installed, phone supervisor not rebuilt/restarted. Updating host requires intentional stop/start and resetting old journal cursor. Next: physical UI/approval validation, then reliable CLI-to-phone handoff; do not claim control of an already-running CLI process.
 
 ## SSH key import troubleshooting
 

@@ -1,5 +1,31 @@
 # Connection-scoped host bridge
 
+## Thread permission extension (2026-11-10)
+
+`threads/start` additionally accepts optional `permission_mode`:
+
+| Value | Upstream sandbox | Approval policy | Reviewer |
+| --- | --- | --- | --- |
+| omitted / `host-default` | inherited | inherited | inherited |
+| `read-only` | `read-only` | `on-request` | `user` |
+| `workspace-write` | `workspace-write` | `on-request` | `user` |
+| `full-access` | `danger-full-access` | `never` | `user` |
+
+Null/unknown/non-string values fail before upstream calls. No arbitrary policy
+objects, filesystem/network scopes or provider overrides accepted. Existing
+resume/turn commands do not accept permission overrides. Global config unchanged.
+
+Create/resume results additionally project optional `approval_policy`,
+`approvals_reviewer`, and `sandbox` (legacy policy type only), plus runtime `model`.
+Only recognized enum labels are forwarded; unsupported/missing policies are
+omitted and rendered Unknown. Raw policy objects/scopes are never forwarded.
+Returned settings describe Codex's response, not the requested mode. Exact
+thread ID/workspace checks remain mandatory. Host policy can reject choices.
+
+Verified with installed Codex schema, fake upstream tests, and real Codex create
+for all explicit modes. One real third-party-model marker turn followed by a
+fresh bridge resume retained same ID and returned readOnly/on-request/user.
+
 Design extension, 2026-11-08. User authorized continuing the host/session milestone. Single primary implementer; standard-library Go, no network listener or automatic commits.
 
 Contract: `--serve` retains a stdio Codex app-server. Positive integer request IDs; `status`, `threads/list` (limit 1–100, optional opaque cursor), `threads/read` and `threads/resume` (required thread_id). Return allowlisted configuration/thread metadata only. Bound input/output frames to 4 MiB and each Codex exchange to 20 seconds. Workspace is immutable for the connection; read/resume validate stored cwd before any resume. Do not override model/provider/permissions, fork, replay uncertain calls or bypass locks.

@@ -40,6 +40,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var decisions by mutableStateOf(listOf<JSONObject>()); private set
     var busy by mutableStateOf(false); private set
     var nextCursor by mutableStateOf<String?>(null); private set
+    var sessionSettings by mutableStateOf(""); private set
     var keyLoaded by mutableStateOf(false); private set
     private var key: ByteArray? = null
     private var config: Connection? = null
@@ -83,6 +84,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (reconnectAllowed && !connected && !connecting) savedConnection?.let { connect(it) }
     }
     fun forget() {
+        sessionSettings = ""
         disconnect(); transport = null; connected = false; connecting = false; reconnectAllowed = false; saveJob?.cancel()
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
         journal = JournalState(); config = null; savedConnection = null; pending.clear(); selected = ""; messages = emptyList(); decisions = emptyList(); threads = emptyList(); busy = false
@@ -99,12 +101,14 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun reset() {
         if (connected || connecting) return
+        sessionSettings = ""
         journal = JournalState(); pending.clear(); threads = emptyList()
         selected = ""; messages = emptyList(); decisions = emptyList(); busy = false; error = ""
         persist()
     }
     fun connect(value: Connection) {
         if (connected || connecting) return
+        sessionSettings = ""
         if (key == null) { error = "Import an unencrypted SSH private key first."; return }
         if (config != null && config != value) { error = "Forget saved host before changing the target."; return }
         config = value; savedConnection = value; reconnectAllowed = true; error = ""; connecting = true
@@ -136,10 +140,15 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun disconnect() { reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
-    fun create(model: String) { if (busy || historyLoading || switching()) return; request("threads/start", JSONObject().apply { if (model.isNotBlank()) put("model", model) }) }
+    fun disconnect() { sessionSettings = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
+    fun create(model: String, mode: String) {
+        if (busy || historyLoading || switching()) return
+        sessionSettings = ""
+        request("threads/start", newThreadParams(model, mode))
+    }
     fun select(id: String) {
         if (busy || historyLoading || switching()) return
+        sessionSettings = ""
         request("threads/resume", JSONObject().put("thread_id", id), id)
     }
     fun refreshThreads() { request("threads/list", JSONObject().put("limit", 50)) }
@@ -182,6 +191,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 "threads/start", "threads/resume" -> {
                     error = ""
+                    sessionSettings = sessionSettingsLabel(result)
                     selected = result.getJSONObject("thread").getString("id")
                     threads = (listOf(selected) + threads).distinct()
                     loadHistory()

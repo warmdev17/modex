@@ -8,6 +8,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
@@ -20,6 +24,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,9 +52,9 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
 internal fun ChatWorkspace(
     host: String, connected: Boolean, connecting: Boolean, selected: String,
     threads: List<String>, titles: Map<String,String>, messages: List<Pair<String,String>>,
-    busy: Boolean, historyLoading: Boolean, hasMore: Boolean, error: String,
+    busy: Boolean, historyLoading: Boolean, hasMore: Boolean, error: String, sessionSettings: String,
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
-    onCreate: (String) -> Unit, onSend: (String) -> Boolean,
+    onCreate: (String, String) -> Unit, onSend: (String) -> Boolean,
     onConnection: () -> Unit, onDisconnect: () -> Unit
 ) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -60,6 +65,9 @@ internal fun ChatWorkspace(
     val prompt = drafts[selected].orEmpty()
     fun updatePrompt(value: String) { drafts = HashMap(drafts).apply { put(selected, value) } }
     var newChat by rememberSaveable { mutableStateOf(false) }
+    var permissionMode by rememberSaveable { mutableStateOf("host-default") }
+    LaunchedEffect(newChat) { if (newChat) permissionMode = "host-default" }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf("") }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !busy && !historyLoading
@@ -110,6 +118,7 @@ internal fun ChatWorkspace(
                 Box {
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Session settings") }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true })
                         DropdownMenuItem(text = { Text("Connection settings") }, onClick = { menu = false; onConnection() })
                         if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, onClick = { menu = false; onDisconnect() })
                     }
@@ -146,12 +155,31 @@ internal fun ChatWorkspace(
     }
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Uses your host’s provider and workspace.", color = Mocha.Subtext)
             OutlinedTextField(model, { model = it }, label = { Text("Model (optional)") }, placeholder = { Text("Host default") }, singleLine = true)
+            Column(Modifier.selectableGroup()) {
+                permissionModes.forEach { (mode, label) ->
+                    Row(Modifier.fillMaxWidth().selectable(selected = permissionMode == mode, role = Role.RadioButton, onClick = { permissionMode = mode }).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = permissionMode == mode, onClick = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text(label)
+                    }
+                }
+            }
+            Text(when (permissionMode) {
+                "full-access" -> "Unrestricted access with no command approval prompts."
+                "host-default" -> "Inherits your host configuration, which may allow full access."
+                else -> "Requests user approval when sandbox restrictions need to be lifted. Host policy may restrict this mode."
+            }, style = MaterialTheme.typography.bodySmall, color = if (permissionMode == "full-access") MaterialTheme.colorScheme.error else Mocha.Subtext)
         } },
-        confirmButton = { TextButton(enabled = canSwitch, onClick = { onCreate(model.trim()); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
+        confirmButton = { TextButton(enabled = canSwitch, onClick = { onCreate(model.trim(), permissionMode); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
         dismissButton = { TextButton(onClick = { newChat = false }) { Text("Cancel") } }
+    )
+    if (showSettings) AlertDialog(
+        onDismissRequest = { showSettings = false }, title = { Text("Session settings") },
+        text = { SelectionContainer { Text(sessionSettings.ifBlank { "Effective permissions are unknown. Select this session while connected to read Codex's resume settings." } + "\n\nReported at create/resume. Host policy and tool-specific approvals still apply.") } },
+        confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Close") } }
     )
 }
 

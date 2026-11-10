@@ -83,7 +83,7 @@ private fun ModexApp() {
         ChatWorkspace(
             host = vm.savedConnection?.host.orEmpty(), connected = vm.connected, connecting = vm.connecting,
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
-            busy = vm.busy, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error,
+            busy = vm.busy, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
             onCreate = vm::create, onSend = vm::send, onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect
         )

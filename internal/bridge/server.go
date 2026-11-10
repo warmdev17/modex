@@ -54,6 +54,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	case "status":
 	case "threads/start":
 		allowed["model"] = true
+		allowed["permission_mode"] = true
 	case "threads/list":
 		allowed["limit"] = true
 		allowed["cursor"] = true
@@ -90,6 +91,25 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	switch cmd.Method {
 	case "threads/start":
 		params := map[string]any{"cwd": cwd}
+		if raw, ok := p["permission_mode"]; ok {
+			var mode string
+			if json.Unmarshal(raw, &mode) != nil {
+				return nil, errors.New("invalid permission_mode")
+			}
+			switch mode {
+			case "host-default":
+			case "read-only", "workspace-write", "full-access":
+				params["sandbox"] = mode
+				params["approvalPolicy"] = "on-request"
+				params["approvalsReviewer"] = "user"
+				if mode == "full-access" {
+					params["sandbox"] = "danger-full-access"
+					params["approvalPolicy"] = "never"
+				}
+			default:
+				return nil, errors.New("invalid permission_mode")
+			}
+		}
 		if raw, ok := p["model"]; ok {
 			var model string
 			if json.Unmarshal(raw, &model) != nil || strings.TrimSpace(model) == "" || len(model) > 256 || strings.ContainsAny(model, "\r\n\x00") {
@@ -101,11 +121,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if err != nil {
 			return nil, err
 		}
-		var result struct {
-			Thread Thread `json:"thread"`
-			Model  string `json:"model"`
-		}
-		if json.Unmarshal(raw, &result) != nil || result.Thread.ID == "" {
+		result, err := projectSession(raw)
+		if err != nil || result.Thread.ID == "" {
 			return nil, errors.New("invalid thread response")
 		}
 		if result.Thread.Cwd != cwd {
@@ -282,10 +299,18 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, err
 		}
 		if cmd.Method == "threads/resume" {
-			thread, err = read("thread/resume", map[string]any{"threadId": id, "excludeTurns": true})
+			raw, err := fetch("thread/resume", map[string]any{"threadId": id, "excludeTurns": true})
 			if err != nil {
 				return nil, err
 			}
+			result, err := projectSession(raw)
+			if err != nil || result.Thread.ID != id {
+				return nil, errors.New("invalid thread response")
+			}
+			if result.Thread.Cwd != cwd {
+				return nil, errors.New("thread outside workspace")
+			}
+			return result, nil
 		}
 		return map[string]any{"thread": thread}, nil
 	}
