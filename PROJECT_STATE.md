@@ -1,6 +1,14 @@
 # Modex project state
 
-Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `feat/thread-permission-modes`; base `f02bc45`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/android-connection-diagnostics`; base `ffb88b9`. Git records final commits.
+
+## Connection diagnostics and live host recovery
+
+Laptop IP now 192.168.1.243, phone Wi-Fi 192.168.1.244, sshd listening on 22. Phone ping to laptop PASS. `/tmp/modex-host` had disappeared and supervisor was dead with stale private endpoint/lock. Verified no host process and endpoint refused; removed only stale files, rebuilt and started supervisor. OpenSSH with modex_phone and locally verified ED25519 pin authenticated and attached; provider third-party/model gpt-6.1-sol confirmed. New instance requires phone Reset session cursor; old saved IP must change (Forget host required by current target-change guard). No prompt sent.
+
+Android now reports fixed stage-specific failures for settings/key, SSH network/auth, pin mismatch, remote executable, unavailable/busy supervisor and instance/replay; 4096-byte synchronized stderr capture stays in RAM and is neither displayed nor logged. Explicit disconnect returns quietly; unexpected EOF remains visible. Same SshTransport code on JVM with actual SSH/key/pin PASS for normal attach, wrong fingerprint, missing binary and old-instance rejection. Probe caught shell echo of --cursor misleading replay classifier; fixed with exact known phrases and regression. Final assembleDebug/testDebugUnitTest/lintDebug --offline PASS (31 tests, zero failures/errors); no Go source changed. Self-review only; no physical Android transport rerun.
+
+APK update via make install-apk FAILED: INSTALL_FAILED_UPDATE_INCOMPATIBLE (debug signing certificate differs from installed app). Did not uninstall or delete app data. APK built at normal debug path; need original signing key or explicit user choice before uninstall/reinstall. New diagnostics not on device yet. `/tmp` host remains temporary; permanent install/startup reliability deferred.
 
 ## Explicit new-thread permissions
 

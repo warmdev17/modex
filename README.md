@@ -109,6 +109,14 @@ Python 3 standard library only. Omit `--model` to use the configured model; `--r
 
 ## Thread permissions
 
+Android connection failures identify the failed step: local configuration/key,
+SSH authentication or network, verified fingerprint mismatch, remote executable,
+supervisor attachment or journal replay. Messages are fixed guidance; raw SSH
+errors and bounded remote stderr are never displayed or logged. Network guidance
+cannot distinguish an outdated IP from firewall/sshd/algorithm failures by itself.
+Disconnect intentionally does not show a transport failure. No automatic prompt
+retry, host-key acceptance or cursor reset is performed.
+
 Android's New conversation dialog offers Host default, Read-only, Workspace write
 and Full access. Host default sends no override and may inherit full access.
 Read-only and Workspace write request `on-request` approvals routed to the user;

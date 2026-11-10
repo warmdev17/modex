@@ -132,8 +132,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                         journal.frame(frame) { apply(it) }; persist()
                     } }
                 })
-            } catch (_: Exception) {
-                withContext(Dispatchers.Main) { if (transport === current) error = "Connection stopped. Check host fingerprint, key, host paths or replay gap. Reconnect to observe; do not resend uncertain prompts." }
+            } catch (failure: Exception) {
+                withContext(Dispatchers.Main) { if (transport === current && reconnectAllowed) error = (failure as? ConnectionFailure)?.message ?: "Connection stopped while applying session data. Reconnect to observe; do not resend uncertain prompts." }
             } finally {
                 copy.fill(0)
                 withContext(Dispatchers.Main) { if (transport === current) { connected = false; connecting = false; getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) } }
