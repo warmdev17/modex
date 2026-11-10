@@ -234,10 +234,15 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 					Turns []struct {
 						Status string `json:"status"`
 						Items  []struct {
-							ID      string `json:"id"`
-							Type    string `json:"type"`
-							Text    string `json:"text"`
-							Content []struct {
+							ID       string `json:"id"`
+							Command  string `json:"command"`
+							Cwd      string `json:"cwd"`
+							Status   string `json:"status"`
+							Output   string `json:"aggregatedOutput"`
+							ExitCode *int   `json:"exitCode"`
+							Type     string `json:"type"`
+							Text     string `json:"text"`
+							Content  []struct {
 								Type string `json:"type"`
 								Text string `json:"text"`
 							} `json:"content"`
@@ -251,13 +256,24 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			if response.Thread.Cwd != cwd {
 				return nil, errors.New("thread outside workspace")
 			}
-			messages := []map[string]string{}
+			messages := []map[string]any{}
 			active := false
+			outputBudget := 1024 * 1024
 			for _, turn := range response.Thread.Turns {
 				if turn.Status == "inProgress" {
 					active = true
 				}
 				for _, item := range turn.Items {
+					if item.Type == "commandExecution" {
+						output := item.Output
+						limit := min(65536, outputBudget)
+						if len(output) > limit {
+							output = strings.ToValidUTF8(output[:limit], "") + "\n[Output truncated; view full log on host]"
+						}
+						outputBudget -= min(len(item.Output), limit)
+						messages = append(messages, map[string]any{"id": item.ID, "role": "command", "text": output, "command": item.Command, "cwd": item.Cwd, "status": item.Status, "exit_code": item.ExitCode})
+						continue
+					}
 					role, text := "", ""
 					switch item.Type {
 					case "userMessage":
@@ -272,7 +288,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						text = item.Text
 					}
 					if role != "" && text != "" {
-						messages = append(messages, map[string]string{"id": item.ID, "role": role, "text": text})
+						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text})
 					}
 				}
 			}

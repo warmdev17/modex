@@ -36,7 +36,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var error by mutableStateOf(""); private set
     var threads by mutableStateOf(listOf<String>()); private set
     var selected by mutableStateOf(""); private set
-    var messages by mutableStateOf(listOf<Pair<String, String>>()); private set
+    internal var messages by mutableStateOf(listOf<ChatEntry>()); private set
     var decisions by mutableStateOf(listOf<JSONObject>()); private set
     var busy by mutableStateOf(false); private set
     var nextCursor by mutableStateOf<String?>(null); private set
@@ -60,7 +60,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 key = Base64.decode(data.getString("key"), Base64.NO_WRAP); keyLoaded = true
                 journal = JournalState(data.optString("instance").ifEmpty { null }, data.optLong("cursor"))
                 selected = data.optString("selected")
-                messages = readMessages(data.optJSONArray("messages") ?: JSONArray())
+                messages = readChat(data.optJSONArray("messages") ?: JSONArray())
                 decisions = data.optJSONArray("decisions")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } } ?: emptyList()
                 val requests = data.optJSONArray("pending") ?: JSONArray()
                 for (i in 0 until requests.length()) { val r = requests.getJSONObject(i); pending[r.getLong("id")] = r.getString("method") to r.getString("tag") }
@@ -72,7 +72,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         val privateKey = key ?: return
         val snapshot = JSONObject().put("connection", JSONObject().put("host", c.host).put("port", c.port).put("user", c.user).put("pin", c.pin).put("binary", c.binary).put("state", c.state))
             .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
-            .put("messages", JSONArray().apply { messages.forEach { put(JSONObject().put("role", if (it.first == "You") "user" else "assistant").put("text", it.second)) } })
+            .put("messages", JSONArray().apply { messages.forEach { put(it.toJson()) } })
             .put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
         val revision = saved.revision()
         saveJob?.cancel()
@@ -89,7 +89,6 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
         journal = JournalState(); config = null; savedConnection = null; pending.clear(); selected = ""; messages = emptyList(); decisions = emptyList(); threads = emptyList(); busy = false
     }
-    private fun readMessages(list: JSONArray) = (0 until list.length()).map { list.getJSONObject(it).let { m -> (if (m.getString("role") == "user") "You" else "Codex") to m.getString("text") } }
     private fun loadHistory() {
         if (selected.isBlank()) return
         historyLoading = true
@@ -155,7 +154,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     fun more() { nextCursor?.let { request("threads/list", JSONObject().put("limit", 50).put("cursor", it), "more") } }
     fun send(text: String): Boolean {
         if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank()) return false
-        messages = messages + ("You" to text); busy = true
+        messages = messages + ChatEntry(role = "You", text = text); busy = true
         request("turn/start", JSONObject().put("thread_id", selected).put("text", text))
         return true
     }
@@ -202,7 +201,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                         if (!result.has("messages")) {
                             error = "Update modex-host to load saved conversation history."
                         } else {
-                            messages = readMessages(result.getJSONArray("messages"))
+                            messages = readChat(result.getJSONArray("messages"))
                             busy = result.optBoolean("active_turn")
                         }
                     }
@@ -215,10 +214,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         when (frame.optString("event")) {
             "decision/required" -> if (decisions.none { it.optString("decision_id") == params.optString("decision_id") }) decisions = decisions + params
             "turn/started" -> if (params.optString("threadId") == selected) busy = true
-            "item/agentMessage/delta" -> if (params.optString("threadId") == selected) {
-                val text = params.optString("delta")
-                messages = if (messages.lastOrNull()?.first == "Codex") messages.dropLast(1) + ("Codex" to (messages.last().second + text)) else messages + ("Codex" to text)
-            }
+            "item/started", "item/completed", "item/agentMessage/delta", "item/commandExecution/outputDelta" ->
+                if (params.optString("threadId") == selected) messages = updateChat(messages, frame.getString("event"), params)
             "error" -> if (params.optString("threadId") == selected) {
                 turnFailure(params)?.let { error = it }
             }

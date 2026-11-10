@@ -35,7 +35,7 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
         if (!restore) {
             runOnMainSync { session.select("fixture-thread") }
         }
-        await { session.selected == "fixture-thread" && !session.historyLoading && session.messages.any { it.second == "Stored assistant reply" } }
+        await { session.selected == "fixture-thread" && !session.historyLoading && session.messages.any { it.text == "Stored assistant reply" } }
         Thread.sleep(700)
         val screenshot = uiAutomation.takeScreenshot() ?: error("No screenshot")
         File(targetContext.filesDir, "continuity-chat.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }

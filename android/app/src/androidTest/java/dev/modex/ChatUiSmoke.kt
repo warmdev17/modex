@@ -22,7 +22,7 @@ fun Instrumentation.chatUiSmoke() {
             ModexTheme { Surface { ChatWorkspace(
                 "laptop.local", true, false, current,
                 listOf("fixture-one","fixture-two"), mapOf("fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
-                listOf("You" to "Make this easier to use on my phone.", "Codex" to markdown), false, false, false, "", "",
+                listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone."), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
                 { current = it; selected = it }, {}, {}, { _, _ -> }, { attempted = it; false }, {}, {}
             ) } }
         } }
@@ -88,7 +88,7 @@ fun Instrumentation.historyScrollSmoke() {
     try {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var loading by mutableStateOf(false)
-        var messages by mutableStateOf(listOf("You" to "Old message"))
+        var messages by mutableStateOf(listOf(ChatEntry(role = "You", text = "Old message")))
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             "fixture", true, false, "history", listOf("history"), emptyMap(),
             messages, false, loading, false, "", "", {}, {}, {}, { _, _ -> }, { false }, {}, {}
@@ -97,7 +97,7 @@ fun Instrumentation.historyScrollSmoke() {
         runOnMainSync { loading = true }
         waitForIdleSync(); Thread.sleep(500)
         runOnMainSync {
-            messages = (0..199).map { "You" to if (it == 199) "LATEST_HISTORY_MARKER" else "Earlier message $it" }
+            messages = (0..199).map { ChatEntry(role = "You", text = if (it == 199) "LATEST_HISTORY_MARKER" else "Earlier message $it") }
             loading = false
         }
         fun visibleMarker(n: AccessibilityNodeInfo?): Boolean {
@@ -129,13 +129,13 @@ fun Instrumentation.historyScrollSmoke() {
             return null
         }
         val reading = earlierMessage(uiAutomation.rootInActiveWindow) ?: error("No older message visible")
-        runOnMainSync { messages = messages + ("You" to "New streaming message") }
+        runOnMainSync { messages = messages + ChatEntry(role = "You", text = "New streaming message") }
         waitForIdleSync(); Thread.sleep(700)
         check(earlierMessage(uiAutomation.rootInActiveWindow) == reading) { "New message stole the older-history position" }
         runOnMainSync { loading = true }
         waitForIdleSync(); Thread.sleep(500)
         runOnMainSync {
-            messages = messages.dropLast(1) + ("You" to ("Tall final message\n".repeat(100) + "LATEST_HISTORY_MARKER"))
+            messages = messages.dropLast(1) + ChatEntry(role = "You", text = ("Tall final message\n".repeat(100) + "LATEST_HISTORY_MARKER"))
             loading = false
         }
         val tallDeadline = System.currentTimeMillis() + 5000
@@ -143,5 +143,60 @@ fun Instrumentation.historyScrollSmoke() {
         check(visibleMarker(uiAutomation.rootInActiveWindow)) { "Reload did not reach tall final message" }
         output.putString("result", "PASS: 200-message async history, upward reading preserved on append, reload with tall final message")
         finish(-1, output)
-    } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message}"); finish(0, output) }
+    } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
+}
+
+/** Native command disclosure, driven by the same reducer as live Codex events. */
+fun Instrumentation.commandTimelineSmoke() {
+    val output = Bundle()
+    try {
+        val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        var messages by mutableStateOf(listOf(ChatEntry("a", "Codex", "Checking the workspace.")))
+        runOnMainSync {
+            messages = updateChat(messages, "item/started", org.json.JSONObject("""{"item":{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"inProgress"}}"""))
+            messages = updateChat(messages, "item/commandExecution/outputDelta", org.json.JSONObject("""{"itemId":"c","delta":"TOOL_OUTPUT_MARKER"}"""))
+            activity.setContent { ModexTheme { Surface { ChatWorkspace(
+                "fixture", true, false, "tools", listOf("tools"), emptyMap(), messages,
+                false, false, false, "", "", {}, {}, {}, { _, _ -> }, { false }, {}, {}
+            ) } } }
+        }
+        fun node(label: String, n: AccessibilityNodeInfo? = uiAutomation.rootInActiveWindow): AccessibilityNodeInfo? {
+            if (n == null) return null
+            if (n.isVisibleToUser && (n.text?.toString() == label || n.contentDescription?.toString() == label)) return n
+            for (i in 0 until n.childCount) node(label, n.getChild(i))?.let { return it }
+            return null
+        }
+        fun await(label: String): AccessibilityNodeInfo {
+            val deadline = System.currentTimeMillis() + 5000
+            while (System.currentTimeMillis() < deadline) { node(label)?.let { return it }; Thread.sleep(100) }
+            error("Missing $label")
+        }
+        fun click(label: String) {
+            var n: AccessibilityNodeInfo? = await(label)
+            while (n != null && !n.isClickable) n = n.parent
+            check(n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) { "Could not toggle $label" }
+            Thread.sleep(500)
+        }
+        fun shot(name: String) {
+            val bmp = uiAutomation.takeScreenshot() ?: error("No screenshot")
+            File(targetContext.filesDir, name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+            bmp.recycle()
+        }
+        await("Running"); await("go test ./...")
+        check(node("TOOL_OUTPUT_MARKER") == null) { "Output exposed while collapsed" }
+        shot("command-collapsed.png")
+        click("Expand command")
+        await("TOOL_OUTPUT_MARKER")
+        shot("command-expanded.png")
+        click("Collapse command")
+        val collapseDeadline = System.currentTimeMillis() + 5000
+        while (node("TOOL_OUTPUT_MARKER") != null && System.currentTimeMillis() < collapseDeadline) Thread.sleep(100)
+        shot("command-recollapsed.png")
+        check(node("TOOL_OUTPUT_MARKER") == null) { "Output still exposed after collapse" }
+        runOnMainSync { messages = updateChat(messages, "item/completed", org.json.JSONObject("""{"item":{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"completed","aggregatedOutput":"TOOL_OUTPUT_MARKER","exitCode":1}}""")) }
+        await("Failed · exit 1")
+        click("Expand command"); await("TOOL_OUTPUT_MARKER")
+        output.putString("result", "PASS: running card, hidden output, expand/collapse, failed exit status and retained output")
+        finish(-1, output)
+    } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
 }

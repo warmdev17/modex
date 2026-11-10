@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/android-history-scroll`; base `71bfc7b`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/command-timeline`; base `9ce071f`. Git records final commits.
+
+## Command timeline
+
+2026-11-11: typed chat entries preserve Codex item IDs, separate commentary/final messages and reduce command start/output/completion into one compact expandable card. Running/completed/failed status and exit code are visible; full command/cwd and plain selectable output appear on expansion. Legacy encrypted text history remains readable. Bridge history includes command entries; 64KiB per output and 1MiB total history-output budget with truncation notice. [Plan](docs/superpowers/plans/2026-11-11-command-timeline.md), [contract](docs/bridge-plan.md#command-timeline-extension-2026-11-11).
+
+Checks on final implementation: Go full suite and vet PASS. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS, 36 JVM tests, zero failures/errors; lint nine warnings. Emulator fixtures PASS for command running/hidden output/expand/collapse/failed exit and retained output, plus 200-message async history, upward-read preservation and tall-message reload. Expanded/collapsed emulator screenshots visually inspected. Physical phone APK in-place update PASS via adb install -r; data preserved. Device live-provider interaction not revalidated. No live provider turn. Reviewer agent failed with stream disconnect; self-review only. Existing host not restarted: live events work with existing forwarding, but command history requires new host binary/restart when no active work. File changes/MCP tool-specific cards remain outside this slice.
 
 ## History scroll fix
 

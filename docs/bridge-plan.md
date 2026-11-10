@@ -64,3 +64,9 @@ Ruling: keep existing uncommitted workspace and no auto-commits; use PROJECT_STA
 - [x] Project returned thread metadata and runtime model; reject malformed or out-of-workspace responses.
 - [x] Test model inheritance, explicit selection, invalid parameters, forbidden overrides and metadata projection.
 - [x] Real provider validation: new Modex-created thread with `gpt-6.1-sol` streamed the exact marker and completed successfully. Existing-thread handoff and one-time command approval also passed in the same live run.
+
+## Command timeline extension (2026-11-11)
+
+`threads/read` messages may additionally have `role: command`, stable `id`, `command`, `cwd`, `status`, nullable integer `exit_code`, and plain output in `text`. Text roles remain `user`/`assistant`. Command output is bounded to 64 KiB per item and 1 MiB total per history response, with a visible truncation notice; original Codex logs are unchanged. Existing frame limits still apply to the full response.
+
+Android reduces forwarded `item/started`, `item/completed`, `item/agentMessage/delta`, and `item/commandExecution/outputDelta` by item ID after selected-thread validation. This separates commentary/final messages and keeps each command's state and output in one collapsible card. Existing text-only saved state remains readable. This does not enumerate OS processes, expose additional execution controls or change approval policy.

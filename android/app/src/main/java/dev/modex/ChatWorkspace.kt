@@ -52,7 +52,7 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
 @Composable
 internal fun ChatWorkspace(
     host: String, connected: Boolean, connecting: Boolean, selected: String,
-    threads: List<String>, titles: Map<String,String>, messages: List<Pair<String,String>>,
+    threads: List<String>, titles: Map<String,String>, messages: List<ChatEntry>,
     busy: Boolean, historyLoading: Boolean, hasMore: Boolean, error: String, sessionSettings: String,
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
     onCreate: (String, String) -> Unit, onSend: (String) -> Boolean,
@@ -131,7 +131,7 @@ internal fun ChatWorkspace(
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
             var openAtLatest by remember(selected) { mutableStateOf(true) }
-            LaunchedEffect(selected, historyLoading, messages.size, messages.lastOrNull()?.second) {
+            LaunchedEffect(selected, historyLoading, messages.size, messages.lastOrNull()) {
                 if (historyLoading) {
                     openAtLatest = true
                     return@LaunchedEffect
@@ -152,12 +152,13 @@ internal fun ChatWorkspace(
                     if (selected.isBlank()) TextButton(onClick = { newChat = true }, enabled = canSwitch, modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
                 }
             } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                items(messages) { (role, body) ->
+                items(messages) { entry ->
+                    val role = entry.role; val body = entry.text
                     if (role == "You") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         Surface(color = Mocha.Surface, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(0.9f)) {
                             SelectionContainer { Text(body, Modifier.padding(14.dp), style = MaterialTheme.typography.bodyLarge) }
                         }
-                    } else MarkdownMessage(body)
+                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(body)
                 }
                 item { Spacer(Modifier.height(1.dp)) }
             }

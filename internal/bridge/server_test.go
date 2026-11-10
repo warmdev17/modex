@@ -272,7 +272,7 @@ func TestStoredHistoryTextAndWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(result)
-	if !strings.Contains(string(raw), `"role":"user"`) || !strings.Contains(string(raw), `"text":"hi"`) || strings.Contains(string(raw), "private") {
+	if !strings.Contains(string(raw), `"role":"user"`) || !strings.Contains(string(raw), `"text":"hi"`) || !strings.Contains(string(raw), `"role":"command"`) {
 		t.Fatalf("unexpected history %s", raw)
 	}
 	if _, err = Handle(context.Background(), "/elsewhere", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true}`)}, call); err == nil {
@@ -288,5 +288,36 @@ func TestListPreservesCodexSessionName(t *testing.T) {
 	raw, _ := json.Marshal(result)
 	if err != nil || !strings.Contains(string(raw), `"name":"Modex mobile"`) {
 		t.Fatalf("result=%s err=%v", raw, err)
+	}
+}
+
+func TestStoredHistoryIncludesCommandLifecycle(t *testing.T) {
+	call := func(context.Context, string, any) (json.RawMessage, error) {
+		return json.RawMessage(`{"thread":{"id":"one","cwd":"/work","turns":[{"status":"inProgress","items":[{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"inProgress","aggregatedOutput":"PASS","exitCode":null}]}]}}`), nil
+	}
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true}`)}, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(result)
+	if !strings.Contains(string(raw), `"role":"command"`) || !strings.Contains(string(raw), `"command":"go test ./..."`) || !strings.Contains(string(raw), `"text":"PASS"`) || !strings.Contains(string(raw), `"status":"inProgress"`) {
+		t.Fatalf("missing command: %s", raw)
+	}
+}
+
+func TestCommandHistoryOutputBudget(t *testing.T) {
+	var items []map[string]any
+	for i := 0; i < 30; i++ {
+		items = append(items, map[string]any{"id": fmt.Sprint(i), "type": "commandExecution", "command": "echo output", "status": "completed", "aggregatedOutput": strings.Repeat("界", 30000), "exitCode": 0})
+	}
+	raw, _ := json.Marshal(map[string]any{"thread": map[string]any{"id": "one", "cwd": "/work", "turns": []any{map[string]any{"items": items}}}})
+	call := func(context.Context, string, any) (json.RawMessage, error) { return raw, nil }
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true}`)}, call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(result)
+	if len(encoded) > 1150000 || !strings.Contains(string(encoded), "truncated") {
+		t.Fatalf("output budget not applied: %d bytes", len(encoded))
 	}
 }
