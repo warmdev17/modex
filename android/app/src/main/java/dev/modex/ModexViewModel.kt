@@ -41,6 +41,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var busy by mutableStateOf(false); private set
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
+    var sessionModel by mutableStateOf(""); private set
     var keyLoaded by mutableStateOf(false); private set
     private var key: ByteArray? = null
     private var config: Connection? = null
@@ -139,7 +140,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun disconnect() { sessionSettings = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
+    fun disconnect() { sessionSettings = ""; sessionModel = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
     fun create(model: String, mode: String) {
         if (busy || historyLoading || switching()) return
         sessionSettings = ""
@@ -152,10 +153,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun refreshThreads() { request("threads/list", JSONObject().put("limit", 50)) }
     fun more() { nextCursor?.let { request("threads/list", JSONObject().put("limit", 50).put("cursor", it), "more") } }
-    fun send(text: String): Boolean {
+    fun send(text: String, model: String): Boolean {
         if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank()) return false
         messages = messages + ChatEntry(role = "You", text = text); busy = true
-        request("turn/start", JSONObject().put("thread_id", selected).put("text", text))
+        request("turn/start", turnStartParams(selected, text, model), model.trim())
         return true
     }
     fun answer(decision: JSONObject, result: JSONObject) {
@@ -191,6 +192,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 "threads/start", "threads/resume" -> {
                     error = ""
                     sessionSettings = sessionSettingsLabel(result)
+                    sessionModel = result.optString("model")
                     selected = result.getJSONObject("thread").getString("id")
                     threads = (listOf(selected) + threads).distinct()
                     if (operation.first == "threads/start") {
@@ -212,6 +214,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 "decision/respond" -> decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
+                "turn/start" -> if (operation.second.isNotBlank()) sessionModel = operation.second
             }
             return
         }

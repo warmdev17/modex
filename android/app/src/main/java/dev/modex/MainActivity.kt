@@ -85,7 +85,7 @@ private fun ModexApp() {
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
             busy = vm.busy, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
-            onCreate = vm::create, onSend = vm::send, onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect
+            onCreate = vm::create, onSend = { vm.send(it, "") }, onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect
         )
     } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

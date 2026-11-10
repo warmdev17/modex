@@ -66,6 +66,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	case "turn/start":
 		allowed["thread_id"] = true
 		allowed["text"] = true
+		allowed["model"] = true
 	case "decision/respond":
 		allowed["decision_id"] = true
 		allowed["result"] = true
@@ -188,6 +189,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if json.Unmarshal(p["text"], &text) != nil || strings.TrimSpace(text) == "" {
 			return nil, errors.New("text is required")
 		}
+		var model string
+		if raw, ok := p["model"]; ok {
+			if json.Unmarshal(raw, &model) != nil || strings.TrimSpace(model) == "" || len(model) > 256 || strings.ContainsAny(model, "\r\n\x00") {
+				return nil, errors.New("model must be a nonempty single-line string up to 256 bytes")
+			}
+		}
 		raw, err := fetch("thread/read", map[string]any{"threadId": id, "includeTurns": false})
 		if err != nil {
 			return nil, err
@@ -201,7 +208,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if metadata.Thread.Cwd != cwd {
 			return nil, errors.New("thread outside workspace")
 		}
-		return fetch("turn/start", map[string]any{"threadId": id, "input": []map[string]string{{"type": "text", "text": text}}})
+		params := map[string]any{"threadId": id, "input": []map[string]string{{"type": "text", "text": text}}}
+		if model != "" {
+			params["model"] = model
+		}
+		return fetch("turn/start", params)
 	case "decision/respond":
 		var id string
 		if json.Unmarshal(p["decision_id"], &id) != nil || id == "" {

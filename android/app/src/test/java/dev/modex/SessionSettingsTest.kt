@@ -14,6 +14,11 @@ class SessionSettingsTest {
         assertEquals("read-only", params.getString("permission_mode"))
         assertEquals("custom-model", params.getString("model"))
     }
+    @Test fun turnModelIsOptionalAndValidatedBySharedBuilder() {
+        assertFalse(turnStartParams("thread", "hello", "").has("model"))
+        assertEquals("gpt-5.6-sol", turnStartParams("thread", "hello", "gpt-5.6-sol").getString("model"))
+        assertEquals("custom-model", turnStartParams("thread", "hello", " custom-model ").getString("model"))
+    }
     @Test fun missingSettingsAreUnknown() {
         val label = sessionSettingsLabel(JSONObject())
         assertTrue(label.contains("Sandbox: Unknown"))

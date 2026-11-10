@@ -165,6 +165,40 @@ func TestTurnStartValidatesThreadAndEmitsNotification(t *testing.T) {
 	}
 }
 
+func TestTurnStartForwardsOptionalModel(t *testing.T) {
+	for _, tc := range []struct{ name, raw, model string }{
+		{"current", `{"thread_id":"thread-1","text":"hello"}`, ""},
+		{"override", `{"thread_id":"thread-1","text":"hello","model":"gpt-5.6-sol"}`, "gpt-5.6-sol"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := func(_ context.Context, method string, params any) (json.RawMessage, error) {
+				if method == "thread/read" {
+					return json.RawMessage(`{"thread":{"id":"thread-1","cwd":"/work"}}`), nil
+				}
+				p := params.(map[string]any)
+				if method != "turn/start" || (tc.model == "" && p["model"] != nil) || (tc.model != "" && p["model"] != tc.model) {
+					t.Fatalf("method=%s params=%v", method, p)
+				}
+				return json.RawMessage(`{"turn":{"id":"t1"}}`), nil
+			}
+			if _, err := Handle(context.Background(), "/work", Command{Method: "turn/start", Params: json.RawMessage(tc.raw)}, call); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTurnStartRejectsInvalidModelBeforeUpstream(t *testing.T) {
+	for _, model := range []string{"null", `""`, `"   "`, "42", `"bad\nmodel"`, `"` + strings.Repeat("m", 257) + `"`} {
+		calls := 0
+		call := func(context.Context, string, any) (json.RawMessage, error) { calls++; return nil, nil }
+		raw := `{"thread_id":"thread-1","text":"hello","model":` + model + `}`
+		if _, err := Handle(context.Background(), "/work", Command{Method: "turn/start", Params: json.RawMessage(raw)}, call); err == nil || calls != 0 {
+			t.Fatalf("model=%s calls=%d err=%v", model, calls, err)
+		}
+	}
+}
+
 func TestUpstreamErrorIsRedacted(t *testing.T) {
 	caller := func(context.Context, string, any) (json.RawMessage, error) { return nil, fmt.Errorf("secret-key") }
 	var out bytes.Buffer

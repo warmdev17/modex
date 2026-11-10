@@ -17,6 +17,11 @@ internal fun newThreadParams(model: String, mode: String): JSONObject {
     }
 }
 
+internal fun turnStartParams(thread: String, text: String, model: String): JSONObject =
+    JSONObject().put("thread_id", thread).put("text", text).apply {
+        if (model.isNotBlank()) put("model", model.trim())
+    }
+
 internal fun sessionSettingsLabel(result: JSONObject): String {
     fun value(key: String) = result.optString(key).ifBlank { "Unknown" }
     val sandbox = when (result.optString("sandbox")) {
