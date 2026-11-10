@@ -182,7 +182,7 @@ fun Instrumentation.commandTimelineSmoke() {
             File(targetContext.filesDir, name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
             bmp.recycle()
         }
-        await("Running"); await("go test ./...")
+        await("Terminal activity"); await("Running"); await("go test ./...")
         check(node("TOOL_OUTPUT_MARKER") == null) { "Output exposed while collapsed" }
         shot("command-collapsed.png")
         click("Expand command")

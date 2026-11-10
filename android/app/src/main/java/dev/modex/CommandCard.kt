@@ -27,36 +27,38 @@ internal fun CommandCard(entry: ChatEntry) {
     val failed = entry.status in listOf("failed", "declined") || (entry.exitCode != null && entry.exitCode != 0)
     val status = when { running -> "Running"; failed -> "Failed"; entry.status == "completed" -> "Completed"; else -> "Status unknown" }
     val color = when { failed -> MaterialTheme.colorScheme.error; running -> Mocha.Blue; else -> Mocha.Subtext }
-    Surface(color = Mocha.Mantle, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-        Column {
-            Surface(onClick = { expanded = !expanded }, color = Mocha.Mantle,
-                modifier = Modifier.fillMaxWidth().semantics {
+    Column(Modifier.fillMaxWidth()) {
+        Surface(onClick = { expanded = !expanded }, color = MaterialTheme.colorScheme.background,
+            shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().semantics {
                     contentDescription = if (expanded) "Collapse command" else "Expand command"
                     stateDescription = "$status, ${if (expanded) "expanded" else "collapsed"}"
-                }) {
-                Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (running) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = color)
-                    Column(Modifier.weight(1f)) {
-                        Text(entry.command.lineSequence().firstOrNull().orEmpty().ifBlank { "Shell command" }, maxLines = 1, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                        Text(status + (entry.exitCode?.let { " · exit $it" } ?: ""), color = color, style = MaterialTheme.typography.labelSmall)
-                    }
-                    val iconColor = Mocha.Subtext
-                    Canvas(Modifier.size(18.dp)) {
-                        val mid = size.height / 2
-                        val dy = if (expanded) -3.dp.toPx() else 3.dp.toPx()
-                        drawLine(iconColor, Offset(3.dp.toPx(), mid-dy/2), Offset(size.width/2, mid+dy/2), 1.8.dp.toPx(), StrokeCap.Round)
-                        drawLine(iconColor, Offset(size.width/2, mid+dy/2), Offset(size.width-3.dp.toPx(), mid-dy/2), 1.8.dp.toPx(), StrokeCap.Round)
-                    }
+            }) {
+            Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 2.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Canvas(Modifier.size(18.dp).semantics { contentDescription = "Terminal activity" }) {
+                    val stroke = 1.6.dp.toPx()
+                    drawLine(Mocha.Subtext, Offset(2.dp.toPx(), 4.dp.toPx()), Offset(7.dp.toPx(), 9.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(Mocha.Subtext, Offset(7.dp.toPx(), 9.dp.toPx()), Offset(2.dp.toPx(), 14.dp.toPx()), stroke, StrokeCap.Round)
+                    drawLine(Mocha.Subtext, Offset(9.dp.toPx(), 14.dp.toPx()), Offset(16.dp.toPx(), 14.dp.toPx()), stroke, StrokeCap.Round)
+                }
+                if (running) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 1.5.dp, color = color)
+                Column(Modifier.weight(1f)) {
+                    Text(entry.command.lineSequence().firstOrNull().orEmpty().ifBlank { "Shell command" }, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    Text(status + (entry.exitCode?.let { " · exit $it" } ?: ""), color = color, style = MaterialTheme.typography.labelSmall)
+                }
+                Canvas(Modifier.size(14.dp)) {
+                    val mid = size.height / 2
+                    val dy = if (expanded) -2.dp.toPx() else 2.dp.toPx()
+                    drawLine(Mocha.Subtext, Offset(2.dp.toPx(), mid-dy/2), Offset(size.width/2, mid+dy/2), 1.5.dp.toPx(), StrokeCap.Round)
+                    drawLine(Mocha.Subtext, Offset(size.width/2, mid+dy/2), Offset(size.width-2.dp.toPx(), mid-dy/2), 1.5.dp.toPx(), StrokeCap.Round)
                 }
             }
-            if (expanded) {
-                HorizontalDivider(color = Mocha.Surface)
-                SelectionContainer {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (entry.cwd.isNotBlank()) Text(entry.cwd, color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
-                        Text(entry.command, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.horizontalScroll(rememberScrollState()))
-                        Text(entry.text.ifEmpty { if (running) "Waiting for output…" else "No output" }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.horizontalScroll(rememberScrollState()))
-                    }
+        }
+        if (expanded) Surface(color = Mocha.Mantle, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().padding(start = 26.dp, top = 4.dp)) {
+            SelectionContainer {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (entry.cwd.isNotBlank()) Text(entry.cwd, color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+                    Text(entry.command, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.horizontalScroll(rememberScrollState()))
+                    Text(entry.text.ifEmpty { if (running) "Waiting for output…" else "No output" }, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.horizontalScroll(rememberScrollState()))
                 }
             }
         }
