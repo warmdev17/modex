@@ -59,13 +59,25 @@ private fun ModexApp() {
     var connectionSettings by rememberSaveable { mutableStateOf(false) }; var importError by rememberSaveable { mutableStateOf("") }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) try {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-                val output = java.io.ByteArrayOutputStream()
-                val chunk = ByteArray(4096)
-                while (true) { val count = input.read(chunk); if (count < 0) break; require(output.size() + count <= 256 * 1024); output.write(chunk, 0, count) }
-                output.toByteArray() } ?: error("No file")
+            if (vm.connected || vm.connecting) {
+                importError = "Disconnect before replacing the SSH key."
+                return@rememberLauncherForActivityResult
+            }
+            val bytes = context.contentResolver.openInputStream(uri)?.use(::readImportedKey)
+                ?: throw java.io.IOException()
             vm.importKey(bytes); importError = ""
-        } catch (_: Exception) { importError = "Could not import key. Select an unencrypted private key under 256 KiB." }
+        } catch (_: SecurityException) {
+            importError = "Android denied access to this file. Copy it to Downloads and select it again."
+        } catch (_: java.io.IOException) {
+            importError = "Could not read this file. Copy it to Downloads on this phone and select it again."
+        } catch (error: IllegalArgumentException) {
+            importError = when (error.message) {
+                "The selected file is empty.", "The selected file exceeds 256 KiB." -> error.message!!
+                else -> "Could not import key. Disconnect and select the file again."
+            }
+        } catch (_: Exception) {
+            importError = "The file provider could not open this file. Copy it to Downloads and select it again."
+        }
     }
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
         ChatWorkspace(
@@ -97,7 +109,12 @@ private fun ModexApp() {
                 OutlinedTextField(pin, { pin = it }, label = { Text("Verified SHA256 host fingerprint") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(binary, { binary = it }, label = { Text("Remote modex-host path") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(state, { state = it }, label = { Text("Remote supervisor state directory") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedButton(onClick = { keyPicker.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) { Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH private key") }
+                OutlinedButton(onClick = {
+                    // Returning from the picker must not auto-reconnect with the old key.
+                    vm.disconnect()
+                    importError = ""
+                    keyPicker.launch(arrayOf("*/*"))
+                }, modifier = Modifier.fillMaxWidth()) { Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH private key") }
                 Text("Your key and connection are encrypted on this device. Use Forget saved host to remove them. Passphrase keys are not supported yet.", style = MaterialTheme.typography.bodySmall)
                 if (importError.isNotEmpty()) Text(importError, color = MaterialTheme.colorScheme.error)
                 Button(onClick = { vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary, state)); connectionSettings = false }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }

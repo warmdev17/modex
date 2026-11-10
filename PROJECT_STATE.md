@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `chore/host-make-targets`; base `be8a153`. Git records final commits.
+Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `fix/android-key-import-errors`; base `15d7276`. Git records final commits.
+
+## SSH key import troubleshooting
+
+User reports both private-key files fail import after USB transfer. Local originals have OpenSSH headers, no encryption and are below 1 KiB; phone copies not verified. Existing catch-all message incorrectly suggested encryption for every exception. File picker resumes Activity, whose foreground handler can auto-connect a saved profile before import; import rejects connected/connecting state. Disable reconnect via existing disconnect before launching picker, retain state guard with clear guidance, distinguish denied access, unreadable/provider error, empty and oversized file. Key bytes/errors are not logged; import preserves prior key on failed read. No new format validation or passphrase support.
+
+Checks on uncommitted fix: four reader tests PASS (byte preservation, exact limit, empty/oversized, I/O failure), full JVM suite PASS; assembleDebug/lintDebug PASS. First concurrent Gradle invocations collided in Kotlin cache; tests rerun successfully after build finished. Physical phone visible over ADB but picker/import and auto-reconnect race not runtime-verified; APK built, not installed. No Go changes or repeated Go suite.
 
 ## Host Make targets
 
