@@ -193,7 +193,12 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     sessionSettings = sessionSettingsLabel(result)
                     selected = result.getJSONObject("thread").getString("id")
                     threads = (listOf(selected) + threads).distinct()
-                    loadHistory()
+                    if (operation.first == "threads/start") {
+                        // Codex cannot read persisted turns until a new thread has its first turn.
+                        messages = emptyList()
+                        busy = false
+                        historyLoading = false
+                    } else loadHistory()
                 }
                 "threads/read" -> {
                     if (operation.second == selected) {

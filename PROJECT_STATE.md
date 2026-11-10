@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/command-timeline`; base `9ce071f`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/new-chat-empty-history`; base `dab46a9`. Git records final commits.
+
+## New-chat empty-history fix
+
+2026-11-11: branch `fix/new-chat-empty-history`, base `dab46a9`. A fresh Codex thread is created successfully but rejects `thread/read includeTurns=true` before its first turn; Android previously issued that read immediately and surfaced the rejection as if creation had failed. New chats now clear the prior transcript/running state and accept a first prompt immediately; resumed sessions still load persisted history.
+
+Checks on the final tree: Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS. Emulator regression first failed at `New chat must not read unpersisted history`, then PASS after the fix while also checking that resume still requests history. Fresh and persistent-host probes with `gpt-5.6-sol`/Host default both created empty threads; the persistent probe reproduced only the immediate history-read rejection. No provider, keyring, host, or transport configuration changed. Physical-phone New chat is not yet revalidated with the fixed APK.
 
 ## Command timeline
 
