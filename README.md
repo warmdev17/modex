@@ -109,6 +109,31 @@ Python 3 standard library only. Omit `--model` to use the configured model; `--r
 
 ## Background supervisor (Linux/macOS)
 
+From the repository root, use:
+
+```sh
+make host          # build and start in the background
+make host-attach   # attach JSON stdin/stdout; EOF detaches
+make host-stop     # stop the supervisor
+```
+
+Defaults: binary `/tmp/modex-host`, workspace = current repository, state directory
+`$HOME/.local/state/modex-phone`, Codex executable `codex`. Match the binary and
+state paths in the phone's connection settings. Override them when needed:
+
+```sh
+make host WORKSPACE=/absolute/path/to/project STATE_DIR=/private/path/modex-state CODEX=/path/to/codex
+make host-stop STATE_DIR=/private/path/modex-state
+```
+
+`make host-build` only builds; `HOST_BINARY=/absolute/path/modex-host` changes the
+output path (its parent directory must exist). Builds replace the binary atomically;
+an already running supervisor keeps its old executable until explicitly stopped
+and started again. Starting while one is running fails without restarting it.
+The default `/tmp` binary may be removed at reboot; run `make host` to rebuild.
+These targets inherit your Codex configuration and do not enable approval prompts
+or select an approval-testing wrapper automatically.
+
 Build a stable executable first (do not use an ephemeral `go run` binary for a long-lived supervisor):
 
 ```sh

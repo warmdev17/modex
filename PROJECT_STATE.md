@@ -1,6 +1,10 @@
 # Modex project state
 
-Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `feat/android-mocha-chat-ui`; base `9022eb7`. This snapshot accompanies the native UI redesign; Git records final commits.
+Updated: 2026-11-10, Asia/Ho_Chi_Minh. Branch: `chore/host-make-targets`; base `be8a153`. Git records final commits.
+
+## Host Make targets
+
+Added `host-build`, `host` (background), `host-attach`, `host-stop`; existing default Android target unchanged. Defaults `/tmp/modex-host`, current workspace, `$HOME/.local/state/modex-phone`, `codex`; overrides documented in README. Atomic binary replacement does not restart existing supervisors or preserve an approval wrapper automatically. Checks on uncommitted milestone: actual build PASS, dry-run with spaced paths/default Android goal PASS, isolated fake-provider Make start/attach/stop lifecycle with spaced workspace/state/Codex paths PASS (loopback permission required). Stop acknowledgement precedes asynchronous endpoint cleanup; fixture waited for removal. No live phone supervisor stopped/restarted; no paid provider or Android checks for this Makefile-only change.
 
 ## Current troubleshooting
 
