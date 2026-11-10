@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 internal enum class ChatIcon { Menu, New, Send, More, Close }
 
@@ -129,9 +130,20 @@ internal fun ChatWorkspace(
             }
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
-            LaunchedEffect(selected, messages.lastOrNull()?.second) {
-                val nearBottom = scroll.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it >= messages.lastIndex - 2 } ?: true
-                if (messages.isNotEmpty() && nearBottom) scroll.scrollToItem(messages.lastIndex)
+            var openAtLatest by remember(selected) { mutableStateOf(true) }
+            LaunchedEffect(selected, historyLoading, messages.size, messages.lastOrNull()?.second) {
+                if (historyLoading) {
+                    openAtLatest = true
+                    return@LaunchedEffect
+                }
+                val layout = scroll.layoutInfo
+                val nearBottom = layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 2 } ?: true
+                if (messages.isNotEmpty() && (openAtLatest || nearBottom)) {
+                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == messages.size + 1 }
+                    // The final spacer anchors the bottom even when the last message is taller than the viewport.
+                    scroll.scrollToItem(messages.size)
+                    openAtLatest = false
+                }
             }
             if (messages.isEmpty()) {
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {
@@ -147,6 +159,7 @@ internal fun ChatWorkspace(
                         }
                     } else MarkdownMessage(body)
                 }
+                item { Spacer(Modifier.height(1.dp)) }
             }
             PromptComposer(prompt, { updatePrompt(it) }, busy, connected && !historyLoading && selected.isNotBlank() && !busy) {
                 if (onSend(prompt)) updatePrompt("")

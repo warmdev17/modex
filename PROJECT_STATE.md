@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/android-connection-diagnostics`; base `ffb88b9`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/android-history-scroll`; base `71bfc7b`. Git records final commits.
+
+## History scroll fix
+
+2026-11-11: branch `fix/android-history-scroll`, base `71bfc7b`. Opening/reloading history scrolls to its newest content after layout; a tail anchor reaches the bottom of a tall final message. New messages preserve intentional upward reading. Existing chat fixture updated for current permission callbacks.
+
+Checks: assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (31 JVM tests, no failures; lint zero errors, nine warnings). Emulator history-scroll fixture PASS: asynchronous 200-message history, older-reading position unchanged on append, reload with tall final message. Original implementation failed newest-message regression. APK built, not yet installed on physical phone. No Go/provider/host changes. Next: separate command execution cards and message IDs per user's follow-up.
 
 ## Connection diagnostics and live host recovery
 

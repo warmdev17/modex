@@ -22,8 +22,8 @@ fun Instrumentation.chatUiSmoke() {
             ModexTheme { Surface { ChatWorkspace(
                 "laptop.local", true, false, current,
                 listOf("fixture-one","fixture-two"), mapOf("fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
-                listOf("You" to "Make this easier to use on my phone.", "Codex" to markdown), false, false, false, "",
-                { current = it; selected = it }, {}, {}, {}, { attempted = it; false }, {}, {}
+                listOf("You" to "Make this easier to use on my phone.", "Codex" to markdown), false, false, false, "", "",
+                { current = it; selected = it }, {}, {}, { _, _ -> }, { attempted = it; false }, {}, {}
             ) } }
         } }
         fun node(label: String): AccessibilityNodeInfo? {
@@ -80,4 +80,68 @@ fun Instrumentation.chatUiSmoke() {
         output.putString("result", "PASS: Mocha chat, code copy, drawer selection, rejected-send draft retained, composer focus")
         finish(-1,output)
     } catch (e: Throwable) { output.putString("result","FAIL: ${e.javaClass.simpleName}: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0,output) }
+}
+
+/** Regression: history arrives after the list has already laid out at its beginning. */
+fun Instrumentation.historyScrollSmoke() {
+    val output = Bundle()
+    try {
+        val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        var loading by mutableStateOf(false)
+        var messages by mutableStateOf(listOf("You" to "Old message"))
+        runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
+            "fixture", true, false, "history", listOf("history"), emptyMap(),
+            messages, false, loading, false, "", "", {}, {}, {}, { _, _ -> }, { false }, {}, {}
+        ) } } } }
+        waitForIdleSync(); Thread.sleep(700)
+        runOnMainSync { loading = true }
+        waitForIdleSync(); Thread.sleep(500)
+        runOnMainSync {
+            messages = (0..199).map { "You" to if (it == 199) "LATEST_HISTORY_MARKER" else "Earlier message $it" }
+            loading = false
+        }
+        fun visibleMarker(n: AccessibilityNodeInfo?): Boolean {
+            if (n == null) return false
+            if (n.isVisibleToUser && n.text?.toString()?.endsWith("LATEST_HISTORY_MARKER") == true) return true
+            return (0 until n.childCount).any { visibleMarker(n.getChild(it)) }
+        }
+        val deadline = System.currentTimeMillis() + 5000
+        while (!visibleMarker(uiAutomation.rootInActiveWindow) && System.currentTimeMillis() < deadline) Thread.sleep(100)
+        check(visibleMarker(uiAutomation.rootInActiveWindow)) {
+            fun labels(n: AccessibilityNodeInfo?): String = if (n == null) "null" else "[${n.text}|${n.contentDescription}]" + (0 until n.childCount).joinToString { labels(n.getChild(it)) }
+            "History opened at the beginning: ${labels(uiAutomation.rootInActiveWindow)}"
+        }
+        fun scrollable(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (n == null) return null
+            if (n.isScrollable) return n
+            for (i in 0 until n.childCount) scrollable(n.getChild(i))?.let { return it }
+            return null
+        }
+        repeat(1) {
+            check(scrollable(uiAutomation.rootInActiveWindow)?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD) == true) { "Cannot scroll history" }
+            Thread.sleep(700)
+        }
+        check(!visibleMarker(uiAutomation.rootInActiveWindow)) { "Fixture did not scroll to older messages" }
+        fun earlierMessage(n: AccessibilityNodeInfo?): String? {
+            if (n == null) return null
+            if (n.isVisibleToUser && n.text?.toString()?.contains("Earlier message") == true) return n.text.toString()
+            for (i in 0 until n.childCount) earlierMessage(n.getChild(i))?.let { return it }
+            return null
+        }
+        val reading = earlierMessage(uiAutomation.rootInActiveWindow) ?: error("No older message visible")
+        runOnMainSync { messages = messages + ("You" to "New streaming message") }
+        waitForIdleSync(); Thread.sleep(700)
+        check(earlierMessage(uiAutomation.rootInActiveWindow) == reading) { "New message stole the older-history position" }
+        runOnMainSync { loading = true }
+        waitForIdleSync(); Thread.sleep(500)
+        runOnMainSync {
+            messages = messages.dropLast(1) + ("You" to ("Tall final message\n".repeat(100) + "LATEST_HISTORY_MARKER"))
+            loading = false
+        }
+        val tallDeadline = System.currentTimeMillis() + 5000
+        while (!visibleMarker(uiAutomation.rootInActiveWindow) && System.currentTimeMillis() < tallDeadline) Thread.sleep(100)
+        check(visibleMarker(uiAutomation.rootInActiveWindow)) { "Reload did not reach tall final message" }
+        output.putString("result", "PASS: 200-message async history, upward reading preserved on append, reload with tall final message")
+        finish(-1, output)
+    } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message}"); finish(0, output) }
 }
