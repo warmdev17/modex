@@ -1,6 +1,10 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/model-catalog-reasoning`; base `e05e86a`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/reasoning-modal-layout`; base `889ae86`. Git records final commits.
+
+## Reasoning modal layout fix
+
+Descriptions varied in line count and resized the centered model dialog during slider changes. `ReasoningControl` now reserves the maximum description height at the current width/font scale, with sizing-only copies removed from accessibility semantics. Visible descriptions remain complete. Emulator regression first reproduced a 28px shift in the Use model button; after the fix identical button bounds PASS when changing from long Keep current text to short high description. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (39 JVM tests, no failures). APK rebuilt; no physical-phone installation or font-scale/device matrix checked. No host/protocol changes.
 
 ## Model catalog and reasoning
 

@@ -71,8 +71,12 @@ fun Instrumentation.chatUiSmoke() {
         val sliderDeadline = System.currentTimeMillis() + 5000
         while (node("Reasoning effort") == null && System.currentTimeMillis() < sliderDeadline) Thread.sleep(100)
         val slider = node("Reasoning effort") ?: error("Reasoning slider missing")
+        val initialConfirmBounds = android.graphics.Rect().also { node("Use model")!!.getBoundsInScreen(it) }
         val sliderArgs = Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 3f) }
         check(slider.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, sliderArgs))
+        waitForIdleSync(); Thread.sleep(500)
+        val changedConfirmBounds = android.graphics.Rect().also { node("Use model")!!.getBoundsInScreen(it) }
+        check(initialConfirmBounds == changedConfirmBounds) { "Reasoning description resized modal: $initialConfirmBounds -> $changedConfirmBounds" }
         click("Use model")
         check(node("fixture-custom · high") != null) { "Queued model is not shown in composer" }
         fun shell(command: String) {

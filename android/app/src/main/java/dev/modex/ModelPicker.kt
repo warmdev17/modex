@@ -6,6 +6,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -59,7 +60,13 @@ internal fun ReasoningControl(model: ModelOption?, value: String, onChange: (Str
             valueRange = 0f..choices.lastIndex.toFloat(), steps = (choices.size - 2).coerceAtLeast(0),
             colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color),
             modifier = Modifier.semantics { contentDescription = "Reasoning effort" })
-        Text(choices[index].second, style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+        Box(Modifier.fillMaxWidth()) {
+            // Reserve the tallest description at the current width and font scale.
+            choices.forEach { (_, description) ->
+                Text(description, style = MaterialTheme.typography.bodySmall, color = Color.Transparent, modifier = Modifier.clearAndSetSemantics {})
+            }
+            Text(choices[index].second, style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+        }
         if (model != null && model.defaultEffort.isNotBlank()) Text("Model default: ${model.defaultEffort}", style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
     }
 }
