@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/hide-internal-codex-sessions`; base `77320c3`. Git records final commits.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/desktop-project-roots`; base `649f850`. Git records final commits.
+
+## Explicit Desktop projects
+
+[Plan](docs/superpowers/plans/2026-11-12-desktop-projects.md), [contract](docs/bridge-plan.md#canonical-desktop-projects-2026-11-12). Host commits `13b3bfb` and `7f18b5f` expose canonical project/list and explicit membership, including bounded read-only compatibility with Desktop legacy assignments using the child CODEX_HOME. Canonical IDs win and projectless exclusions are respected. Android lists registered projects (including empty ones) and groups only explicit members; standalone cwd no longer creates fake projects. Recents remains unchanged. Project discovery errors remain isolated and never hide Recents.
+
+Evidence: full Go tests/vet and bridge race PASS. Real read-only host query returned exactly modex/codjingrank/det/.codex, 13 interactive sessions and 3 explicit memberships. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS. Emulator chat-ui fixture PASS: registered folders, standalone ssh-x20 excluded from Projects, model/reasoning and composer regression checks; drawer screenshot visually inspected. Emulator fixture apps replaced after signature mismatch; physical phone untouched. Self-review only. No prompt sent, Desktop state written, supervisor restarted, push or merge. APK ready at normal debug path; host rebuild/restart when idle and APK update required for phone validation. Physical phone runtime, Windows/macOS and older Codex project/list support unverified. Legacy state schema may change; missing/invalid metadata leaves chats in Recents.
 
 ## Hide internal review sessions
 

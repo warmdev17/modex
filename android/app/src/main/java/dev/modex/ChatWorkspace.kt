@@ -63,7 +63,8 @@ internal fun ChatWorkspace(
     onCreate: (String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
-    threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false
+    threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
+    registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = ""
 ) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -108,18 +109,21 @@ internal fun ChatWorkspace(
                     TextButton(onClick = onRefresh, enabled = connected && !threadListLoading) { Text("Refresh") }
                 }
                 val visible = threads.filter { (titles[it] ?: it).contains(search, ignoreCase = true) || it.contains(search,ignoreCase = true) || threadWorkspaces[it].orEmpty().contains(search, ignoreCase = true) }
-                val projects = visible.groupBy { threadWorkspaces[it].orEmpty() }
+                val projects = projectSessions(registeredProjects, visible, projectMembership)
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (visible.isEmpty()) item { Text(if (threadListLoading) "Loading sessions…" else if (search.isBlank()) "No conversations yet" else "No matching conversations", Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodyMedium) }
                     item { Text("Projects", Modifier.padding(horizontal = 12.dp, vertical = 10.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
-                    projects.forEach { (path, ids) ->
+                    if (projectStatus.isNotEmpty()) item { Text(projectStatus, Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall) }
+                    registeredProjects.filter { search.isBlank() || projects[it.id].orEmpty().isNotEmpty() || it.name.contains(search, true) || it.roots.any { root -> root.contains(search,true) } }.forEach { project ->
+                        val path = project.id
+                        val ids = projects[path].orEmpty()
                         item(key = "folder:$path") {
                             Surface(onClick = { collapsedProjects = ArrayList(collapsedProjects).apply { if (path in this) remove(path) else add(path) } }, color = Mocha.Mantle, shape = RoundedCornerShape(6.dp)) {
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     ChatGlyph(ChatIcon.Folder)
                                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                                        Text(projectName(path), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        if (path.isNotEmpty()) Text(path, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(project.name.ifBlank { projectName(project.roots.firstOrNull().orEmpty()) }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (project.roots.isNotEmpty()) Text(project.roots.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     Text(if (path in collapsedProjects) "›" else "⌄", color = Mocha.Subtext)
                                 }

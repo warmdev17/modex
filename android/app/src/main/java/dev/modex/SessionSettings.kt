@@ -66,3 +66,19 @@ internal fun withWorkspace(params: JSONObject, workspace: String): JSONObject = 
 }
 
 internal fun projectName(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifBlank { path.ifBlank { "Other sessions" } }
+
+internal data class RemoteProject(val id: String, val name: String, val roots: List<String>)
+
+internal fun readProjects(result: JSONObject): List<RemoteProject> {
+    val data = result.optJSONArray("data") ?: return emptyList()
+    return (0 until data.length()).mapNotNull { i ->
+        val p = data.optJSONObject(i) ?: return@mapNotNull null
+        val id = p.optString("id")
+        if (id.isBlank()) return@mapNotNull null
+        val roots = p.optJSONArray("roots")
+        RemoteProject(id, p.optString("name"), (0 until (roots?.length() ?: 0)).mapNotNull { j -> roots?.optJSONObject(j)?.optString("path")?.takeIf { it.isNotBlank() } })
+    }
+}
+
+internal fun projectSessions(projects: List<RemoteProject>, threads: List<String>, membership: Map<String,String>): Map<String,List<String>> =
+    projects.associate { project -> project.id to threads.filter { membership[it] == project.id } }

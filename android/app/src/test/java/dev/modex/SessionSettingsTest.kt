@@ -44,6 +44,13 @@ class SessionSettingsTest {
         assertEquals("/other", result.getString("workspace"))
         assertFalse(withWorkspace(JSONObject(), "").has("workspace"))
     }
+    @Test fun standaloneChatNeverBecomesAProjectFromItsFolder() {
+        val projects = listOf(RemoteProject("real", "Modex", listOf("/work/modex")), RemoteProject("empty", "Empty", listOf("/work/empty")))
+        val groups = projectSessions(projects, listOf("member", "standalone"), mapOf("member" to "real"))
+        assertEquals(listOf("member"), groups["real"])
+        assertEquals(emptyList<String>(), groups["empty"])
+        assertFalse(groups.values.flatten().contains("standalone"))
+    }
     @Test fun missingSettingsAreUnknown() {
         val label = sessionSettingsLabel(JSONObject())
         assertTrue(label.contains("Sandbox: Unknown"))

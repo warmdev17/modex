@@ -28,6 +28,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private val saved = SavedHost(application)
     var savedConnection by mutableStateOf<Connection?>(null); private set
     private var reconnectAllowed = true
+    internal var projects by mutableStateOf(emptyList<RemoteProject>()); private set
+    var projectMembership by mutableStateOf(mapOf<String,String>()); private set
+    var projectStatus by mutableStateOf(""); private set
+    private val projectCursors = mutableSetOf<String>()
     var threadWorkspaces by mutableStateOf(mapOf<String,String>()); private set
     var selectedWorkspace by mutableStateOf(""); private set
     private val threadCursors = mutableSetOf<String>()
@@ -101,7 +105,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         sessionSettings = ""
         disconnect(); transport = null; connected = false; connecting = false; reconnectAllowed = false; saveJob?.cancel()
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
-        threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap()
+        threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
         journal = JournalState(); config = null; savedConnection = null; pending.clear(); selected = ""; messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList(); busy = false
     }
     private fun loadHistory() {
@@ -169,6 +173,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun refreshThreads() {
         if (!connected || threadListLoading) return
+        projects = emptyList(); projectCursors.clear(); projectStatus = "Loading projects…"
+        request("projects/list", JSONObject().put("limit", 100))
         threadCursors.clear(); threadListLoading = true
         request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true))
     }
@@ -204,6 +210,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (frame.has("id")) {
             val operation = pending.remove(frame.getLong("id")) ?: return
             if (frame.has("error")) {
+                if (operation.first == "projects/list") { projectStatus = "Project list unavailable. Update the host/Codex; chats remain in Recents."; return }
                 if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
                 if (operation.first == "turn/start") busy = false
                 if (operation.first == "threads/read") historyLoading = false
@@ -213,6 +220,12 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             }
             val result = frame.optJSONObject("result") ?: return
             when (operation.first) {
+                "projects/list" -> {
+                    projects = (projects + readProjects(result)).distinctBy { it.id }
+                    val cursor = if (result.isNull("next_cursor")) "" else result.optString("next_cursor")
+                    if (cursor.isNotEmpty() && projectCursors.add(cursor)) request("projects/list", JSONObject().put("limit",100).put("cursor",cursor))
+                    else projectStatus = if (cursor.isNotEmpty()) "Project listing stopped: repeated cursor." else ""
+                }
                 "models/list" -> {
                     models = (models + readModels(result)).distinctBy { it.model }
                     val cursor = if (result.isNull("next_cursor")) "" else result.optString("next_cursor")
@@ -225,6 +238,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     val list = result.optJSONArray("data") ?: JSONArray()
                     titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
                     val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
+                    val membership = (0 until list.length()).mapNotNull { i -> val t = list.getJSONObject(i); if (t.isNull("projectId")) null else t.getString("id") to t.optString("projectId") }.toMap()
+                    projectMembership = if (operation.second == "more") projectMembership + membership else membership
                     threadWorkspaces = if (operation.second == "more") threadWorkspaces + paths else paths
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }
                     threads = if (operation.second == "more") (threads + ids).distinct() else ids

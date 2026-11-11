@@ -23,10 +23,10 @@ fun Instrumentation.chatUiSmoke() {
             var current by remember { mutableStateOf(selected) }
             ModexTheme { Surface { ChatWorkspace(
                 "laptop.local", true, false, current,
-                listOf("fixture-one","fixture-two"), mapOf("fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
+                listOf("fixture-one","fixture-two","standalone"), mapOf("standalone" to "Standalone chat", "fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
                 listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone."), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
                 "gpt-5.6-sol", emptyList(), emptySet(),
-                { current = it; selected = it }, {}, {}, { _, _ -> }, { text, model, effort -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, threadWorkspaces = mapOf("fixture-one" to "/work/modex", "fixture-two" to "/work/other"), models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
+                { current = it; selected = it }, {}, {}, { _, _ -> }, { text, model, effort -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, registeredProjects = listOf(RemoteProject("p1", "modex", listOf("/work/modex")), RemoteProject("p2", "other", listOf("/work/other"))), projectMembership = mapOf("fixture-one" to "p1", "fixture-two" to "p2"), threadWorkspaces = mapOf("fixture-one" to "/work/modex", "fixture-two" to "/work/other", "standalone" to "/generated/ssh-x20"), models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
             ) } }
         } }
         fun node(label: String): AccessibilityNodeInfo? {
@@ -67,6 +67,7 @@ fun Instrumentation.chatUiSmoke() {
         check(node("Projects") != null) { "Project section missing" }
         check(node("/work/modex") != null) { "Project path missing" }
         check(node("/work/other") != null) { "Second project missing" }
+        check(node("ssh-x20") == null && node("/generated/ssh-x20") == null) { "Standalone chat generated a project" }
         shot("drawer-mocha.png")
         click("SSH approval flow")
         runOnMainSync { check(selected == "fixture-two") }
