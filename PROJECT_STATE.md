@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/inline-agent-controls`; base `e880d73`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/model-catalog-reasoning`; base `e05e86a`. Git records final commits.
+
+## Model catalog and reasoning
+
+[Plan](docs/superpowers/plans/2026-11-11-model-catalog.md), [contract](docs/bridge-plan.md#model-catalog-and-reasoning-extension-2026-11-11). Bridge catalog/effort milestone `f58e524`. Android requests visible model pages from Codex on connect; errors stay local to the picker and custom model ID remains available. Composer model control is left aligned; New chat uses the same picker. Discrete reasoning slider uses advertised effort strings, with distinct Mocha colors for low/medium/high/xhigh/max/ultra. Changing model clears the queued effort; custom models without advertised efforts retain Codex's current/host setting. Choices send on next explicit prompt and remain scoped to the thread. Selecting Keep current omits effort; it does not reset a previous override.
+
+Evidence: full Go tests/vet and bridge race PASS. Read-only real Codex app-server catalog returned nine models including max/ultra; no provider prompt sent. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (39 JVM tests, no failures; lint 0 errors/12 warnings). Emulator chat-ui fixture PASS: dropdown selection, slider high reaching send, rejected-send draft retention, drawer and code copy. Dialog/composer screenshots visually inspected. First fixture lacked a wait for slider semantics; adding bounded wait passed. An initial concurrent Gradle compilation hit backend/cache errors; sequential rebuild passed. Final reviewer agent disconnected; self-review only. Physical phone and provider inference with chosen effort not tested. No supervisor restart, install on physical phone, push or merge. Rebuild/restart host when idle and install new APK before phone testing.
 
 ## Inline agent controls
 

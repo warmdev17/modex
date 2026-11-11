@@ -58,8 +58,9 @@ internal fun ChatWorkspace(
     busy: Boolean, historyLoading: Boolean, hasMore: Boolean, error: String, sessionSettings: String,
     sessionModel: String, decisions: List<JSONObject>, answeringDecisionIds: Set<String>,
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
-    onCreate: (String, String) -> Unit, onSend: (String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
-    onConnection: () -> Unit, onDisconnect: () -> Unit
+    onCreate: (String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
+    onConnection: () -> Unit, onDisconnect: () -> Unit,
+    models: List<ModelOption> = emptyList(), modelCatalogStatus: String = ""
 ) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -74,6 +75,8 @@ internal fun ChatWorkspace(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf("") }
     var queuedModels by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
+    var queuedEfforts by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
+    var effortInput by rememberSaveable { mutableStateOf("") }
     val queuedModel = queuedModels[selected].orEmpty()
     LaunchedEffect(selected, sessionModel) {
         if (queuedModel.isNotBlank() && queuedModel == sessionModel) queuedModels = HashMap(queuedModels).apply { remove(selected) }
@@ -178,11 +181,11 @@ internal fun ChatWorkspace(
             }
             PromptComposer(
                 prompt, { updatePrompt(it) }, busy,
-                queuedModel.ifBlank { sessionModel.ifBlank { "Host model" } }, connected && selected.isNotBlank(),
-                { modelInput = queuedModel.ifBlank { sessionModel }; showModel = true },
+                (queuedModel.ifBlank { sessionModel.ifBlank { "Host model" } } + queuedEfforts[selected].orEmpty().let { if (it.isEmpty()) "" else " · $it" }), connected && selected.isNotBlank(),
+                { modelInput = queuedModel.ifBlank { sessionModel }; effortInput = queuedEfforts[selected].orEmpty(); showModel = true },
                 connected && !historyLoading && selected.isNotBlank() && !busy
             ) {
-                if (onSend(prompt, queuedModel)) updatePrompt("")
+                if (onSend(prompt, queuedModel, queuedEfforts[selected].orEmpty())) updatePrompt("")
             }
         }
     }
@@ -190,7 +193,7 @@ internal fun ChatWorkspace(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Uses your host’s provider and workspace.", color = Mocha.Subtext)
-            OutlinedTextField(model, { model = it }, label = { Text("Model (optional)") }, placeholder = { Text("Host default") }, singleLine = true)
+            ModelPicker(models, modelCatalogStatus, model, { model = it })
             Column(Modifier.selectableGroup()) {
                 permissionModes.forEach { (mode, label) ->
                     Row(Modifier.fillMaxWidth().selectable(selected = permissionMode == mode, role = Role.RadioButton, onClick = { permissionMode = mode }).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -206,7 +209,7 @@ internal fun ChatWorkspace(
                 else -> "Requests user approval when sandbox restrictions need to be lifted. Host policy may restrict this mode."
             }, style = MaterialTheme.typography.bodySmall, color = if (permissionMode == "full-access") MaterialTheme.colorScheme.error else Mocha.Subtext)
         } },
-        confirmButton = { TextButton(enabled = canSwitch, onClick = { onCreate(model.trim(), permissionMode); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
+        confirmButton = { TextButton(enabled = canSwitch && validModelId(model), onClick = { onCreate(model.trim(), permissionMode); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
         dismissButton = { TextButton(onClick = { newChat = false }) { Text("Cancel") } }
     )
     if (showSettings) AlertDialog(
@@ -217,16 +220,15 @@ internal fun ChatWorkspace(
     if (showModel) AlertDialog(
         onDismissRequest = { showModel = false },
         title = { Text("Model for next turn") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Codex applies this model to the next turn and later turns in this session.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
-            OutlinedTextField(
-                modelInput, { modelInput = it }, singleLine = true, isError = !validModelId(modelInput),
-                label = { Text("Model ID") }, placeholder = { Text(sessionModel.ifBlank { "Host model" }) }, modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text(if (validModelId(modelInput)) "Leave empty to keep the current session model." else "Use a single-line model ID up to 256 UTF-8 bytes.") }
-            )
+            ModelPicker(models, modelCatalogStatus, modelInput, { modelInput = it; effortInput = "" })
+            ReasoningControl(models.firstOrNull { it.model == modelInput.trim() }, effortInput) { effortInput = it }
+
         } },
         confirmButton = { TextButton(enabled = validModelId(modelInput), onClick = {
             queuedModels = HashMap(queuedModels).apply { if (modelInput.isEmpty()) remove(selected) else put(selected, modelInput.trim()) }
+            queuedEfforts = HashMap(queuedEfforts).apply { if (effortInput.isEmpty()) remove(selected) else put(selected, effortInput) }
             showModel = false
         }) { Text("Use model") } },
         dismissButton = { TextButton(onClick = { showModel = false }) { Text("Cancel") } }
@@ -245,10 +247,12 @@ private fun PromptComposer(prompt: String, onChange: (String) -> Unit, busy: Boo
                     onClick = onModel, enabled = modelEnabled, shape = RoundedCornerShape(6.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
                 ) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
                     ChatGlyph(ChatIcon.Model)
                     Spacer(Modifier.width(6.dp))
-                    Text(model, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                    Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
                     if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
+                    }
                 }
                 FilledIconButton(onClick = onSend, enabled = enabled && prompt.isNotBlank(), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Mocha.Blue) else ChatGlyph(ChatIcon.Send,"Send message")

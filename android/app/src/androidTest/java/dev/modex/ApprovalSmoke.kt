@@ -41,7 +41,7 @@ fun Instrumentation.approvalPreview() {
                 ModexTheme { Surface { ChatWorkspace(
                     "fixture", connected, false, "approval-preview", listOf("approval-preview"), emptyMap(),
                     emptyList(), false, false, false, "", "", "fixture-model", decisions, emptySet(),
-                    {}, {}, {}, { _, _ -> }, { _, _ -> false }, { _, _ -> }, {}, {}
+                    {}, {}, {}, { _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {}
                 ) } }
             }
         }

@@ -43,6 +43,9 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
     var sessionModel by mutableStateOf(""); private set
+    internal var models by mutableStateOf(emptyList<ModelOption>()); private set
+    var modelCatalogStatus by mutableStateOf(""); private set
+    private val modelCursors = mutableSetOf<String>()
     var keyLoaded by mutableStateOf(false); private set
     private var key: ByteArray? = null
     private var config: Connection? = null
@@ -127,6 +130,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) {
                         check(transport === current)
                         connecting = false; connected = true
+                        models = emptyList(); modelCursors.clear(); modelCatalogStatus = "Loading models…"
+                        request("models/list", JSONObject().put("limit", 100))
                         refreshThreads()
                         loadHistory()
                     } }
@@ -157,10 +162,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun refreshThreads() { request("threads/list", JSONObject().put("limit", 50)) }
     fun more() { nextCursor?.let { request("threads/list", JSONObject().put("limit", 50).put("cursor", it), "more") } }
-    fun send(text: String, model: String): Boolean {
-        if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank() || !validModelId(model)) return false
+    fun send(text: String, model: String, effort: String = ""): Boolean {
+        if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank() || !validModelId(model) || !validEffort(effort)) return false
         messages = messages + ChatEntry(role = "You", text = text); busy = true
-        request("turn/start", turnStartParams(selected, text, model), model.trim())
+        request("turn/start", turnStartParams(selected, text, model, effort), model.trim())
         return true
     }
     fun answer(decision: JSONObject, result: JSONObject) {
@@ -185,6 +190,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (frame.has("id")) {
             val operation = pending.remove(frame.getLong("id")) ?: return
             if (frame.has("error")) {
+                if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
                 if (operation.first == "turn/start") busy = false
                 if (operation.first == "threads/read") historyLoading = false
                 if (operation.first == "decision/respond") answeringDecisionIds -= operation.second
@@ -192,6 +198,13 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             }
             val result = frame.optJSONObject("result") ?: return
             when (operation.first) {
+                "models/list" -> {
+                    models = (models + readModels(result)).distinctBy { it.model }
+                    val cursor = if (result.isNull("next_cursor")) "" else result.optString("next_cursor")
+                    if (cursor.isNotEmpty() && modelCursors.add(cursor) && modelCursors.size <= 100) {
+                        request("models/list", JSONObject().put("limit", 100).put("cursor", cursor))
+                    } else modelCatalogStatus = if (cursor.isNotEmpty()) "Model list truncated. Custom IDs remain available." else if (models.isEmpty()) "No models advertised. Enter a custom model ID." else ""
+                }
                 "threads/list" -> {
                     if (error.startsWith("Host rejected threads/list")) error = ""
                     val list = result.optJSONArray("data") ?: JSONArray()

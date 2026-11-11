@@ -18,6 +18,7 @@ fun Instrumentation.chatUiSmoke() {
         var selected = "fixture-one"
         var attempted = ""
         var attemptedModel = ""
+        var attemptedEffort = ""
         runOnMainSync { activity.setContent {
             var current by remember { mutableStateOf(selected) }
             ModexTheme { Surface { ChatWorkspace(
@@ -25,7 +26,7 @@ fun Instrumentation.chatUiSmoke() {
                 listOf("fixture-one","fixture-two"), mapOf("fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
                 listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone."), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
                 "gpt-5.6-sol", emptyList(), emptySet(),
-                { current = it; selected = it }, {}, {}, { _, _ -> }, { text, model -> attempted = text; attemptedModel = model; false }, { _, _ -> }, {}, {}
+                { current = it; selected = it }, {}, {}, { _, _ -> }, { text, model, effort -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
             ) } }
         } }
         fun node(label: String): AccessibilityNodeInfo? {
@@ -64,13 +65,16 @@ fun Instrumentation.chatUiSmoke() {
         click("SSH approval flow")
         runOnMainSync { check(selected == "fixture-two") }
         click("Choose model")
-        var modelField = node("Model ID")
-        while (modelField != null && !modelField.isEditable) modelField = modelField.parent
-        check(modelField != null) { "Model ID field is not editable" }
-        val modelArgs = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "fixture-custom") }
-        check(modelField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, modelArgs)) { "Cannot enter model ID" }
+        click("gpt-5.6-sol")
+        click("Fixture custom")
+        shot("model-reasoning.png")
+        val sliderDeadline = System.currentTimeMillis() + 5000
+        while (node("Reasoning effort") == null && System.currentTimeMillis() < sliderDeadline) Thread.sleep(100)
+        val slider = node("Reasoning effort") ?: error("Reasoning slider missing")
+        val sliderArgs = Bundle().apply { putFloat(AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 3f) }
+        check(slider.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, sliderArgs))
         click("Use model")
-        check(node("fixture-custom") != null) { "Queued model is not shown in composer" }
+        check(node("fixture-custom · high") != null) { "Queued model is not shown in composer" }
         fun shell(command: String) {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand(command)).use { it.readBytes() }
         }
@@ -84,7 +88,8 @@ fun Instrumentation.chatUiSmoke() {
         click("Send message")
         runOnMainSync {
             check(attempted == "Keep this draft") { "Fixture did not type draft" }
-            check(attemptedModel == "fixture-custom") { "Queued model did not reach send" }
+            check(attemptedModel == "fixture-custom")
+            check(attemptedEffort == "high") { "Queued reasoning did not reach send" }
             attempted = ""
         }
         click("Send message")
@@ -109,7 +114,7 @@ fun Instrumentation.historyScrollSmoke() {
         var messages by mutableStateOf(listOf(ChatEntry(role = "You", text = "Old message")))
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             "fixture", true, false, "history", listOf("history"), emptyMap(),
-            messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _ -> }, { _, _ -> false }, { _, _ -> }, {}, {}
+            messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {}
         ) } } } }
         waitForIdleSync(); Thread.sleep(700)
         runOnMainSync { loading = true }
@@ -175,7 +180,7 @@ fun Instrumentation.commandTimelineSmoke() {
             messages = updateChat(messages, "item/commandExecution/outputDelta", org.json.JSONObject("""{"itemId":"c","delta":"TOOL_OUTPUT_MARKER"}"""))
             activity.setContent { ModexTheme { Surface { ChatWorkspace(
                 "fixture", true, false, "tools", listOf("tools"), emptyMap(), messages,
-                false, false, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _ -> }, { _, _ -> false }, { _, _ -> }, {}, {}
+                false, false, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {}
             ) } } }
         }
         fun node(label: String, n: AccessibilityNodeInfo? = uiAutomation.rootInActiveWindow): AccessibilityNodeInfo? {

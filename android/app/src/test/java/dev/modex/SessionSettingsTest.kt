@@ -27,6 +27,15 @@ class SessionSettingsTest {
         assertFalse(validModelId("m".repeat(257)))
         assertFalse(validModelId("é".repeat(129)))
     }
+    @Test fun catalogUsesModelIdAndOnlyAdvertisedEfforts() {
+        val models = readModels(JSONObject("""{"data":[{"id":"picker-id","model":"custom","displayName":"Custom","defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"low","description":"Fast"},{"reasoningEffort":"medium","description":"Balanced"}]}]}"""))
+        assertEquals("custom", models.single().model)
+        assertEquals(listOf("low", "medium"), models.single().efforts.map { it.first })
+        assertEquals("medium", models.single().defaultEffort)
+        assertEquals("high", turnStartParams("t", "hello", "custom", "high").getString("effort"))
+        assertFalse(turnStartParams("t", "hello", "custom", "").has("effort"))
+        assertFalse(validEffort("bad\neffort"))
+    }
     @Test fun missingSettingsAreUnknown() {
         val label = sessionSettingsLabel(JSONObject())
         assertTrue(label.contains("Sandbox: Unknown"))
