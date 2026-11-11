@@ -1,6 +1,10 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Publication integration: `main` from `chore/publish-github`, based on `1b2ba2e`. Git records final commits.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `chore/remove-unused-design-system`; base `c106c0c`. Git records final commits.
+
+## Unused design artifact cleanup
+
+Removed the unreferenced generated web design master (233 lines, purple/cyan CSS, web fonts and landing-page guidance). Current UI decisions remain in the Mocha chat spec/plan and Android ModexTheme.kt; no unique current requirement was lost. Tracked-file inventory, build manifests, README links, script imports and instrumentation dispatch were inspected. Runtime source, tests, smoke scripts, Gradle wrapper and protocol/design history retained: lack of runtime imports alone does not make these unused. No code/dependency/build changes. Validation: removed-path reference scan and unchanged runtime/build tree comparison; no emulator/device/provider tests needed for this documentation-only cut. Recover the removed artifact from base c106c0c if required. No merge or push in this cleanup.
 
 ## GitHub publication
 
