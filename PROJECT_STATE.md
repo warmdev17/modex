@@ -1,0 +1,191 @@
+# Modex project state
+
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Publication integration: `main` from `chore/publish-github`, based on `1b2ba2e`. Git records final commits.
+
+## GitHub publication
+
+User authorized publication to `git@github.com:warmdev17/modex.git`, retaining every commit without squash. Remote inspected empty; all local feature/fix branch tips are ancestors of `1b2ba2e` (38 existing commits). Integrate into main with an explicit merge commit; publish main with all reachable history, keeping local branches. No history rewrite or force push. Pre-publication checks on `1b2ba2e`: Go full suite/vet PASS; Android assembleDebug/testDebugUnitTest/lintDebug offline PASS; Python unittest discovery PASS (2 checks, 3 integration tests skipped without fixture binaries). Pattern scan of 263 historical blobs found no private-key/API-token matches; this is a bounded scan, not a guarantee. Python bytecode ignored at repository root. No emulator started, phone changes, or supervisor restart. Remote push verification belongs to the final handoff.
+
+## Explicit Desktop projects
+
+[Plan](docs/superpowers/plans/2026-11-12-desktop-projects.md), [contract](docs/bridge-plan.md#canonical-desktop-projects-2026-11-12). Host commits `13b3bfb` and `7f18b5f` expose canonical project/list and explicit membership, including bounded read-only compatibility with Desktop legacy assignments using the child CODEX_HOME. Canonical IDs win and projectless exclusions are respected. Android lists registered projects (including empty ones) and groups only explicit members; standalone cwd no longer creates fake projects. Recents remains unchanged. Project discovery errors remain isolated and never hide Recents.
+
+Evidence: full Go tests/vet and bridge race PASS. Real read-only host query returned exactly modex/codjingrank/det/.codex, 13 interactive sessions and 3 explicit memberships. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS. Emulator chat-ui fixture PASS: registered folders, standalone ssh-x20 excluded from Projects, model/reasoning and composer regression checks; drawer screenshot visually inspected. Emulator fixture apps replaced after signature mismatch; physical phone untouched. Self-review only. No prompt sent, Desktop state written, supervisor restarted, push or merge. APK ready at normal debug path; host rebuild/restart when idle and APK update required for phone validation. Physical phone runtime, Windows/macOS and older Codex project/list support unverified. Legacy state schema may change; missing/invalid metadata leaves chats in Recents.
+
+## Hide internal review sessions
+
+All-source sidebar discovery had included Guardian approval conversations. Real read-only source inspection confirmed 43 Guardian review threads classified as subAgent.other=guardian. Bridge now requests only cli/vscode/appServer sources in both workspace modes, across all projects/providers. It never filters by title/path and deletes nothing. Real filtered query returned 13 interactive sessions across 11 paths with no internal sources. Regression observed failing before fix; full Go tests/vet PASS. Android unchanged; APK rebuild unnecessary. Running supervisor not restarted; phone refresh requires updated host when idle. Desktop-created cwd under Documents/Codex remains legitimate. No live phone recheck or prompts sent.
+
+## Stable Android debug signing
+
+Phone update rejected new APK certificate ae6929…; installed package on Android guest user had certificate 6c1a50…, matching existing ~/.android/debug.keystore. Re-signed current APK with that existing key and adb install -r on device 24d2ee04 PASS; no uninstall/data clear. Build now pins debug storeFile to user.home/.android/debug.keystore independent of Gradle cache. Keystore remains local and is not committed. Final assembleDebug PASS; generated APK certificate verified matching 6c1a50… old key. App UI not opened automatically; no phone inference recheck.
+
+## Remote project sidebar
+
+[Plan](docs/superpowers/plans/2026-11-11-remote-project-sidebar.md), [contract](docs/bridge-plan.md#remote-project-extension-2026-11-11). Bridge `b73e826` retains default workspace confinement but accepts explicit absolute workspace on thread start/read/resume/turn, with exact ID/cwd validation. All-workspace listing now includes interactive sources across providers (internal-source correction above), ordered by updated_at, excludes archived sessions. Android follows list pages automatically, groups by full cwd with folder icons and collapsible Projects plus Recents, searches titles/paths, selected rows Blue/Base. Selected cwd is stored in existing encrypted snapshot and passed on history/resume/send/new chat. Project folders derive from Codex sessions; desktop-private pinned/empty-project metadata is not imported.
+
+Evidence: Go full tests/vet and bridge race PASS. Read-only real Codex list returned 56 sessions across 16 paths; two-page list and cross-project metadata read PASS. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (40 JVM tests, no failures, lint 0 errors/13 warnings). Emulator sidebar fixture PASS for two project paths and selecting another session, with model/effort and draft regressions; screenshot visually confirms folder icons and Blue/Base selected rows. Fixture needed bounded wait for drawer accessibility after opening. Gradle cache was missing; dependency download/build succeeded. Reviewer agent stream disconnected; self-review fallback. No existing session resumed or sent prompts; host not restarted and physical phone not updated. Cross-project live inference/resume and Windows/macOS runtime not validated.
+
+## Reasoning modal layout fix
+
+Descriptions varied in line count and resized the centered model dialog during slider changes. `ReasoningControl` now reserves the maximum description height at the current width/font scale, with sizing-only copies removed from accessibility semantics. Visible descriptions remain complete. Emulator regression first reproduced a 28px shift in the Use model button; after the fix identical button bounds PASS when changing from long Keep current text to short high description. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (39 JVM tests, no failures). APK rebuilt; no physical-phone installation or font-scale/device matrix checked. No host/protocol changes.
+
+## Model catalog and reasoning
+
+[Plan](docs/superpowers/plans/2026-11-11-model-catalog.md), [contract](docs/bridge-plan.md#model-catalog-and-reasoning-extension-2026-11-11). Bridge catalog/effort milestone `f58e524`. Android requests visible model pages from Codex on connect; errors stay local to the picker and custom model ID remains available. Composer model control is left aligned; New chat uses the same picker. Discrete reasoning slider uses advertised effort strings, with distinct Mocha colors for low/medium/high/xhigh/max/ultra. Changing model clears the queued effort; custom models without advertised efforts retain Codex's current/host setting. Choices send on next explicit prompt and remain scoped to the thread. Selecting Keep current omits effort; it does not reset a previous override.
+
+Evidence: full Go tests/vet and bridge race PASS. Read-only real Codex app-server catalog returned nine models including max/ultra; no provider prompt sent. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (39 JVM tests, no failures; lint 0 errors/12 warnings). Emulator chat-ui fixture PASS: dropdown selection, slider high reaching send, rejected-send draft retention, drawer and code copy. Dialog/composer screenshots visually inspected. First fixture lacked a wait for slider semantics; adding bounded wait passed. An initial concurrent Gradle compilation hit backend/cache errors; sequential rebuild passed. Final reviewer agent disconnected; self-review only. Physical phone and provider inference with chosen effort not tested. No supervisor restart, install on physical phone, push or merge. Rebuild/restart host when idle and install new APK before phone testing.
+
+## Inline agent controls
+
+[Design](docs/superpowers/specs/2026-11-11-inline-agent-controls-design.md), [plan](docs/superpowers/plans/2026-11-11-inline-agent-controls.md). Bridge optional per-turn model override committed at `b554f9a`; muted expandable terminal rows committed at `507a0db`. Composer now queues a validated free-form model ID per session; omission keeps the current model. Approvals and non-secret question inputs render inline for the selected thread, with disabled disconnected/in-flight actions. Question drafts use saved Compose state so lazy-list disposal does not discard answers. File-change acceptance remains disabled pending a diff viewer.
+
+Verification: full Go suite and vet PASS on 2026-11-11; Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS on the final uncommitted tree (38 JVM tests, zero failures/errors; lint 11 warnings). Earlier emulator fixtures PASS for model selection reaching Send, rejected-send draft retention, inline approvals/questions, selected-thread filtering, disconnected controls, compact terminal expansion/status, history scroll and fresh New chat. Production-context screenshots visually inspected. Final saved-question-state/defensive-guard edits compile; runtime recheck pending because ADB currently has no devices. Independent reviewer failed to start with stream disconnect; self-review fallback. No live model-switch provider turn or physical-phone install in this slice. Existing supervisor was not restarted; per-turn override needs the new host binary before phone testing. No merge/push.
+
+## New-chat empty-history fix
+
+2026-11-11: branch `fix/new-chat-empty-history`, base `dab46a9`. A fresh Codex thread is created successfully but rejects `thread/read includeTurns=true` before its first turn; Android previously issued that read immediately and surfaced the rejection as if creation had failed. New chats now clear the prior transcript/running state and accept a first prompt immediately; resumed sessions still load persisted history.
+
+Checks on the final tree: Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS. Emulator regression first failed at `New chat must not read unpersisted history`, then PASS after the fix while also checking that resume still requests history. Fresh and persistent-host probes with `gpt-5.6-sol`/Host default both created empty threads; the persistent probe reproduced only the immediate history-read rejection. No provider, keyring, host, or transport configuration changed. Physical-phone New chat is not yet revalidated with the fixed APK.
+
+## Command timeline
+
+2026-11-11: typed chat entries preserve Codex item IDs, separate commentary/final messages and reduce command start/output/completion into one compact expandable card. Running/completed/failed status and exit code are visible; full command/cwd and plain selectable output appear on expansion. Legacy encrypted text history remains readable. Bridge history includes command entries; 64KiB per output and 1MiB total history-output budget with truncation notice. [Plan](docs/superpowers/plans/2026-11-11-command-timeline.md), [contract](docs/bridge-plan.md#command-timeline-extension-2026-11-11).
+
+Checks on final implementation: Go full suite and vet PASS. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS, 36 JVM tests, zero failures/errors; lint nine warnings. Emulator fixtures PASS for command running/hidden output/expand/collapse/failed exit and retained output, plus 200-message async history, upward-read preservation and tall-message reload. Expanded/collapsed emulator screenshots visually inspected. Physical phone APK in-place update PASS via adb install -r; data preserved. Device live-provider interaction not revalidated. No live provider turn. Reviewer agent failed with stream disconnect; self-review only. Existing host not restarted: live events work with existing forwarding, but command history requires new host binary/restart when no active work. File changes/MCP tool-specific cards remain outside this slice.
+
+## History scroll fix
+
+2026-11-11: branch `fix/android-history-scroll`, base `71bfc7b`. Opening/reloading history scrolls to its newest content after layout; a tail anchor reaches the bottom of a tall final message. New messages preserve intentional upward reading. Existing chat fixture updated for current permission callbacks.
+
+Checks: assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (31 JVM tests, no failures; lint zero errors, nine warnings). Emulator history-scroll fixture PASS: asynchronous 200-message history, older-reading position unchanged on append, reload with tall final message. Original implementation failed newest-message regression. APK built, not yet installed on physical phone. No Go/provider/host changes. Next: separate command execution cards and message IDs per user's follow-up.
+
+## Connection diagnostics and live host recovery
+
+Laptop IP now 192.168.1.243, phone Wi-Fi 192.168.1.244, sshd listening on 22. Phone ping to laptop PASS. `/tmp/modex-host` had disappeared and supervisor was dead with stale private endpoint/lock. Verified no host process and endpoint refused; removed only stale files, rebuilt and started supervisor. OpenSSH with modex_phone and locally verified ED25519 pin authenticated and attached; provider third-party/model gpt-6.1-sol confirmed. New instance requires phone Reset session cursor; old saved IP must change (Forget host required by current target-change guard). No prompt sent.
+
+Android now reports fixed stage-specific failures for settings/key, SSH network/auth, pin mismatch, remote executable, unavailable/busy supervisor and instance/replay; 4096-byte synchronized stderr capture stays in RAM and is neither displayed nor logged. Explicit disconnect returns quietly; unexpected EOF remains visible. Same SshTransport code on JVM with actual SSH/key/pin PASS for normal attach, wrong fingerprint, missing binary and old-instance rejection. Probe caught shell echo of --cursor misleading replay classifier; fixed with exact known phrases and regression. Final assembleDebug/testDebugUnitTest/lintDebug --offline PASS (31 tests, zero failures/errors); no Go source changed. Self-review only; no physical Android transport rerun.
+
+APK update via make install-apk FAILED: INSTALL_FAILED_UPDATE_INCOMPATIBLE (debug signing certificate differs from installed app). Did not uninstall or delete app data. APK built at normal debug path; need original signing key or explicit user choice before uninstall/reinstall. New diagnostics not on device yet. `/tmp` host remains temporary; permanent install/startup reliability deferred.
+
+## Explicit new-thread permissions
+
+Continuing the Codex companion direction after user evaluated T3. [Plan](docs/superpowers/plans/2026-11-10-thread-permissions.md), [contract](docs/bridge-plan.md#thread-permission-extension-2026-11-10). New chat offers Host default (unchanged inherited permissions), Read-only, Workspace write, Full access with warning. Explicit sandboxed modes request on-request/user, full access never/user. Host policy can reject choices. No global configuration changes; no overrides on resume/turn. Session settings menu projects Codex-returned provider/model/legacy sandbox type/approval/reviewer; missing policy labels remain Unknown. Metadata cleared during switching/reconnect/reset/disconnect and not persisted as authoritative. Settings report create/resume time; full active permission-profile/tool-scope display remains unimplemented. Read-only may request permission escalation, not an immutable no-write guarantee; file approvals cannot be accepted without a diff viewer.
+
+Evidence on final uncommitted milestone: Go suite PASS; bridge race PASS; go vet PASS. Android assembleDebug/testDebugUnitTest/lintDebug --offline PASS, 25 tests/0 failures/0 errors, existing warnings. Go and Kotlin new tests observed fail before implementation. Installed Codex schema validated request/response fields. Real Codex creates returned expected permissions for all three explicit modes; one short paid third-party gpt-6.1-sol marker turn in temporary workspace followed by fresh bridge same-ID resume returned readOnly/on-request/user. Empty-thread resume probe rejected before that; no existing user session touched. Independent reviewer attempted but stream disconnected, so self-review only. New dialog not visually verified on emulator/phone; APK built but not installed, phone supervisor not rebuilt/restarted. Updating host requires intentional stop/start and resetting old journal cursor. Next: physical UI/approval validation, then reliable CLI-to-phone handoff; do not claim control of an already-running CLI process.
+
+## SSH key import troubleshooting
+
+User reports both private-key files fail import after USB transfer. Local originals have OpenSSH headers, no encryption and are below 1 KiB; phone copies not verified. Existing catch-all message incorrectly suggested encryption for every exception. File picker resumes Activity, whose foreground handler can auto-connect a saved profile before import; import rejects connected/connecting state. Disable reconnect via existing disconnect before launching picker, retain state guard with clear guidance, distinguish denied access, unreadable/provider error, empty and oversized file. Key bytes/errors are not logged; import preserves prior key on failed read. No new format validation or passphrase support.
+
+Checks on uncommitted fix: four reader tests PASS (byte preservation, exact limit, empty/oversized, I/O failure), full JVM suite PASS; assembleDebug/lintDebug PASS. First concurrent Gradle invocations collided in Kotlin cache; tests rerun successfully after build finished. Physical phone visible over ADB but picker/import and auto-reconnect race not runtime-verified; APK built, not installed. No Go changes or repeated Go suite.
+
+## Host Make targets
+
+Added `host-build`, `host` (background), `host-attach`, `host-stop`; existing default Android target unchanged. Defaults `/tmp/modex-host`, current workspace, `$HOME/.local/state/modex-phone`, `codex`; overrides documented in README. Atomic binary replacement does not restart existing supervisors or preserve an approval wrapper automatically. Checks on uncommitted milestone: actual build PASS, dry-run with spaced paths/default Android goal PASS, isolated fake-provider Make start/attach/stop lifecycle with spaced workspace/state/Codex paths PASS (loopback permission required). Stop acknowledgement precedes asynchronous endpoint cleanup; fixture waited for removal. No live phone supervisor stopped/restarted; no paid provider or Android checks for this Makefile-only change.
+
+## Current troubleshooting
+
+Phone screenshot confirms the desktop session `01a1b731…` is listed with its preview. Earlier workspace/active-writer explanations were hypotheses, not verified causes. Read-only live probe reproduced the actual history failure: this session's upstream includeTurns response was 4,408,427 bytes (81 turns), exceeding the bridge's 4MiB frame cap and closing its Codex reader. Raised only upstream cap to 16MiB; downstream remains 4MiB. Fixed bridge read this exact session into 281 text messages (167,034 bytes) and then successfully listed all six sessions without resume, fork or prompt. Resume ownership on this currently running session has not been tested. History above either cap remains unsupported pending pagination.
+
+Large-history correction committed at `9022eb7`; user confirmed this session now loads on phone. Existing 16MiB upstream / 4MiB downstream bounds remain.
+
+## Current UI milestone
+
+Approved [UI design](docs/superpowers/specs/2026-11-09-android-chat-ui-design.md) and [implementation plan](docs/superpowers/plans/2026-11-09-mocha-chat-ui.md). Native Catppuccin Mocha blue theme, left conversation drawer with search/refresh/load-more and selected session, compact header, new-chat model dialog, 48dp arrow send control with 10dp corners, matching system bars. Connection settings and approvals preserve existing behavior. Per-session drafts survive drawer switches; ViewModel send reports local acceptance before composer clears. Drafts are UI saved state, not a durable encrypted draft store.
+
+Codex schema/live metadata verified `name` is the user-facing title and `preview` is usually the first question; this session reports `name=modex`. Bridge list forwards bounded optional name; Android prioritizes name, then preview, then untitled + short ID. Workspace filtering unchanged.
+
+CommonMark 0.24.0 + GFM table parser; native Compose headings/emphasis/lists/quotes/safe HTTP(S) links/tables, inline code and fenced/indented code with language label, horizontal scroll, selection and Copy code. HTML remains inert; no remote images, upload, MCP/skill picker, syntax highlighting or math/Mermaid in this slice.
+
+Checks on final production working tree: full Go suite PASS; Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (17 unit tests, zero errors; existing warnings). Emulator chat/drawer visually inspected; code copy and session selection PASS. Keyboard screenshot confirms visible draft and reachable blue send control. Extended draft/table smoke PASS: emulator fixture verified code copy, drawer selection, rejected-send draft retained, keyboard composer and Markdown table screenshot. Temporary Gradle cache reset required redownloading dependencies; previous TLS dependency issue recovered. Independent reviewer probe failed with stream disconnect, so self-review only. No physical-phone validation of this new UI yet; no paid model turn. Host binary built at /tmp/modex-ui-host; existing phone supervisor not changed this session.
+
+
+
+## Objective
+
+Native Android access to the user's actual Codex environment on Linux, Windows and macOS, preserving custom API providers, existing sessions, skills and MCP. [Design](docs/design.md); [milestone plan](docs/next-milestone-plan.md); [bridge contract](docs/bridge-plan.md).
+
+## Implemented
+
+Go standard-library host: diagnostic mode and connection-scoped `--serve` bridge with status, workspace-bound thread creation with optional model, paginated workspace-filtered thread list/read/resume, text turn/start, persistent app-server reader, late event streaming, and one-time command/file approval and non-secret question responses. No automatic fork, writer-lock bypass, session-wide permission grants or uncertain operation replay. Frames capped at 4 MiB; each RPC has a 20-second deadline. Pending decisions are memory-only, capped at 128; ordinary command queue capped at 16.
+
+`scripts/live_provider_smoke.py` reproduces paid direct inference, same-thread handoff, streaming and a real approval in a temporary workspace. The command allowlist is tested separately. Review context intentionally contains task content; it is not a generic credential redactor. Raw upstream errors/configuration are suppressed.
+
+## Verified evidence
+
+Previous live-provider evidence at `187cb87`:
+
+- `python3 -m unittest discover -s scripts -p 'test_*.py'`: PASS; direct/wrapped printf allowlist and shell-injection rejection.
+- `python3 scripts/live_provider_smoke.py --host /tmp/modex-host-linux --model gpt-6.1-sol --report /tmp/modex-new-thread-verified.json`: PASS against real `third-party` provider. Configured model was `gpt-5.5`; only the test thread used `gpt-6.1-sol`. Global config was not changed.
+- Direct provider and Modex text turns returned exact markers, streamed `item/agentMessage/delta`, and ended `completed`. Same thread ID survived closing the first app-server and resuming through Modex.
+- Real approval: one `decision/required`, one delivered `accept`, `serverRequest/resolved`, exact printf command stdout, exit code 0, final text and completed turn all verified. No raw logs, keys or endpoint values stored here.
+- Newly created chat through `threads/start` used the fixed temporary workspace and `gpt-6.1-sol`, had an independent thread ID, streamed the exact marker and completed successfully.
+- Current working tree: Go tests, race tests, vet and amd64 cross-builds for Linux/Windows/macOS PASS. Runtime/live integration tested on Linux only. All new feature tests were observed failing before implementation.
+
+Earlier attempts with configured `gpt-5.5` returned HTTP 403 in both direct Codex and Modex; `gpt-6.1-sol` succeeded. Do not describe that earlier 403 as proven transient or a proven auth failure. The original approval harness failed because Codex supplied a Bash-wrapped command and offered accept/cancel rather than decline; the corrected harness checks the shell wrapper and actual execution instead of assuming failure was in the bridge.
+
+## In progress and next
+
+Primary owns integration/state. Backend and reviewer subagent probes for continuity both failed immediately with stream disconnect; no delegated edits/findings accepted. Inline fallback.
+
+Current milestone: black native chat UI, stored text history and encrypted connection/session restoration with a foreground connection service. Host API implemented at `7c93ba5`; Android build/tests/lint and emulator restore checks pass. Plan: [session continuity](docs/superpowers/plans/2026-11-09-session-continuity.md); [history contract](docs/history-contract.md).
+
+Next after this milestone: physical phone verification of saved host + history + multitasking; session titles, full file-diff review, done/decision notifications and push relay/bubbles. Windows supervisor ACL remains outstanding. No billing/license/release decision; no publish/push.
+
+## Background supervisor milestone
+
+Design/contract: [supervisor plan](docs/supervisor-plan.md). Linux/macOS detached launcher plus foreground mode, authenticated loopback attach and stop, random instance/token in private owned 0700/0600 state, exclusive owner lock and no automatic stale recovery. Journal retains 1024 frames/16 MiB, reports gaps, checks instance on resume; one client controls at a time. No automatic operation replay, model override, Codex restart, on-disk transcript or boot service. Windows supervisor modes fail closed pending native ACL validation; --serve remains available. macOS is cross-build-only.
+
+Tests: journal retention/count/byte gaps, wakeups, invalid JSON, auth, competing clients, stale instance, offline replay, explicit stop, private/exclusive/stale state; black-box detached fake app-server test verifies CLI attach, disconnected turn completion, state cleanup and no orphan child. Provider test `python3 scripts/live_supervisor_smoke.py --host /tmp/modex-supervisor-host --model gpt-6.1-sol --report /tmp/modex-supervisor-live.json` PASS with `third-party`: submitted once, disconnected after acknowledgement, reattached same instance/cursor, exact delta-streamed reply and completed turn, authenticated stop and cleaned state. Linux runtime only. Pending decisions persist while bridge is alive but their original notification must remain within journal retention to replay. A hard crash loses RAM journal and can leave stale private state; do not bypass locks.
+
+Final supervisor checks on the working tree: `GOCACHE=/tmp/modex-go-cache go test -race ./...` PASS; `go vet ./...` PASS; Linux/Windows/macOS amd64 cross-builds PASS. `MODEX_HOST_BINARY=/tmp/modex-supervisor-host PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts -p 'test_*.py' -v` PASS (4 tests, including failed-start cleanup). Live reconnect smoke PASS twice. Self-review only, per no-subagent instruction; no SSH/mobile runtime claim. All fixture supervisors were stopped; no service installed. New source and related docs committed together as one supervisor feature.
+
+## OpenSSH transport milestone
+
+`cmd/modex` + `internal/sshtransport`: use installed OpenSSH to exec remote `modex-host --attach`; fixed strict host key checking, key/agent-only noninteractive authentication, no PTY, timeouts/keepalives, shell-quoted absolute POSIX remote paths and cursor/instance reconnect. No token or provider key leaves the target; no prompt replay or automatic host deployment. SSH config aliases are allowed and remain trusted local configuration.
+
+Verification on working tree: Go tests/race/vet PASS; client cross-builds Linux/Windows/macOS PASS. Linux real loopback sshd test uses ephemeral keys and isolated config: JSON round-trip and metacharacter paths PASS, wrong host key rejected, real supervisor status and same-instance cursor continuity across two SSH attachments PASS (fake provider). No remote VPS, Android, Windows client runtime or macOS runtime validation. Supervisor real-provider test was already validated at `31e06f4`; combined SSH plus paid inference is not claimed. Related contract in docs/ssh-transport-plan.md. Self-review only, no subagents per user instruction.
+
+
+## Native Android milestone
+
+Kotlin/Compose min API 26, target/compile 36; Gradle wrapper 8.14.3. Native mwiede JSch with Bouncy Castle Ed25519, strict out-of-band SHA256 host pin, SAF key import held in RAM. Connection form, paginated IDs, new chat/model, same-ID resume, live deltas, offered command decisions and non-secret questions. Same-instance journal cursor advances only after apply succeeds; no automatic prompt retry. Connection metadata survives rotation; ViewModel key/journal do not survive process death. No stored history loading or file approval acceptance.
+
+Verified on this milestone's uncommitted working tree before commit:
+
+- Gradle `:app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --no-daemon`: PASS; five JVM protocol tests, zero test failures/lint errors. Lint warns about newer dependencies, default icon and backup-rule metadata; no production release readiness claim. Used installed Gradle 8.14.3/JDK 21/SDK 36 with `/tmp/modex-gradle` cache. Wrapper generated, but fresh wrapper download not separately tested.
+- Emulator Pixel 4 XL: APK installed, activity launched, connection screen visually inspected; no AndroidRuntime crash observed at launch.
+- `python3 scripts/test_android_transport.py --host /tmp/modex-android-host --adb /opt/android-sdk/platform-tools/adb`: PASS on Android emulator with ephemeral Ed25519 keys and isolated loopback sshd, real supervisor/fake provider. Two status round-trips, same-instance cursor continuity and wrong-pin rejection checked. Fixture stopped and private test key deleted. Initial test timed out; traced to JSch returning a new buffered output stream on each getter. Keeping write/flush on the same stream fixed the reproduced failure.
+- `GOCACHE=/tmp/modex-go-cache go test ./...`: PASS; Go behavior unchanged.
+
+APK: `android/app/build/outputs/apk/debug/app-debug.apk` (ignored build output). No physical phone, remote VPS, full UI chat/approval automation or Android-to-paid-provider inference checked; previous Go host provider evidence above still applies only to the host path. UI implementation is a first functional slice, not a finished visual design. No persistent Android storage of private keys; selected original key file remains wherever the user imported it from.
+
+
+## Physical-phone troubleshooting: turn feedback
+
+User reached the session/new-chat UI after correcting remote host path to `/tmp/modex-host`. SSH key authentication succeeded. Existing phone session (prefix `01a1bdba`) recorded `gpt-5.5`, then provider HTTP 403 explicitly rejecting model access; no agent message was produced. Android ignored asynchronous turn errors. No global model/provider config changed and the user prompt was not replayed.
+
+Fix: classify failed-turn and non-retrying error events into fixed safe UI messages (HTTP 403 gets model/key-permission guidance), never display raw provider URL/error. Session picker now refreshes on open and exposes Refresh/count/empty state. The cause of an empty list on the physical phone is not independently proven; no claim that full stored-session support is fixed.
+
+Verification on uncommitted fix tree before commit: regression test initially failed compilation for missing error classifier; final Gradle `:app:assembleDebug :app:testDebugUnitTest :app:lintDebug --offline --no-daemon` PASS, 6 tests / 0 failures, lint 0 errors (existing warnings remain). One separate real-provider turn through `/tmp/modex-host --serve` in a temporary workspace with explicit `gpt-6.1-sol`: exact marker, streamed delta and completed status PASS. This does not validate physical-phone rendering; user needs to install updated APK and create a chat with an allowed model. Existing session was not resumed or mutated by troubleshooting. No Go source changed; Go tests not repeated for this Android-only fix. Self-review only; prior reviewer transport unavailable. No publish/push.
+
+
+## Readable approval review and phone validation
+
+User reported physical-phone success with `gpt-6.1-sol`: response streaming, disconnect during a roughly 100-word composition then reconnect receiving messages, command approval visible, Allow once executed the command and returned its result. These are user-observed device results, not automated device evidence. The phone supervisor was explicitly stopped/restarted for approval testing with a temporary `/tmp/modex-codex-approval` wrapper: `read-only`, `on-request`, reviewer `user`, model `gpt-6.1-sol`; config/read confirmed these values. Global config/history unchanged. New supervisor instance requires resetting the client cursor and creating a new thread, since old threads used danger-full-access. Wrapper/binary in /tmp are temporary, not installed services.
+
+UI improvement: approval dialog displays exact selectable monospace command, working directory, reason, action type and all supplied extra filesystem/network scope, with fixed labels. Nested permission values become readable field/value lines rather than a JSON envelope; unknown fields remain visible. Offered one-time buttons and response payloads unchanged; file-change acceptance remains disabled with an explicit explanation until a diff viewer exists.
+
+Verification before commit on uncommitted milestone tree: Gradle `:app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --offline --no-daemon` PASS; 7 unit tests, 0 failures/lint errors (existing warnings remain). Formatter regression initially failed compilation for absent helper, then passed. `adb shell am instrument -w -e preview approval dev.modex.test/dev.modex.TransportSmoke` PASS: light/dark screenshots captured and manually inspected on Pixel 4 XL emulator. No SSH connection/command executes in this preview. Initial fixture text-node assertion failed despite successful screenshot rendering; fixture now captures images for manual inspection and makes no accessibility-assertion claim. Test runner remains TransportSmoke, with opt-in preview mode; default SSH fixture behavior preserved. No Go source changes or repeated Go tests. New UI not yet verified on physical phone, tablet, landscape, large fonts or screen reader. No independent reviewer used for this narrow change; no push/publication.
+
+
+## Session continuity milestone
+
+User requested black clean native UI, durable history and connection across app exit/multitasking. Implemented host `threads/read include_turns=true`, exact workspace/ID verification, text-only user/assistant messages and active-turn status; default metadata/resume contracts unchanged. No system/developer/tool details exposed. Frame limit 4MiB still applies; no history pagination. Go tests/race/vet PASS; read existing phone thread returned 15 messages across both roles without resume/prompt.
+
+Android: fixed neutral black theme, gray user bubble/unboxed assistant; encrypted single-host profile/private key/messages/decisions/pending-request IDs/selected thread/journal via Keystore AES-GCM in noBackupFilesDir, atomic write, tamper detection. Forget removes ciphertext/key and invalidates delayed saves. App-owned ViewModel preserves Activity recreation; foreground dataSync service begins on explicit visible connection and provides ongoing notification + Disconnect. Foreground return attaches saved connection if disconnected; no automatic prompt retry. Process restore reads encrypted snapshot then loads stored history. Reset cursor keeps host/key; Forget removes them. Notification permission requested on Android 13+. Services are OS-limited and not restarted after force-stop/reboot; no claim of indefinite background survival.
+
+Evidence before Android commit: Gradle assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (8 tests, lint 0 errors, warnings remain). Emulator storage instrumentation PASS: encrypted round-trip, ciphertext excludes marker, tamper rejected, forget; continuity fixture over native SSH + real supervisor/fake provider PASS for initial stored-history display then force-stop and fresh-process auto-attach/history restoration. Screenshot inspected: black chat with restored user/assistant messages. First attempts hit notification permission dialog and stale fixture profile; fixture initial stage now clears only emulator test profile, grants notification in test setup, then verifies restoration in a distinct process. No paid turn sent in continuity test. Physical phone still needs updated APK and first import once; no device/battery endurance, Android 8 runtime, tablet, landscape, large-font or screen-reader proof. Reviewer unavailable, self-review only.
+
+Phone host was updated/restarted with history-capable `/tmp/modex-host` preserving `/tmp/modex-codex-approval` read-only/on-request/user/gpt-6.1-sol wrapper and same workspace/state dir; no history/config deletion. Instance changed; old phone cursor needs one Reset session cursor. /tmp host/wrapper remain temporary, no boot service installed.
