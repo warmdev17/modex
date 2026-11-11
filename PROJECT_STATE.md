@@ -1,6 +1,10 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/stable-android-debug-signing`; base `2f75a10`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/hide-internal-codex-sessions`; base `77320c3`. Git records final commits.
+
+## Hide internal review sessions
+
+All-source sidebar discovery had included Guardian approval conversations. Real read-only source inspection confirmed 43 Guardian review threads classified as subAgent.other=guardian. Bridge now requests only cli/vscode/appServer sources in both workspace modes, across all projects/providers. It never filters by title/path and deletes nothing. Real filtered query returned 13 interactive sessions across 11 paths with no internal sources. Regression observed failing before fix; full Go tests/vet PASS. Android unchanged; APK rebuild unnecessary. Running supervisor not restarted; phone refresh requires updated host when idle. Desktop-created cwd under Documents/Codex remains legitimate. No live phone recheck or prompts sent.
 
 ## Stable Android debug signing
 
@@ -8,7 +12,7 @@ Phone update rejected new APK certificate ae6929…; installed package on Androi
 
 ## Remote project sidebar
 
-[Plan](docs/superpowers/plans/2026-11-11-remote-project-sidebar.md), [contract](docs/bridge-plan.md#remote-project-extension-2026-11-11). Bridge `b73e826` retains default workspace confinement but accepts explicit absolute workspace on thread start/read/resume/turn, with exact ID/cwd validation. All-workspace listing includes all known sources and providers, ordered by updated_at, excludes archived sessions. Android follows list pages automatically, groups by full cwd with folder icons and collapsible Projects plus Recents, searches titles/paths, selected rows Blue/Base. Selected cwd is stored in existing encrypted snapshot and passed on history/resume/send/new chat. Project folders derive from Codex sessions; desktop-private pinned/empty-project metadata is not imported.
+[Plan](docs/superpowers/plans/2026-11-11-remote-project-sidebar.md), [contract](docs/bridge-plan.md#remote-project-extension-2026-11-11). Bridge `b73e826` retains default workspace confinement but accepts explicit absolute workspace on thread start/read/resume/turn, with exact ID/cwd validation. All-workspace listing now includes interactive sources across providers (internal-source correction above), ordered by updated_at, excludes archived sessions. Android follows list pages automatically, groups by full cwd with folder icons and collapsible Projects plus Recents, searches titles/paths, selected rows Blue/Base. Selected cwd is stored in existing encrypted snapshot and passed on history/resume/send/new chat. Project folders derive from Codex sessions; desktop-private pinned/empty-project metadata is not imported.
 
 Evidence: Go full tests/vet and bridge race PASS. Read-only real Codex list returned 56 sessions across 16 paths; two-page list and cross-project metadata read PASS. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (40 JVM tests, no failures, lint 0 errors/13 warnings). Emulator sidebar fixture PASS for two project paths and selecting another session, with model/effort and draft regressions; screenshot visually confirms folder icons and Blue/Base selected rows. Fixture needed bounded wait for drawer accessibility after opening. Gradle cache was missing; dependency download/build succeeded. Reviewer agent stream disconnected; self-review fallback. No existing session resumed or sent prompts; host not restarted and physical phone not updated. Cross-project live inference/resume and Windows/macOS runtime not validated.
 

@@ -206,11 +206,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("all_workspaces must be boolean")
 			}
 		}
-		params := map[string]any{"limit": limit, "modelProviders": []string{}, "sourceKinds": []string{}, "sortKey": "updated_at"}
+		params := map[string]any{"limit": limit, "modelProviders": []string{}, "sourceKinds": []string{"cli", "vscode", "appServer"}, "sortKey": "updated_at"}
 		if !all {
 			params["cwd"] = cwd
-		} else {
-			params["sourceKinds"] = []string{"cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"}
 		}
 		if cursor != "" {
 			params["cursor"] = cursor

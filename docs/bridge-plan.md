@@ -79,6 +79,8 @@ Android reduces forwarded `item/started`, `item/completed`, `item/agentMessage/d
 
 ## Remote project extension (2026-11-11)
 
-`threads/list` accepts optional `all_workspaces:boolean` (default false). True omits the cwd filter, includes all known session sources/providers, and returns existing projected cwd/title metadata with normal cursor pagination. Non-archived sessions are sorted by updated_at; no filesystem project scan or desktop-private pin database is read.
+`threads/list` accepts optional `all_workspaces:boolean` (default false). True omits the cwd filter, includes interactive CLI, VS Code and app-server sources across providers, and returns existing projected cwd/title metadata with normal cursor pagination. Non-archived sessions are sorted by updated_at; no filesystem project scan or desktop-private pin database is read.
 
 `threads/start`, `threads/read`, `threads/resume`, and `turn/start` accept optional `workspace`: absolute native-host path, at most 32768 UTF-8 bytes and no CR/LF/NUL. Omission retains the configured host workspace. The caller explicitly chooses a remote project; returned thread IDs and exact cwd remain checked before history access, resume and sending. Explicit resume passes the same cwd to Codex. New thread creation uses selected project cwd and existing permission mode behavior. This expands access via authenticated SSH to other Codex projects owned by that remote user; it is not a restricted single-workspace deployment when opted in.
+
+2026-11-11 correction: listing explicitly filters sourceKinds to cli/vscode/appServer in both workspace modes. Guardian approval assessments and other internal subagent/exec/unknown sessions are excluded by source, never by title or folder name. No sessions are deleted.

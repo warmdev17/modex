@@ -50,3 +50,18 @@ func TestExplicitWorkspaceStillRejectsMismatch(t *testing.T) {
 		}
 	}
 }
+
+func TestSessionListUsesInteractiveSourcesInEveryWorkspaceMode(t *testing.T) {
+	for _, params := range []string{`{}`, `{"all_workspaces":true}`} {
+		_, err := Handle(context.Background(), "/work", Command{Method: "threads/list", Params: json.RawMessage(params)}, func(_ context.Context, _ string, v any) (json.RawMessage, error) {
+			kinds := v.(map[string]any)["sourceKinds"].([]string)
+			if len(kinds) != 3 || kinds[0] != "cli" || kinds[1] != "vscode" || kinds[2] != "appServer" {
+				t.Fatalf("internal sources included: %v", kinds)
+			}
+			return json.RawMessage(`{"data":[],"nextCursor":null}`), nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
