@@ -71,6 +71,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			allowed["include_turns"] = true
 		}
 	case "turn/start":
+		allowed["attachments"] = true
 		allowed["thread_id"] = true
 		allowed["text"] = true
 		allowed["model"] = true
@@ -261,8 +262,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if json.Unmarshal(p["thread_id"], &id) != nil || id == "" {
 			return nil, errors.New("thread_id is required")
 		}
-		if json.Unmarshal(p["text"], &text) != nil || strings.TrimSpace(text) == "" {
-			return nil, errors.New("text is required")
+		if string(p["text"]) == "null" || json.Unmarshal(p["text"], &text) != nil {
+			return nil, errors.New("text must be a string")
+		}
+		input, err := turnInput(text, p["attachments"])
+		if err != nil {
+			return nil, err
 		}
 		var model string
 		if raw, ok := p["model"]; ok {
@@ -289,7 +294,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if metadata.Thread.Cwd != cwd {
 			return nil, errors.New("thread outside workspace")
 		}
-		params := map[string]any{"threadId": id, "input": []map[string]string{{"type": "text", "text": text}}}
+		params := map[string]any{"threadId": id, "input": input}
 		if model != "" {
 			params["model"] = model
 		}
@@ -340,6 +345,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 							Content  []struct {
 								Type string `json:"type"`
 								Text string `json:"text"`
+								Path string `json:"path"`
 							} `json:"content"`
 						} `json:"items"`
 					} `json:"turns"`
@@ -376,6 +382,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						for _, part := range item.Content {
 							if part.Type == "text" {
 								text += part.Text
+							} else if part.Type == "localImage" {
+								text += "\n[Image: " + filepath.Base(part.Path) + "]"
+							} else if part.Type == "image" {
+								text += "\n[Image]"
 							}
 						}
 					case "agentMessage":
