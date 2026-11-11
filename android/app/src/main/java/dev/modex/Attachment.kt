@@ -54,3 +54,25 @@ internal fun attachmentTextPreview(file: java.io.File): String? {
     if (content.any { it == '\uFFFD' || (it.isISOControl() && it !in "\n\r\t") }) return null
     return content + if (bytes.size > 256 * 1024) "\n[Preview limited to 256 KiB; use Open with for the complete file]" else ""
 }
+
+// Older hosts flatten text parts and omit attachment metadata; recover only a complete validated suffix.
+internal fun legacyFileAttachments(text: String): Pair<String,List<Attachment>> {
+    val marker = "Attached files selected by the user (JSON paths):\n"
+    val index = text.lastIndexOf(marker)
+    if (index < 0) return text to emptyList()
+    return try {
+        val tokener = org.json.JSONTokener(text.substring(index + marker.length))
+        val array = tokener.nextValue() as? org.json.JSONArray ?: return text to emptyList()
+        require(tokener.nextClean() == '\u0000' && array.length() in 1..8)
+        val files = (0 until array.length()).map { n ->
+            val f = array.getJSONObject(n)
+            require(f.keys().asSequence().toSet() == setOf("name", "path"))
+            val path = f.get("path") as String
+            val name = f.get("name") as String
+            require((path.startsWith("/") || Regex("^[A-Za-z]:[\\\\/].*").matches(path)) && path.length <= 32768 && path.none { it.isISOControl() })
+            require(name == attachmentName(path))
+            Attachment(path, name, "file")
+        }
+        text.substring(0,index) to files
+    } catch (_: Exception) { text to emptyList() }
+}

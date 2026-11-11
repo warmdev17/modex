@@ -6,6 +6,16 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 
 class AttachmentTest {
+    @Test fun oldHostJoinedFileReferencesRestoreClickableFilesWithoutChangingPrompt() {
+        val marker = "Attached files selected by the user (JSON paths):\n"
+        val source = "Please inspect this" + marker + """[{"name":"notes.json","path":"/work/notes.json"},{"name":"manual.pdf","path":"/work/manual.pdf"}]"""
+        val restored = readChat(org.json.JSONArray().put(org.json.JSONObject().put("role", "user").put("text", source))).single()
+        assertEquals("Please inspect this", restored.text)
+        assertEquals(listOf("notes.json", "manual.pdf"), restored.attachments.map { it.name })
+        assertEquals(restored, readChat(org.json.JSONArray().put(restored.toJson())).single())
+        val trailing = source + " preserve this sentence"
+        assertEquals(trailing, readChat(org.json.JSONArray().put(org.json.JSONObject().put("role", "user").put("text", trailing))).single().text)
+    }
     @Test fun previewTextIsBoundedAndBinaryIsNotRenderedAsText() {
         val f = java.io.File.createTempFile("modex-preview", ".txt")
         try {

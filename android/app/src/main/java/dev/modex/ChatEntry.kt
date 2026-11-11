@@ -20,10 +20,13 @@ private fun boundedOutput(text: String): String {
 
 internal fun readChat(list: JSONArray): List<ChatEntry> = (0 until list.length()).map { i ->
     val m = list.getJSONObject(i)
-    val files = m.optJSONArray("attachments")?.let { a -> (0 until a.length()).map { n ->
+    var files = m.optJSONArray("attachments")?.let { a -> (0 until a.length()).map { n ->
         val f = a.getJSONObject(n); Attachment(f.getString("path"), f.optString("name").ifBlank { attachmentName(f.getString("path")) }, f.getString("kind"), f.optLong("size"))
     } }.orEmpty()
-    val body = if (m.has("display_text")) m.getString("display_text") else m.optString("text")
+    var body = if (m.has("display_text")) m.getString("display_text") else m.optString("text")
+    if (m.optString("role") in listOf("user", "You") && files.isEmpty()) {
+        val recovered = legacyFileAttachments(body); body = recovered.first; files = recovered.second
+    }
     val role = when (val r = m.optString("role")) { "user" -> "You"; "assistant" -> "Codex"; else -> r }
     ChatEntry(m.optString("id"), role, if (role == "command") boundedOutput(m.optString("text")) else body,
         m.optString("command"), m.optString("status"), if (m.isNull("exit_code")) null else m.optInt("exit_code"), m.optString("cwd"), files)

@@ -154,3 +154,22 @@ func TestHistoryFileReferencesNeverConsumeTrailingUserText(t *testing.T) {
 		}
 	}
 }
+
+func TestJoinedHistoryRestoresFilesWithoutEatingPrompt(t *testing.T) {
+	const source = `{"thread":{"id":"t","cwd":"/work","turns":[{"items":[{"id":"u","type":"userMessage","content":[{"type":"text","text":"Please inspect thisAttached files selected by the user (JSON paths):\n[{\"name\":\"notes.json\",\"path\":\"/work/notes.json\"}]"}]}]}]}}`
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"t","include_turns":true}`)}, func(context.Context, string, any) (json.RawMessage, error) { return json.RawMessage(source), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(result)
+	var got struct {
+		Messages []struct {
+			DisplayText string            `json:"display_text"`
+			Attachments []attachmentInput `json:"attachments"`
+		} `json:"messages"`
+	}
+	_ = json.Unmarshal(raw, &got)
+	if len(got.Messages) != 1 || got.Messages[0].DisplayText != "Please inspect this" || len(got.Messages[0].Attachments) != 1 {
+		t.Fatalf("joined history lost metadata: %s", raw)
+	}
+}

@@ -2,6 +2,10 @@
 
 Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `feat/attachment-previews`; base `f579145`. Git records the completed preview milestone commit.
 
+## Attachment reconnect follow-up
+
+Branch fix/attachment-history-reconnect, base 8f0630d. Reproduced flattened prompt plus file-reference history with failing Go and Android regressions. Host now splits a complete validated reference suffix while preserving prompt bytes; Android also recovers legacy host file references and persists recovered metadata through snapshots. Malformed/trailing content remains visible unchanged. Go full tests/vet and Android assembleDebug/unit/lint PASS. Read-only Codex history probe confirmed separate input parts in current app-server; compatibility regression covers older flattened host output reported on phone. No supervisor restart or user prompt replay.
+
 ## JSON preview follow-up
 
 Branch feat/json-preview, base 4d590e6. JSON attachments now format with two-space indentation and Catppuccin Mocha token colors, preserving numeric literals and escape sequences. Invalid, truncated, oversized or overdeep input remains raw text; preview formatting output is bounded. Android assembleDebug, unit tests and lint PASS; emulator verification will be combined with reconnect/model milestones. PDF rendering intentionally remains Open with per user scope.

@@ -382,7 +382,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						role = "user"
 						for _, part := range item.Content {
 							if part.Type == "text" {
-								if files := historyFileReferences(part.Text); len(files) > 0 {
+								if index := strings.LastIndex(part.Text, "Attached files selected by the user (JSON paths):\n"); index >= 0 && len(historyFileReferences(part.Text[index:])) > 0 {
+									text += part.Text[:index]
+									displayText += part.Text[:index]
+									files := historyFileReferences(part.Text[index:])
 									for _, file := range files {
 										attachments = append(attachments, file)
 										text += "\n[File: " + file["name"] + "]"
