@@ -36,6 +36,14 @@ class SessionSettingsTest {
         assertFalse(turnStartParams("t", "hello", "custom", "").has("effort"))
         assertFalse(validEffort("bad\neffort"))
     }
+    @Test fun projectsKeepSameNamedFoldersSeparateAcrossPlatforms() {
+        assertEquals("modex", projectName("/home/me/modex"))
+        assertEquals("modex", projectName("C:\\Work\\modex"))
+        assertEquals("/", projectName("/"))
+        val result = withWorkspace(turnStartParams("t", "hi", ""), "/other")
+        assertEquals("/other", result.getString("workspace"))
+        assertFalse(withWorkspace(JSONObject(), "").has("workspace"))
+    }
     @Test fun missingSettingsAreUnknown() {
         val label = sessionSettingsLabel(JSONObject())
         assertTrue(label.contains("Sandbox: Unknown"))

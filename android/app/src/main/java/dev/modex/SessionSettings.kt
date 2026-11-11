@@ -60,3 +60,9 @@ internal fun readModels(result: JSONObject): List<ModelOption> {
         ModelOption(model, entry.optString("displayName").ifBlank { model }, entry.optString("defaultReasoningEffort"), efforts)
     }
 }
+
+internal fun withWorkspace(params: JSONObject, workspace: String): JSONObject = params.apply {
+    if (workspace.isNotEmpty()) put("workspace", workspace)
+}
+
+internal fun projectName(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifBlank { path.ifBlank { "Other sessions" } }

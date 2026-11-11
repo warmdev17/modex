@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -32,7 +33,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
@@ -46,6 +47,7 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
             ChatIcon.Send -> { line(12f,19f,12f,5f); line(6f,11f,12f,5f); line(12f,5f,18f,11f) }
             ChatIcon.Close -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
             ChatIcon.More -> for (y in listOf(5f,12f,19f)) drawCircle(color,1.4f*u,Offset(12*u,y*u))
+            ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }
             ChatIcon.Model -> { drawCircle(color, 7f*u, Offset(12*u,12*u), style = androidx.compose.ui.graphics.drawscope.Stroke(1.6f*u)); line(7f,12f,17f,12f); line(12f,7f,12f,17f) }
         }
     }
@@ -60,11 +62,13 @@ internal fun ChatWorkspace(
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
     onCreate: (String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
-    models: List<ModelOption> = emptyList(), modelCatalogStatus: String = ""
+    models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
+    threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false
 ) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     BackHandler(drawer.isOpen) { scope.launch { drawer.close() } }
+    var collapsedProjects by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     var search by rememberSaveable { mutableStateOf("") }
     var drafts by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
     val prompt = drafts[selected].orEmpty()
@@ -98,23 +102,39 @@ internal fun ChatWorkspace(
                 FilledTonalButton(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = Mocha.Blue), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentPadding = PaddingValues(14.dp)) {
                     ChatGlyph(ChatIcon.New); Spacer(Modifier.width(12.dp)); Text("New chat"); Spacer(Modifier.weight(1f))
                 }
-                OutlinedTextField(search, { search = it }, placeholder = { Text("Search loaded sessions") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))
+                OutlinedTextField(search, { search = it }, placeholder = { Text("Search sessions or projects") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Conversations", style = MaterialTheme.typography.labelLarge, color = Mocha.Subtext, modifier = Modifier.weight(1f))
-                    TextButton(onClick = onRefresh, enabled = connected) { Text("Refresh") }
+                    Text("Sessions", style = MaterialTheme.typography.labelLarge, color = Mocha.Subtext, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onRefresh, enabled = connected && !threadListLoading) { Text("Refresh") }
                 }
-                val visible = threads.filter { (titles[it] ?: it).contains(search, ignoreCase = true) || it.contains(search,ignoreCase = true) }
-                LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (visible.isEmpty()) item { Text(if (search.isBlank()) "No conversations yet" else "No matching conversations", Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodyMedium) }
-                    items(visible, key = { it }) { id ->
-                        Surface(onClick = { onSelect(id); scope.launch { drawer.close() } }, enabled = canSwitch, color = if (id == selected) MaterialTheme.colorScheme.primaryContainer else Mocha.Mantle, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth()) {
-                            Column(Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
-                                Text(titles[id] ?: "Untitled session", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = if (id == selected) Mocha.Blue else Mocha.Text)
-                                Text(id.take(8), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, modifier = Modifier.padding(top = 4.dp))
+                val visible = threads.filter { (titles[it] ?: it).contains(search, ignoreCase = true) || it.contains(search,ignoreCase = true) || threadWorkspaces[it].orEmpty().contains(search, ignoreCase = true) }
+                val projects = visible.groupBy { threadWorkspaces[it].orEmpty() }
+                LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    if (visible.isEmpty()) item { Text(if (threadListLoading) "Loading sessions…" else if (search.isBlank()) "No conversations yet" else "No matching conversations", Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodyMedium) }
+                    item { Text("Projects", Modifier.padding(horizontal = 12.dp, vertical = 10.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
+                    projects.forEach { (path, ids) ->
+                        item(key = "folder:$path") {
+                            Surface(onClick = { collapsedProjects = ArrayList(collapsedProjects).apply { if (path in this) remove(path) else add(path) } }, color = Mocha.Mantle, shape = RoundedCornerShape(6.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    ChatGlyph(ChatIcon.Folder)
+                                    Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                                        Text(projectName(path), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        if (path.isNotEmpty()) Text(path, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    Text(if (path in collapsedProjects) "›" else "⌄", color = Mocha.Subtext)
+                                }
                             }
                         }
+                        if (path !in collapsedProjects || search.isNotEmpty()) items(ids, key = { "project:$it" }) { id ->
+                            SessionSidebarRow(id, titles[id], id == selected, canSwitch, Modifier.padding(start = 20.dp)) { onSelect(id); scope.launch { drawer.close() } }
+                        }
                     }
-                    if (hasMore) item { TextButton(onClick = onMore, enabled = connected) { Text("Load more") } }
+                    if (visible.isNotEmpty()) item { Text("Recents", Modifier.padding(horizontal = 12.dp, vertical = 12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
+                    items(visible, key = { "recent:$it" }) { id ->
+                        SessionSidebarRow(id, titles[id], id == selected, canSwitch) { onSelect(id); scope.launch { drawer.close() } }
+                    }
+                    if (threadListLoading) item { Text("Loading sessions…", Modifier.padding(12.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) }
+                    if (hasMore && !threadListLoading) item { TextButton(onClick = onMore, enabled = connected) { Text("Load more") } }
                 }
                 HorizontalDivider(color = Mocha.Surface)
                 TextButton(onClick = { scope.launch { drawer.close() }; onConnection() }, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
@@ -192,7 +212,7 @@ internal fun ChatWorkspace(
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Uses your host’s provider and workspace.", color = Mocha.Subtext)
+            Text("Uses your host’s provider. Folder: ${threadWorkspaces[selected].orEmpty().ifBlank { "Host workspace" }}", color = Mocha.Subtext)
             ModelPicker(models, modelCatalogStatus, model, { model = it })
             Column(Modifier.selectableGroup()) {
                 permissionModes.forEach { (mode, label) ->
@@ -259,5 +279,12 @@ private fun PromptComposer(prompt: String, onChange: (String) -> Unit, busy: Boo
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled, color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = modifier.fillMaxWidth().semantics { this.selected = selected }) {
+        Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp))
     }
 }

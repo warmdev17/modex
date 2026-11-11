@@ -28,6 +28,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private val saved = SavedHost(application)
     var savedConnection by mutableStateOf<Connection?>(null); private set
     private var reconnectAllowed = true
+    var threadWorkspaces by mutableStateOf(mapOf<String,String>()); private set
+    var selectedWorkspace by mutableStateOf(""); private set
+    private val threadCursors = mutableSetOf<String>()
+    var threadListLoading by mutableStateOf(false); private set
     var titles by mutableStateOf(mapOf<String, String>()); private set
     var historyLoading by mutableStateOf(false); private set
     private var saveJob: kotlinx.coroutines.Job? = null
@@ -65,6 +69,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 key = Base64.decode(data.getString("key"), Base64.NO_WRAP); keyLoaded = true
                 journal = JournalState(data.optString("instance").ifEmpty { null }, data.optLong("cursor"))
                 selected = data.optString("selected")
+                selectedWorkspace = data.optString("selected_workspace")
                 messages = readChat(data.optJSONArray("messages") ?: JSONArray())
                 decisions = data.optJSONArray("decisions")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } } ?: emptyList()
                 val requests = data.optJSONArray("pending") ?: JSONArray()
@@ -80,6 +85,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         val privateKey = key ?: return
         val snapshot = JSONObject().put("connection", JSONObject().put("host", c.host).put("port", c.port).put("user", c.user).put("pin", c.pin).put("binary", c.binary).put("state", c.state))
             .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
+            .put("selected_workspace", selectedWorkspace)
             .put("messages", JSONArray().apply { messages.forEach { put(it.toJson()) } })
             .put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
         val revision = saved.revision()
@@ -95,12 +101,13 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         sessionSettings = ""
         disconnect(); transport = null; connected = false; connecting = false; reconnectAllowed = false; saveJob?.cancel()
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
+        threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap()
         journal = JournalState(); config = null; savedConnection = null; pending.clear(); selected = ""; messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList(); busy = false
     }
     private fun loadHistory() {
         if (selected.isBlank()) return
         historyLoading = true
-        request("threads/read", JSONObject().put("thread_id", selected).put("include_turns", true), selected)
+        request("threads/read", withWorkspace(JSONObject().put("thread_id", selected).put("include_turns", true), selectedWorkspace), selected)
     }
     fun importKey(bytes: ByteArray) {
         require(!connected && !connecting && bytes.size in 1..(256 * 1024))
@@ -108,9 +115,9 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun reset() {
         if (connected || connecting) return
-        sessionSettings = ""; sessionModel = ""
+        sessionSettings = ""; sessionModel = ""; threadListLoading = false; titles = emptyMap()
         journal = JournalState(); pending.clear(); threads = emptyList()
-        selected = ""; messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); busy = false; error = ""
+        selected = ""; selectedWorkspace = ""; threadWorkspaces = emptyMap(); messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); busy = false; error = ""
         persist()
     }
     fun connect(value: Connection) {
@@ -129,7 +136,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 current.open(value, copy, journal, onHello = {
                     kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) {
                         check(transport === current)
-                        connecting = false; connected = true
+                        connecting = false; connected = true; threadListLoading = false
                         models = emptyList(); modelCursors.clear(); modelCatalogStatus = "Loading models…"
                         request("models/list", JSONObject().put("limit", 100))
                         refreshThreads()
@@ -145,7 +152,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) { if (transport === current && reconnectAllowed) error = (failure as? ConnectionFailure)?.message ?: "Connection stopped while applying session data. Reconnect to observe; do not resend uncertain prompts." }
             } finally {
                 copy.fill(0)
-                withContext(Dispatchers.Main) { if (transport === current) { connected = false; connecting = false; getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) } }
+                withContext(Dispatchers.Main) { if (transport === current) { connected = false; connecting = false; threadListLoading = false; getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) } }
             }
         }
     }
@@ -153,19 +160,26 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     fun create(model: String, mode: String) {
         if (busy || historyLoading || switching()) return
         sessionSettings = ""; sessionModel = ""
-        request("threads/start", newThreadParams(model, mode))
+        request("threads/start", withWorkspace(newThreadParams(model, mode), selectedWorkspace))
     }
     fun select(id: String) {
         if (busy || historyLoading || switching()) return
         sessionSettings = ""; sessionModel = ""
-        request("threads/resume", JSONObject().put("thread_id", id), id)
+        request("threads/resume", withWorkspace(JSONObject().put("thread_id", id), threadWorkspaces[id].orEmpty()), id)
     }
-    fun refreshThreads() { request("threads/list", JSONObject().put("limit", 50)) }
-    fun more() { nextCursor?.let { request("threads/list", JSONObject().put("limit", 50).put("cursor", it), "more") } }
+    fun refreshThreads() {
+        if (!connected || threadListLoading) return
+        threadCursors.clear(); threadListLoading = true
+        request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true))
+    }
+    fun more() {
+        if (!connected || threadListLoading) return
+        nextCursor?.let { threadListLoading = true; request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("cursor", it), "more") }
+    }
     fun send(text: String, model: String, effort: String = ""): Boolean {
         if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank() || !validModelId(model) || !validEffort(effort)) return false
         messages = messages + ChatEntry(role = "You", text = text); busy = true
-        request("turn/start", turnStartParams(selected, text, model, effort), model.trim())
+        request("turn/start", withWorkspace(turnStartParams(selected, text, model, effort), selectedWorkspace), model.trim())
         return true
     }
     fun answer(decision: JSONObject, result: JSONObject) {
@@ -193,6 +207,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
                 if (operation.first == "turn/start") busy = false
                 if (operation.first == "threads/read") historyLoading = false
+                if (operation.first == "threads/list") threadListLoading = false
                 if (operation.first == "decision/respond") answeringDecisionIds -= operation.second
                 error = explainHostRejection(operation.first, frame.optJSONObject("error")?.optString("message").orEmpty()); return
             }
@@ -209,15 +224,23 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     if (error.startsWith("Host rejected threads/list")) error = ""
                     val list = result.optJSONArray("data") ?: JSONArray()
                     titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
+                    val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
+                    threadWorkspaces = if (operation.second == "more") threadWorkspaces + paths else paths
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }
                     threads = if (operation.second == "more") (threads + ids).distinct() else ids
                     nextCursor = if (result.isNull("next_cursor")) null else result.optString("next_cursor").ifEmpty { null }
+                    threadListLoading = false
+                    nextCursor?.let { cursor ->
+                        if (threadCursors.add(cursor)) more() else { nextCursor = null; error = "Session listing stopped because the host repeated a page cursor. Refresh to retry." }
+                    }
                 }
                 "threads/start", "threads/resume" -> {
                     error = ""
                     sessionSettings = sessionSettingsLabel(result)
                     sessionModel = result.optString("model")
                     selected = result.getJSONObject("thread").getString("id")
+                    selectedWorkspace = result.getJSONObject("thread").optString("cwd")
+                    threadWorkspaces = threadWorkspaces + (selected to selectedWorkspace)
                     threads = (listOf(selected) + threads).distinct()
                     if (operation.first == "threads/start") {
                         // Codex cannot read persisted turns until a new thread has its first turn.

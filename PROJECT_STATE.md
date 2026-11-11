@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/reasoning-modal-layout`; base `889ae86`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/remote-project-sidebar`; base `111b774`. Git records final commits.
+
+## Remote project sidebar
+
+[Plan](docs/superpowers/plans/2026-11-11-remote-project-sidebar.md), [contract](docs/bridge-plan.md#remote-project-extension-2026-11-11). Bridge `b73e826` retains default workspace confinement but accepts explicit absolute workspace on thread start/read/resume/turn, with exact ID/cwd validation. All-workspace listing includes all known sources and providers, ordered by updated_at, excludes archived sessions. Android follows list pages automatically, groups by full cwd with folder icons and collapsible Projects plus Recents, searches titles/paths, selected rows Blue/Base. Selected cwd is stored in existing encrypted snapshot and passed on history/resume/send/new chat. Project folders derive from Codex sessions; desktop-private pinned/empty-project metadata is not imported.
+
+Evidence: Go full tests/vet and bridge race PASS. Read-only real Codex list returned 56 sessions across 16 paths; two-page list and cross-project metadata read PASS. Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (40 JVM tests, no failures, lint 0 errors/13 warnings). Emulator sidebar fixture PASS for two project paths and selecting another session, with model/effort and draft regressions; screenshot visually confirms folder icons and Blue/Base selected rows. Fixture needed bounded wait for drawer accessibility after opening. Gradle cache was missing; dependency download/build succeeded. Reviewer agent stream disconnected; self-review fallback. No existing session resumed or sent prompts; host not restarted and physical phone not updated. Cross-project live inference/resume and Windows/macOS runtime not validated.
 
 ## Reasoning modal layout fix
 
