@@ -24,8 +24,9 @@ type Thread struct {
 
 type threadListItem struct {
 	Thread
-	Preview string `json:"preview,omitempty"`
-	Name    string `json:"name,omitempty"`
+	ProjectID *string `json:"projectId"`
+	Preview   string  `json:"preview,omitempty"`
+	Name      string  `json:"name,omitempty"`
 }
 
 func safePreview(value string) string {
@@ -57,7 +58,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["model"] = true
 		allowed["permission_mode"] = true
 		allowed["workspace"] = true
-	case "threads/list", "models/list":
+	case "threads/list", "models/list", "projects/list":
 		if cmd.Method == "threads/list" {
 			allowed["all_workspaces"] = true
 		}
@@ -155,7 +156,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, err
 		}
 		return map[string]any{"workspace": cwd, "config": summary}, nil
-	case "models/list":
+	case "models/list", "projects/list":
 		limit := 100
 		if raw, ok := p["limit"]; ok {
 			if json.Unmarshal(raw, &limit) != nil || limit < 1 || limit > 100 {
@@ -171,6 +172,24 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			if cursor != "" {
 				params["cursor"] = cursor
 			}
+		}
+		if cmd.Method == "projects/list" {
+			delete(params, "includeHidden")
+			raw, err := fetch("project/list", params)
+			if err != nil {
+				return nil, err
+			}
+			var page struct {
+				Data []projectEntry `json:"data"`
+				Next *string        `json:"nextCursor"`
+			}
+			if json.Unmarshal(raw, &page) != nil || page.Data == nil {
+				return nil, errors.New("invalid project list response")
+			}
+			return struct {
+				Data []projectEntry `json:"data"`
+				Next *string        `json:"next_cursor"`
+			}{page.Data, page.Next}, nil
 		}
 		raw, err := fetch("model/list", params)
 		if err != nil {

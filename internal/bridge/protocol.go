@@ -20,7 +20,7 @@ func DecodeCommand(raw []byte) (Command, error) {
 		return Command{}, errors.New("command id must be positive")
 	}
 	switch cmd.Method {
-	case "models/list", "status", "threads/list", "threads/start", "threads/read", "threads/resume", "turn/start", "decision/respond":
+	case "projects/list", "models/list", "status", "threads/list", "threads/start", "threads/read", "threads/resume", "turn/start", "decision/respond":
 		return cmd, nil
 	default:
 		return cmd, errors.New("unsupported Modex command")

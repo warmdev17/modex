@@ -243,7 +243,7 @@ func readFrame(reader *bufio.Reader) ([]byte, error) {
 }
 
 func (p *Process) Initialize(ctx context.Context) error {
-	_, err := p.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "modex_host", "version": "0.0.2"}})
+	_, err := p.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]string{"name": "modex_host", "version": "0.0.2"}, "capabilities": map[string]bool{"experimentalApi": true}})
 	if err != nil {
 		return err
 	}
