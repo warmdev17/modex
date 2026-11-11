@@ -1,6 +1,14 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `feat/attachment-previews`; base `f579145`. Git records the completed preview milestone commit.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/session-model-persistence`; base `5b57ca4`. JSON preview (`8f0630d`) and attachment reconnect (`5b57ca4`) are committed on stacked branches; Git records the third milestone commit.
+
+## Per-thread model and reasoning persistence
+
+Model/effort selection now lives in the encrypted per-thread host snapshot and is saved at Use model, before a prompt is sent. Resume/host status cannot overwrite an existing mobile choice. New conversations initialize from configured host settings and advertised default reasoning; the UI removes Keep current and shows the explicit effort or Reasoning unavailable when no value is supplied. First and subsequent turns explicitly use the saved choice without changing global Codex configuration. Forget clears choices; Reset cursor preserves them. Safe host status/thread projections now include configured/reported effort. Plan: [preview/session fixes](docs/superpowers/plans/2026-11-12-preview-session-fixes.md).
+
+Verification on the uncommitted third milestone tree: Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (53 JVM tests, no failures); Go full tests/vet and bridge race PASS. Emulator chat/model/effort UI regression PASS. Real pinned loopback SSH + supervisor/fake Codex continuity fixture PASS for two attachments, explicit per-thread model/high effort, disconnect/reconnect and force-stop/fresh-process restoration. The expanded fixture first reproduced an SSH protocol failure: restored image thumbnails opened SFTP during SSH key exchange. Shared file access now requires the exec channel to be connected; preview download waits for an in-progress connection. The same fixture then passed both stages. Temporary raw diagnostic logging was removed.
+
+Paid third-party gpt-6.1-sol/high inference and history reload from a separate fresh host process PASS: correct image/file response, two attachment paths and model/effort preserved. This is host/provider evidence, separate from emulator fake-provider state testing. JSON Mocha viewer fixture PASS with visual screenshot inspection; image/file viewer fixture also PASS. Emulator stopped after testing. Physical phone not installed, production supervisor not restarted, no global configuration changed, no prompts replayed, no push/merge. Self-review only for this follow-up; no independent reviewer tool used. PDF remains Open with. Unknown custom-model effort stays explicitly unavailable rather than borrowing another model's setting. Remote files still need to exist for an uncached preview; the app cache may be evicted by Android.
 
 ## Attachment reconnect follow-up
 

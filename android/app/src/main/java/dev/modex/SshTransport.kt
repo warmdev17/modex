@@ -109,7 +109,8 @@ class SshTransport {
     internal fun <T> withFiles(action: (ChannelSftp) -> T): T = synchronized(fileLock) {
         check(!closed)
         val ssh = session ?: error("Disconnected")
-        check(ssh.isConnected)
+        // Session.isConnected becomes true before the SSH handshake finishes.
+        check(ssh.isConnected && channel?.isConnected == true) { "SSH attach is not ready" }
         val files = ssh.openChannel("sftp") as ChannelSftp
         fileChannel = files
         try {

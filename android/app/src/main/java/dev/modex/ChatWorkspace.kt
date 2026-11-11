@@ -71,9 +71,10 @@ internal fun ChatWorkspace(
     busy: Boolean, historyLoading: Boolean, hasMore: Boolean, error: String, sessionSettings: String,
     sessionModel: String, decisions: List<JSONObject>, answeringDecisionIds: Set<String>,
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
-    onCreate: (String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
+    onCreate: (String, String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
+    sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
     threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
     registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = "",
     attachments: List<Attachment> = emptyList(), attachmentWorking: Boolean = false,
@@ -96,13 +97,10 @@ internal fun ChatWorkspace(
     LaunchedEffect(newChat) { if (newChat) permissionMode = "host-default" }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf("") }
-    var queuedModels by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
-    var queuedEfforts by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
     var effortInput by rememberSaveable { mutableStateOf("") }
-    val queuedModel = queuedModels[selected].orEmpty()
-    LaunchedEffect(selected, sessionModel) {
-        if (queuedModel.isNotBlank() && queuedModel == sessionModel) queuedModels = HashMap(queuedModels).apply { remove(selected) }
-    }
+    var newEffort by rememberSaveable { mutableStateOf("") }
+    fun defaultEffort(id: String) = if (id == hostModel && hostEffort.isNotBlank()) hostEffort else models.firstOrNull { it.model == id }?.defaultEffort.orEmpty()
+    LaunchedEffect(newChat) { if (newChat) { model = hostModel; newEffort = defaultEffort(hostModel) } }
     var showModel by rememberSaveable { mutableStateOf(false) }
     var modelInput by rememberSaveable { mutableStateOf("") }
     val selectedDecisions = decisions.filter { it.optString("thread_id") == selected }
@@ -227,14 +225,14 @@ internal fun ChatWorkspace(
             }
             PromptComposer(
                 prompt, { updatePrompt(it) }, busy,
-                (queuedModel.ifBlank { sessionModel.ifBlank { "Host model" } } + queuedEfforts[selected].orEmpty().let { if (it.isEmpty()) "" else " · $it" }), connected && selected.isNotBlank(),
-                { modelInput = queuedModel.ifBlank { sessionModel }; effortInput = queuedEfforts[selected].orEmpty(); showModel = true },
+                (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank(),
+                { modelInput = sessionModel; effortInput = sessionEffort.ifBlank { defaultEffort(sessionModel) }; showModel = true },
                 connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking,
                 attachments, attachmentWorking, attachmentProgress, attachmentError,
                 connected && selected.isNotBlank() && !busy && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it }
             ) {
-                if (onSend(prompt, queuedModel, queuedEfforts[selected].orEmpty())) updatePrompt("")
+                if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) })) updatePrompt("")
             }
         }
     }
@@ -242,7 +240,8 @@ internal fun ChatWorkspace(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Uses your host’s provider. Folder: ${threadWorkspaces[selected].orEmpty().ifBlank { "Host workspace" }}", color = Mocha.Subtext)
-            ModelPicker(models, modelCatalogStatus, model, { model = it })
+            ModelPicker(models, modelCatalogStatus, model, { model = it; newEffort = defaultEffort(it) })
+            ReasoningControl(models.firstOrNull { it.model == model }, newEffort) { newEffort = it }
             Column(Modifier.selectableGroup()) {
                 permissionModes.forEach { (mode, label) ->
                     Row(Modifier.fillMaxWidth().selectable(selected = permissionMode == mode, role = Role.RadioButton, onClick = { permissionMode = mode }).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -258,7 +257,7 @@ internal fun ChatWorkspace(
                 else -> "Requests user approval when sandbox restrictions need to be lifted. Host policy may restrict this mode."
             }, style = MaterialTheme.typography.bodySmall, color = if (permissionMode == "full-access") MaterialTheme.colorScheme.error else Mocha.Subtext)
         } },
-        confirmButton = { TextButton(enabled = canSwitch && validModelId(model), onClick = { onCreate(model.trim(), permissionMode); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
+        confirmButton = { TextButton(enabled = canSwitch && model.isNotBlank() && validModelId(model), onClick = { onCreate(model.trim(), permissionMode, newEffort); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
         dismissButton = { TextButton(onClick = { newChat = false }) { Text("Cancel") } }
     )
     if (showSettings) AlertDialog(
@@ -271,13 +270,12 @@ internal fun ChatWorkspace(
         title = { Text("Model for next turn") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Codex applies this model to the next turn and later turns in this session.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
-            ModelPicker(models, modelCatalogStatus, modelInput, { modelInput = it; effortInput = "" })
+            ModelPicker(models, modelCatalogStatus, modelInput, { modelInput = it; effortInput = defaultEffort(it) })
             ReasoningControl(models.firstOrNull { it.model == modelInput.trim() }, effortInput) { effortInput = it }
 
         } },
-        confirmButton = { TextButton(enabled = validModelId(modelInput), onClick = {
-            queuedModels = HashMap(queuedModels).apply { if (modelInput.isEmpty()) remove(selected) else put(selected, modelInput.trim()) }
-            queuedEfforts = HashMap(queuedEfforts).apply { if (effortInput.isEmpty()) remove(selected) else put(selected, effortInput) }
+        confirmButton = { TextButton(enabled = modelInput.isNotBlank() && validModelId(modelInput), onClick = {
+            onModelChoice(modelInput.trim(), effortInput)
             showModel = false
         }) { Text("Use model") } },
         dismissButton = { TextButton(onClick = { showModel = false }) { Text("Cancel") } }

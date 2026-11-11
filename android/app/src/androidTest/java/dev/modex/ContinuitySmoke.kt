@@ -27,7 +27,7 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
                 var ready = false
                 runOnMainSync { ready = condition() }
                 if (ready) return
-                check(System.currentTimeMillis() < deadline) { "State timeout" }
+                check(System.currentTimeMillis() < deadline) { "State timeout connected=${session.connected} connecting=${session.connecting} key=${session.keyLoaded} selected=${session.selected} loading=${session.historyLoading} error=${session.error}" }
                 Thread.sleep(100)
             }
         }
@@ -36,12 +36,24 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
             runOnMainSync { session.select("fixture-thread") }
         }
         await { session.selected == "fixture-thread" && !session.historyLoading && session.messages.any { it.text == "Stored assistant reply" } }
+        runOnMainSync { check(session.messages.first { it.role == "You" }.attachments.size == 2) { "Attachment metadata lost from reloaded history" } }
+        if (!restore) {
+            runOnMainSync { check(session.sessionModel == "fixture" && session.sessionEffort == "low") { "Host defaults not resolved" } }
+            runOnMainSync { session.chooseModel("fixture-chosen", "high"); session.disconnect() }
+            await { !session.connected && !session.connecting }
+            runOnMainSync {
+                check(session.sessionModel == "fixture-chosen" && session.sessionEffort == "high") { "Choice lost on disconnect" }
+                session.connect(session.savedConnection!!)
+            }
+            await { session.connected && !session.historyLoading }
+        }
+        runOnMainSync { check(session.sessionModel == "fixture-chosen" && session.sessionEffort == "high") { "Choice lost on reconnect/process restore" } }
         Thread.sleep(700)
         val screenshot = uiAutomation.takeScreenshot() ?: error("No screenshot")
         File(targetContext.filesDir, "continuity-chat.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         screenshot.recycle()
         if (restore) runOnMainSync { check(session.keyLoaded); session.forget() }
-        result.putString("result", "PASS: ${if (restore) "process restore and history" else "history and saved host"}")
+        result.putString("result", "PASS: ${if (restore) "process restore, history and model/effort choice" else "history, disconnect/reconnect and saved model/effort choice"}")
         finish(-1, result)
     } catch (failure: Throwable) {
         runOnMainSync { vm?.forget() }

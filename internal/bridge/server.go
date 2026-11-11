@@ -20,6 +20,8 @@ type Thread struct {
 	ID       string `json:"id"`
 	Cwd      string `json:"cwd"`
 	Provider string `json:"modelProvider"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"reasoningEffort,omitempty"`
 }
 
 type threadListItem struct {

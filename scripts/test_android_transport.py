@@ -59,7 +59,8 @@ AllowUsers {getpass.getuser()}
 Subsystem sftp internal-sftp
 ''')
         # Emulator reaches the host through 10.0.2.2; keys are ephemeral and passwords disabled.
-        sshd = subprocess.Popen([shutil.which('sshd'), '-D', '-e', '-f', str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        sshd_log = (root / 'sshd.log').open('w+')
+        sshd = subprocess.Popen([shutil.which('sshd'), '-D', '-e', '-f', str(config)], stdout=subprocess.DEVNULL, stderr=sshd_log)
         state = root / ('state[*?] space' if args.attachments else 'state')
         started = False
         try:
@@ -80,9 +81,9 @@ import json,sys
 for line in sys.stdin:
  r=json.loads(line)
  if r.get('method')=='initialized':continue
- thread={'id':'fixture-thread','cwd':sys.argv[0].rsplit('/',1)[0],'modelProvider':'fixture','turns':[{'status':'completed','items':[{'id':'u','type':'userMessage','content':[{'type':'text','text':'Previous question'}]},{'id':'a','type':'agentMessage','text':'Stored assistant reply'}]}]}
+ thread={'id':'fixture-thread','cwd':sys.argv[0].rsplit('/',1)[0],'modelProvider':'fixture','model':'fixture','reasoningEffort':'low','turns':[{'status':'completed','items':[{'id':'u','type':'userMessage','content':[{'type':'text','text':'Previous question'},{'type':'localImage','path':sys.argv[0].rsplit('/',1)[0]+'/image.png'},{'type':'text','text':'Attached files selected by the user (JSON paths):\\n'+json.dumps([{'name':'notes.txt','path':sys.argv[0].rsplit('/',1)[0]+'/notes.txt'}])}]},{'id':'a','type':'agentMessage','text':'Stored assistant reply'}]}]}
  method=r.get('method')
- result={'config':{'model':'fixture','model_provider':'fixture'}} if method=='config/read' else {'thread':thread} if method in ('thread/read','thread/resume') else {'data':[thread],'nextCursor':None} if method=='thread/list' else {}
+ result={'config':{'model':'fixture','model_provider':'fixture','model_reasoning_effort':'low'}} if method=='config/read' else {'thread':thread} if method in ('thread/read','thread/resume') else {'data':[thread],'nextCursor':None} if method=='thread/list' else {}
  if method=='turn/start':
   inputs=r['params']['input']
   assert any(p.get('type')=='localImage' and p['path'].endswith('image.png') for p in inputs)
@@ -114,6 +115,12 @@ for line in sys.stdin:
                 if args.continuity:
                     run(adb + ['shell', 'am', 'force-stop', 'dev.modex'])
                     time.sleep(.4)
+        except Exception:
+            sshd_log.flush(); sshd_log.seek(0)
+            print('Fixture SSH diagnostics:')
+            for line in sshd_log.read().splitlines()[-12:]:
+                print(line)
+            raise
         finally:
             try:
                 run(adb + ['shell', 'am', 'force-stop', 'dev.modex'])
@@ -125,6 +132,7 @@ for line in sys.stdin:
                 finally:
                     sshd.terminate()
                     sshd.wait(timeout=5)
+                    sshd_log.close()
 
 
 if __name__ == '__main__':
