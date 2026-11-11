@@ -70,3 +70,9 @@ Ruling: keep existing uncommitted workspace and no auto-commits; use PROJECT_STA
 `threads/read` messages may additionally have `role: command`, stable `id`, `command`, `cwd`, `status`, nullable integer `exit_code`, and plain output in `text`. Text roles remain `user`/`assistant`. Command output is bounded to 64 KiB per item and 1 MiB total per history response, with a visible truncation notice; original Codex logs are unchanged. Existing frame limits still apply to the full response.
 
 Android reduces forwarded `item/started`, `item/completed`, `item/agentMessage/delta`, and `item/commandExecution/outputDelta` by item ID after selected-thread validation. This separates commentary/final messages and keeps each command's state and output in one collapsible card. Existing text-only saved state remains readable. This does not enumerate OS processes, expose additional execution controls or change approval policy.
+
+## Model catalog and reasoning extension (2026-11-11)
+
+`models/list {limit?:1..100,cursor?:string}` calls Codex `model/list` with visible models only. Result `{data:[{id,model,displayName,defaultReasoningEffort,supportedReasoningEfforts:[{reasoningEffort,description}]}],next_cursor:string|null}` projects picker fields only. Catalog may be bundled/cached; it is not proof of provider model access. Android follows cursor pages on connect and retains custom IDs if discovery fails.
+
+`turn/start` accepts optional `effort`: nonblank single-line string up to 64 UTF-8 bytes, forwarded unchanged to Codex. Omission inherits the session's current setting. Current schema advertises arbitrary effort strings; the Android slider only offers efforts from the chosen model. Changing model clears the queued effort; changes apply to the next explicit send. No provider HTTP calls or credentials on the phone.

@@ -55,7 +55,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	case "threads/start":
 		allowed["model"] = true
 		allowed["permission_mode"] = true
-	case "threads/list":
+	case "threads/list", "models/list":
 		allowed["limit"] = true
 		allowed["cursor"] = true
 	case "threads/read", "threads/resume":
@@ -67,6 +67,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["thread_id"] = true
 		allowed["text"] = true
 		allowed["model"] = true
+		allowed["effort"] = true
 	case "decision/respond":
 		allowed["decision_id"] = true
 		allowed["result"] = true
@@ -140,6 +141,38 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, err
 		}
 		return map[string]any{"workspace": cwd, "config": summary}, nil
+	case "models/list":
+		limit := 100
+		if raw, ok := p["limit"]; ok {
+			if json.Unmarshal(raw, &limit) != nil || limit < 1 || limit > 100 {
+				return nil, errors.New("invalid model limit")
+			}
+		}
+		params := map[string]any{"limit": limit, "includeHidden": false}
+		if raw, ok := p["cursor"]; ok {
+			var cursor string
+			if string(raw) == "null" || json.Unmarshal(raw, &cursor) != nil || len(cursor) > 4096 {
+				return nil, errors.New("invalid model cursor")
+			}
+			if cursor != "" {
+				params["cursor"] = cursor
+			}
+		}
+		raw, err := fetch("model/list", params)
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Data []modelEntry `json:"data"`
+			Next *string      `json:"nextCursor"`
+		}
+		if json.Unmarshal(raw, &page) != nil || page.Data == nil {
+			return nil, errors.New("invalid model list response")
+		}
+		return struct {
+			Data []modelEntry `json:"data"`
+			Next *string      `json:"next_cursor"`
+		}{page.Data, page.Next}, nil
 	case "threads/list":
 		limit := 20
 		cursor := ""
@@ -195,6 +228,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("model must be a nonempty single-line string up to 256 bytes")
 			}
 		}
+		var effort string
+		if raw, ok := p["effort"]; ok {
+			if json.Unmarshal(raw, &effort) != nil || strings.TrimSpace(effort) == "" || len(effort) > 64 || strings.ContainsAny(effort, "\r\n\x00") {
+				return nil, errors.New("invalid reasoning effort")
+			}
+		}
 		raw, err := fetch("thread/read", map[string]any{"threadId": id, "includeTurns": false})
 		if err != nil {
 			return nil, err
@@ -211,6 +250,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		params := map[string]any{"threadId": id, "input": []map[string]string{{"type": "text", "text": text}}}
 		if model != "" {
 			params["model"] = model
+		}
+		if effort != "" {
+			params["effort"] = effort
 		}
 		return fetch("turn/start", params)
 	case "decision/respond":
