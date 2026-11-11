@@ -4,6 +4,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
+    signingConfigs.getByName("debug") {
+        // Keep upgrades compatible when Gradle caches move or are recreated.
+        storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
+    }
     namespace = "dev.modex"
     compileSdk = 36
     defaultConfig { applicationId = "dev.modex"; minSdk = 26; targetSdk = 36; versionCode = 1; versionName = "0.1.0" }

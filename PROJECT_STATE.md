@@ -1,6 +1,10 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/remote-project-sidebar`; base `111b774`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/stable-android-debug-signing`; base `2f75a10`. Git records final commits.
+
+## Stable Android debug signing
+
+Phone update rejected new APK certificate ae6929…; installed package on Android guest user had certificate 6c1a50…, matching existing ~/.android/debug.keystore. Re-signed current APK with that existing key and adb install -r on device 24d2ee04 PASS; no uninstall/data clear. Build now pins debug storeFile to user.home/.android/debug.keystore independent of Gradle cache. Keystore remains local and is not committed. Final assembleDebug PASS; generated APK certificate verified matching 6c1a50… old key. App UI not opened automatically; no phone inference recheck.
 
 ## Remote project sidebar
 
