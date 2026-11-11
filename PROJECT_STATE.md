@@ -1,6 +1,10 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/desktop-project-roots`; base `649f850`. Git records final commits.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Publication integration: `main` from `chore/publish-github`, based on `1b2ba2e`. Git records final commits.
+
+## GitHub publication
+
+User authorized publication to `git@github.com:warmdev17/modex.git`, retaining every commit without squash. Remote inspected empty; all local feature/fix branch tips are ancestors of `1b2ba2e` (38 existing commits). Integrate into main with an explicit merge commit; publish main with all reachable history, keeping local branches. No history rewrite or force push. Pre-publication checks on `1b2ba2e`: Go full suite/vet PASS; Android assembleDebug/testDebugUnitTest/lintDebug offline PASS; Python unittest discovery PASS (2 checks, 3 integration tests skipped without fixture binaries). Pattern scan of 263 historical blobs found no private-key/API-token matches; this is a bounded scan, not a guarantee. Python bytecode ignored at repository root. No emulator started, phone changes, or supervisor restart. Remote push verification belongs to the final handoff.
 
 ## Explicit Desktop projects
 
