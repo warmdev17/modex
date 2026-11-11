@@ -16,6 +16,9 @@ fun Instrumentation.chatUiSmoke() {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var markdown by mutableStateOf("## Ready to build\n\nUse **native Android** with `Jetpack Compose`.\n\n- Keep the session ID\n- Render Markdown cleanly\n\n```kotlin\nval message = \"Hello, Modex\"\nprintln(message)\n```")
         var selected = "fixture-one"
+        var attachmentFiles by mutableStateOf(listOf(Attachment("/fixture/reference.png", "reference.png", "image")))
+        var phoneChosen = false
+        var remoteChosen = false
         var attempted = ""
         var attemptedModel = ""
         var attemptedEffort = ""
@@ -26,7 +29,7 @@ fun Instrumentation.chatUiSmoke() {
                 listOf("fixture-one","fixture-two","standalone"), mapOf("standalone" to "Standalone chat", "fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
                 listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone."), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
                 "gpt-5.6-sol", emptyList(), emptySet(),
-                { current = it; selected = it }, {}, {}, { _, _ -> }, { text, model, effort -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, registeredProjects = listOf(RemoteProject("p1", "modex", listOf("/work/modex")), RemoteProject("p2", "other", listOf("/work/other"))), projectMembership = mapOf("fixture-one" to "p1", "fixture-two" to "p2"), threadWorkspaces = mapOf("fixture-one" to "/work/modex", "fixture-two" to "/work/other", "standalone" to "/generated/ssh-x20"), models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
+                { current = it; selected = it }, {}, {}, { _, _ -> }, { text, model, effort -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, registeredProjects = listOf(RemoteProject("p1", "modex", listOf("/work/modex")), RemoteProject("p2", "other", listOf("/work/other"))), projectMembership = mapOf("fixture-one" to "p1", "fixture-two" to "p2"), threadWorkspaces = mapOf("fixture-one" to "/work/modex", "fixture-two" to "/work/other", "standalone" to "/generated/ssh-x20"), attachments = attachmentFiles, onPhoneFiles = { phoneChosen = true }, onRemoteFiles = { remoteChosen = true }, onRemoveAttachment = { path -> attachmentFiles = attachmentFiles.filter { it.path != path } }, models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
             ) } }
         } }
         fun node(label: String): AccessibilityNodeInfo? {
@@ -56,6 +59,15 @@ fun Instrumentation.chatUiSmoke() {
             val bmp = uiAutomation.takeScreenshot() ?: error("No screenshot")
             File(targetContext.filesDir,name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; bmp.recycle()
         }
+        check(node("reference.png") != null) { "Attachment chip missing" }
+        click("Attach files")
+        check(node("From this phone") != null && node("From connected computer") != null) { "Attachment sources missing" }
+        shot("attachment-sources.png")
+        click("From this phone")
+        check(phoneChosen)
+        click("Attach files"); click("From connected computer"); check(remoteChosen)
+        click("Remove reference.png")
+        check(attachmentFiles.isEmpty()) { "Attachment removal failed" }
         shot("chat-mocha.png")
         click("Copy code")
         check(node("Copied") != null)
@@ -89,6 +101,7 @@ fun Instrumentation.chatUiSmoke() {
         fun shell(command: String) {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand(command)).use { it.readBytes() }
         }
+        runOnMainSync { attachmentFiles = listOf(Attachment("/fixture/retry.txt", "retry.txt", "file")) }
         click("Message Codex")
         val field = node("Message Codex") ?: error("Composer inaccessible after focus")
         val bounds = android.graphics.Rect(); field.getBoundsInScreen(bounds)
@@ -104,7 +117,7 @@ fun Instrumentation.chatUiSmoke() {
             attempted = ""
         }
         click("Send message")
-        runOnMainSync { check(attempted == "Keep this draft") { "Rejected send lost draft" } }
+        runOnMainSync { check(attempted == "Keep this draft") { "Rejected send lost draft" }; check(attachmentFiles.single().name == "retry.txt") { "Rejected send lost attachment" } }
         Thread.sleep(700)
         shot("composer-keyboard.png")
         shell("input keyevent 4")
@@ -233,4 +246,50 @@ fun Instrumentation.commandTimelineSmoke() {
         output.putString("result", "PASS: running card, hidden output, expand/collapse, failed exit status and retained output")
         finish(-1, output)
     } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
+}
+
+/** Remote picker selection and path navigation, without reading any remote machine. */
+fun Instrumentation.remoteFilePickerSmoke() {
+    val result = Bundle()
+    try {
+        val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        var attached = emptyList<RemoteFile>()
+        var browsed = ""
+        runOnMainSync { activity.setContent { ModexTheme {
+            RemoteFilePicker("/work", RemoteDirectory("/work", "/", listOf(
+                RemoteFile("src", "/work/src", true, 0),
+                RemoteFile("notes.txt", "/work/notes.txt", false, 48),
+                RemoteFile("photo.png", "/work/photo.png", false, 1024),
+                RemoteFile("huge.zip", "/work/huge.zip", false, MAX_ATTACHMENT_BYTES + 1)
+            ), false), false, "", true, 8, { browsed = it }, { attached = it }, {})
+        } } }
+        fun node(label: String): AccessibilityNodeInfo? {
+            fun walk(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+                if (n == null) return null
+                if (n.text?.toString() == label || n.contentDescription?.toString() == label) return n
+                for (i in 0 until n.childCount) walk(n.getChild(i))?.let { return it }
+                return null
+            }
+            return walk(uiAutomation.rootInActiveWindow)
+        }
+        fun click(label: String) {
+            val deadline = System.currentTimeMillis() + 5000
+            var n = node(label)
+            while (n == null && System.currentTimeMillis() < deadline) { Thread.sleep(100); n = node(label) }
+            while (n != null && !n.isClickable) n = n.parent
+            check(n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) { "Cannot click $label" }
+            waitForIdleSync(); Thread.sleep(400)
+        }
+        click("notes.txt"); click("photo.png")
+        check(node("Attach (2)") != null)
+        check(node("Over 20 MiB limit") != null)
+        click("src"); check(browsed == "/work/src")
+        click("Up"); check(browsed == "/")
+        val bitmap = uiAutomation.takeScreenshot() ?: error("No picker screenshot")
+        File(targetContext.filesDir,"remote-file-picker.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; bitmap.recycle()
+        click("Attach (2)")
+        check(attached.map { it.name } == listOf("notes.txt","photo.png"))
+        result.putString("result","PASS: remote picker multi-selection, folder navigation, oversized-file state and attachment confirmation")
+        finish(-1,result)
+    } catch(e: Throwable) { result.putString("result","FAIL: remote picker: ${e.message}"); finish(0,result) }
 }

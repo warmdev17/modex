@@ -75,6 +75,18 @@ private fun ModexApp() {
             importError = "The file provider could not open this file. Copy it to Downloads and select it again."
         }
     }
+    var phoneThread by rememberSaveable { mutableStateOf("") }
+    var phoneGeneration by rememberSaveable { mutableStateOf(0) }
+    var phoneTarget by rememberSaveable { mutableStateOf("") }
+    var remoteThread by rememberSaveable { mutableStateOf("") }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (phoneTarget == vm.savedConnection.toString()) vm.attachments.fromPhone(phoneThread, uris, phoneGeneration, context.contentResolver)
+    }
+    if (remoteThread.isNotEmpty()) RemoteFilePicker(
+        vm.selectedWorkspace, vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
+        MAX_ATTACHMENTS - vm.attachments.drafts[remoteThread].orEmpty().size, vm.attachments::browse,
+        { files -> files.forEach { vm.attachments.addRemote(remoteThread, it) }; remoteThread = "" }, { remoteThread = "" }
+    )
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
         ChatWorkspace(
             host = vm.savedConnection?.host.orEmpty(), connected = vm.connected, connecting = vm.connecting,
@@ -86,7 +98,12 @@ private fun ModexApp() {
             onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect,
             models = vm.models, modelCatalogStatus = vm.modelCatalogStatus,
             threadWorkspaces = vm.threadWorkspaces, threadListLoading = vm.threadListLoading,
-            registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus
+            registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus,
+            attachments = vm.attachments.drafts[vm.selected].orEmpty(), attachmentWorking = vm.attachments.working,
+            attachmentProgress = vm.attachments.progress, attachmentError = vm.attachments.error,
+            onPhoneFiles = { phoneThread = vm.selected; phoneGeneration = vm.attachments.generation; phoneTarget = vm.savedConnection.toString(); documentPicker.launch(arrayOf("*/*")) },
+            onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.selectedWorkspace) },
+            onRemoveAttachment = { vm.attachments.remove(vm.selected, it) }
         )
     } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

@@ -1,5 +1,6 @@
 package dev.modex
 
+import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.HostKey
 import com.jcraft.jsch.HostKeyRepository
@@ -19,6 +20,8 @@ class SshTransport {
     @Volatile private var channel: ChannelExec? = null
     @Volatile private var closed = false
     private val writeLock = Any()
+    private val fileLock = Any()
+    @Volatile private var fileChannel: ChannelSftp? = null
 
     fun open(config: Connection, key: ByteArray, journal: JournalState, onHello: () -> Unit, onFrame: (JSONObject) -> Unit) {
         var stage = "config"
@@ -103,7 +106,20 @@ class SshTransport {
         output.flush()
     }
 
-    fun close() { closed = true; channel?.disconnect(); session?.disconnect() }
+    internal fun <T> withFiles(action: (ChannelSftp) -> T): T = synchronized(fileLock) {
+        check(!closed)
+        val ssh = session ?: error("Disconnected")
+        check(ssh.isConnected)
+        val files = ssh.openChannel("sftp") as ChannelSftp
+        fileChannel = files
+        try {
+            files.connect(15000)
+            check(!closed)
+            action(files)
+        } finally { files.disconnect(); fileChannel = null }
+    }
+
+    fun close() { closed = true; fileChannel?.disconnect(); channel?.disconnect(); session?.disconnect() }
 }
 
 private fun MessageDigestEqual(expected: String, actual: String) = java.security.MessageDigest.isEqual(expected.toByteArray(), actual.toByteArray())

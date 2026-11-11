@@ -1,6 +1,14 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `main`; integration base `c106c0c`. Git records final commits.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `feat/composer-attachments`; base `b86fdb8`, host milestone `1ac728e`. Git records the Android milestone commit.
+
+## Composer attachments
+
+[Plan](docs/superpowers/plans/2026-11-12-composer-attachments.md). Implemented + source menu (phone/connected computer), native document picker, SFTP remote browser with multiple selection, removable per-thread draft chips and upload progress/errors. Bundled genuine OpenAI knot vector tinted Mocha Blue replaces the model glyph. Reuses pinned SSH; bounded streaming/atomic uploads in private state/attachments directories. Bridge validates at most 8 readable regular files, 20 MiB each; images use native localImage and files use quoted path references under existing approvals. Attachment-only sends/history supported. No file bytes in journal. ACK clears only submitted draft paths in the origin thread; rejection preserves selections.
+
+Verification on feature tree: Go full suite/vet PASS; Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS. Emulator chat UI and remote-picker fixtures PASS; source-menu screenshot inspected. Isolated SSH/SFTP integration PASS: exact content, 0700/0600 permissions, partial cleanup, phone URI stream, origin-thread/ACK isolation, literal wildcard/space paths, native image/file mapping. Paid third-party gpt-6.1-sol turn correctly identified a red PNG, read a random token from an attached text file and reloaded history. Python discovery PASS (2 checks, 3 optional integrations skipped). Read-only specialist review found JSch glob expansion; fixed with API-specific escaping and unit/integration regression. Emulator stopped after testing; no physical phone install or production supervisor restart.
+
+Limitations: completed uploads retained (including abandoned drafts), no retention UI; drafts survive rotation/reconnect but not process death. SFTP must be enabled, image capability depends on provider/model. Physical-phone and Windows/macOS runtime unverified. Current Windows supervisor remains unsupported as documented. APK ready at standard debug output. Rebuild/restart host when idle and update APK for device testing. Feature remains local, requires PR before merge; no push/merge authorized for this milestone.
 
 ## Minor-change merge workflow
 

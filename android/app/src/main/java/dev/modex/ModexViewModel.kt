@@ -16,6 +16,7 @@ import org.json.JSONObject
 
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
+        method == "turn/start" && (detail.contains("attachment", true) || detail.contains("select PNG")) -> "An attachment could not be read. Check the file still exists, is at most 20 MiB, and images are PNG, JPEG, GIF or WebP."
         detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
         detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
         detail.contains("model_provider_mismatch", ignoreCase = true) -> "This session belongs to a different Codex provider or model configuration."
@@ -59,9 +60,11 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private var config: Connection? = null
     private var journal = JournalState()
     private var transport: SshTransport? = null
+    internal val attachments = AttachmentState(viewModelScope, { transport }, { config })
     // Avoid matching responses retained from an earlier app process.
     private var sequence = java.security.SecureRandom().nextLong().ushr(12) + 1
     private val pending = mutableMapOf<Long, Pair<String, String>>()
+    private val sentAttachmentPaths = mutableMapOf<Long, Pair<String, Set<String>>>()
 
     init {
         (application as ModexApplication).session = this
@@ -102,6 +105,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (reconnectAllowed && !connected && !connecting) savedConnection?.let { connect(it) }
     }
     fun forget() {
+        attachments.clear(); sentAttachmentPaths.clear()
         sessionSettings = ""
         disconnect(); transport = null; connected = false; connecting = false; reconnectAllowed = false; saveJob?.cancel()
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
@@ -120,7 +124,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     fun reset() {
         if (connected || connecting) return
         sessionSettings = ""; sessionModel = ""; threadListLoading = false; titles = emptyMap()
-        journal = JournalState(); pending.clear(); threads = emptyList()
+        journal = JournalState(); pending.clear(); sentAttachmentPaths.clear(); threads = emptyList()
         selected = ""; selectedWorkspace = ""; threadWorkspaces = emptyMap(); messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); busy = false; error = ""
         persist()
     }
@@ -183,9 +187,11 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         nextCursor?.let { threadListLoading = true; request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("cursor", it), "more") }
     }
     fun send(text: String, model: String, effort: String = ""): Boolean {
-        if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank() || !validModelId(model) || !validEffort(effort)) return false
-        messages = messages + ChatEntry(role = "You", text = text); busy = true
-        request("turn/start", withWorkspace(turnStartParams(selected, text, model, effort), selectedWorkspace), model.trim())
+        val files = attachments.drafts[selected].orEmpty()
+        if (!connected || busy || attachments.working || historyLoading || switching() || selected.isEmpty() || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
+        messages = messages + ChatEntry(role = "You", text = attachmentMessage(text, files)); busy = true
+        val id = request("turn/start", withWorkspace(turnStartParams(selected, text, model, effort, files), selectedWorkspace), model.trim())
+        if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         return true
     }
     fun answer(decision: JSONObject, result: JSONObject) {
@@ -196,8 +202,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         request("decision/respond", JSONObject().put("decision_id", id).put("result", result), id)
     }
     private fun switching() = pending.values.any { it.first == "threads/start" || it.first == "threads/resume" }
-    private fun request(method: String, params: JSONObject, tag: String = "") {
-        if (!connected) return
+    private fun request(method: String, params: JSONObject, tag: String = ""): Long? {
+        if (!connected) return null
         val id = sequence++; pending[id] = method to tag
         persist()
         val command = JSONObject().put("id", id).put("method", method).put("params", params)
@@ -205,10 +211,13 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             try { transport?.send(command) ?: error("Disconnected") }
             catch (_: Exception) { withContext(Dispatchers.Main) { error = "Delivery uncertain. Reconnect and observe before retrying." } }
         }
+        return id
     }
     private fun apply(frame: JSONObject) {
         if (frame.has("id")) {
-            val operation = pending.remove(frame.getLong("id")) ?: return
+            val id = frame.getLong("id")
+            val sentAttachments = sentAttachmentPaths.remove(id)
+            val operation = pending.remove(id) ?: return
             if (frame.has("error")) {
                 if (operation.first == "projects/list") { projectStatus = "Project list unavailable. Update the host/Codex; chats remain in Recents."; return }
                 if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
@@ -279,7 +288,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     answeringDecisionIds -= operation.second
                     decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
                 }
-                "turn/start" -> if (operation.second.isNotBlank()) sessionModel = operation.second
+                "turn/start" -> { sentAttachments?.let { attachments.sent(it.first, it.second) }; if (operation.second.isNotBlank()) sessionModel = operation.second }
             }
             return
         }

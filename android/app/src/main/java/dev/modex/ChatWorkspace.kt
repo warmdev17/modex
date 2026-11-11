@@ -3,6 +3,8 @@ package dev.modex
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,11 +35,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
     val color = LocalContentColor.current
+    if (icon == ChatIcon.Model) {
+        Icon(painterResource(R.drawable.ic_openai), description, Modifier.size(22.dp), tint = color)
+        return
+    }
     Canvas(Modifier.size(22.dp).semantics { if (description != null) contentDescription = description }) {
         val u = size.width / 24
         fun line(x: Float, y: Float, x2: Float, y2: Float) = drawLine(color, Offset(x*u,y*u), Offset(x2*u,y2*u), 1.8f*u, StrokeCap.Round)
@@ -48,7 +54,12 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
             ChatIcon.Close -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
             ChatIcon.More -> for (y in listOf(5f,12f,19f)) drawCircle(color,1.4f*u,Offset(12*u,y*u))
             ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }
-            ChatIcon.Model -> { drawCircle(color, 7f*u, Offset(12*u,12*u), style = androidx.compose.ui.graphics.drawscope.Stroke(1.6f*u)); line(7f,12f,17f,12f); line(12f,7f,12f,17f) }
+            ChatIcon.Model -> Unit
+            ChatIcon.Attach -> { line(5f,12f,19f,12f); line(12f,5f,12f,19f) }
+            ChatIcon.File -> { line(5f,3f,14f,3f); line(14f,3f,19f,8f); line(19f,8f,19f,21f); line(19f,21f,5f,21f); line(5f,21f,5f,3f); line(14f,3f,14f,8f); line(14f,8f,19f,8f) }
+            ChatIcon.Image -> { line(3f,4f,21f,4f); line(21f,4f,21f,20f); line(21f,20f,3f,20f); line(3f,20f,3f,4f); line(3f,17f,9f,11f); line(9f,11f,15f,17f); line(13f,15f,17f,11f); line(17f,11f,21f,15f); drawCircle(color,1.5f*u,Offset(16*u,8*u)) }
+            ChatIcon.Phone -> { line(7f,3f,17f,3f); line(17f,3f,17f,21f); line(17f,21f,7f,21f); line(7f,21f,7f,3f); line(11f,18f,13f,18f) }
+            ChatIcon.Computer -> { line(3f,4f,21f,4f); line(21f,4f,21f,16f); line(21f,16f,3f,16f); line(3f,16f,3f,4f); line(12f,16f,12f,21f); line(8f,21f,16f,21f) }
         }
     }
 }
@@ -64,7 +75,10 @@ internal fun ChatWorkspace(
     onConnection: () -> Unit, onDisconnect: () -> Unit,
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
     threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
-    registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = ""
+    registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = "",
+    attachments: List<Attachment> = emptyList(), attachmentWorking: Boolean = false,
+    attachmentProgress: String = "", attachmentError: String = "",
+    onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {}
 ) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
@@ -207,7 +221,10 @@ internal fun ChatWorkspace(
                 prompt, { updatePrompt(it) }, busy,
                 (queuedModel.ifBlank { sessionModel.ifBlank { "Host model" } } + queuedEfforts[selected].orEmpty().let { if (it.isEmpty()) "" else " · $it" }), connected && selected.isNotBlank(),
                 { modelInput = queuedModel.ifBlank { sessionModel }; effortInput = queuedEfforts[selected].orEmpty(); showModel = true },
-                connected && !historyLoading && selected.isNotBlank() && !busy
+                connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking,
+                attachments, attachmentWorking, attachmentProgress, attachmentError,
+                connected && selected.isNotBlank() && !busy && !attachmentWorking,
+                onPhoneFiles, onRemoteFiles, onRemoveAttachment
             ) {
                 if (onSend(prompt, queuedModel, queuedEfforts[selected].orEmpty())) updatePrompt("")
             }
@@ -260,25 +277,50 @@ internal fun ChatWorkspace(
 }
 
 @Composable
-private fun PromptComposer(prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean, onSend: () -> Unit) {
+private fun PromptComposer(
+    prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
+    attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
+    attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, onSend: () -> Unit
+) {
+    var attachMenu by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
+            if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                attachments.forEach { file -> InputChip(
+                    selected = false, onClick = {}, label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp)) },
+                    leadingIcon = { ChatGlyph(if (file.kind == "image") ChatIcon.Image else ChatIcon.File) },
+                    trailingIcon = { IconButton(onClick = { onRemove(file.path) }, enabled = !busy && !attachmentWorking, modifier = Modifier.size(32.dp)) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
+                    shape = RoundedCornerShape(8.dp)
+                ) }
+            }
+            if (attachmentWorking) Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Text(attachmentProgress, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
             BasicTextField(prompt, onChange, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
                 decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex…", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box {
+                    IconButton(onClick = { attachMenu = true }, enabled = attachEnabled) { ChatGlyph(ChatIcon.Attach, "Attach files") }
+                    DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                        DropdownMenuItem(text = { Text("From this phone") }, leadingIcon = { ChatGlyph(ChatIcon.Phone) }, enabled = attachEnabled, onClick = { attachMenu = false; onPhoneFiles() })
+                        DropdownMenuItem(text = { Text("From connected computer") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, enabled = attachEnabled, onClick = { attachMenu = false; onRemoteFiles() })
+                    }
+                }
                 TextButton(
                     onClick = onModel, enabled = modelEnabled, shape = RoundedCornerShape(6.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
                 ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
-                    ChatGlyph(ChatIcon.Model)
-                    Spacer(Modifier.width(6.dp))
-                    Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
-                    if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
+                        ChatGlyph(ChatIcon.Model)
+                        Spacer(Modifier.width(6.dp))
+                        Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                        if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
                     }
                 }
-                FilledIconButton(onClick = onSend, enabled = enabled && prompt.isNotBlank(), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
+                FilledIconButton(onClick = onSend, enabled = enabled && (prompt.isNotBlank() || attachments.isNotEmpty()), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Mocha.Blue) else ChatGlyph(ChatIcon.Send,"Send message")
                 }
             }
