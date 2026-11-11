@@ -5,6 +5,8 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.webkit.MimeTypeMap
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -66,7 +68,7 @@ internal fun AttachmentViewer(file: Attachment, load: suspend (Attachment) -> Fi
     var revision by remember { mutableIntStateOf(0) }
     var local by remember(file.path) { mutableStateOf<File?>(null) }
     var image by remember(file.path) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    var text by remember(file.path) { mutableStateOf<String?>(null) }
+    var text by remember(file.path) { mutableStateOf<AnnotatedString?>(null) }
     var error by remember(file.path) { mutableStateOf("") }
     var loading by remember(file.path) { mutableStateOf(true) }
     LaunchedEffect(file.path, revision) {
@@ -75,7 +77,7 @@ internal fun AttachmentViewer(file: Attachment, load: suspend (Attachment) -> Fi
             val downloaded = load(file)
             local = downloaded
             if (file.kind == "image") image = imagePreview(downloaded) ?: error("Unsupported image")
-            else text = withContext(Dispatchers.IO) { attachmentTextPreview(downloaded) }
+            else text = withContext(Dispatchers.IO) { attachmentTextPreview(downloaded)?.let { if (file.name.endsWith(".json", true)) jsonPreview(it) else AnnotatedString(it) } }
         } catch (_: Exception) { error = "Could not open this attachment. Reconnect and check the file still exists and is at most 20 MiB." }
         finally { loading = false }
     }
@@ -106,7 +108,7 @@ internal fun AttachmentViewer(file: Attachment, load: suspend (Attachment) -> Fi
                                 Image(image!!, file.name, Modifier.fillMaxSize().graphicsLayer { scaleX = scale; scaleY = scale; translationX = offset.x; translationY = offset.y }, contentScale = ContentScale.Fit)
                             }
                         }
-                        text != null -> SelectionContainer(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) { Text(text!!, style = MaterialTheme.typography.bodyMedium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) }
+                        text != null -> SelectionContainer(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) { Text(text!!, modifier = Modifier.horizontalScroll(rememberScrollState()), style = MaterialTheme.typography.bodyMedium, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) }
                         else -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) { ChatGlyph(ChatIcon.File); Text(file.name, Modifier.padding(16.dp)); Text("Use Open with to view this file in another app.", color = Mocha.Subtext) }
                     }
                 }

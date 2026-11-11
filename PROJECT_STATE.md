@@ -2,6 +2,10 @@
 
 Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `feat/attachment-previews`; base `f579145`. Git records the completed preview milestone commit.
 
+## JSON preview follow-up
+
+Branch feat/json-preview, base 4d590e6. JSON attachments now format with two-space indentation and Catppuccin Mocha token colors, preserving numeric literals and escape sequences. Invalid, truncated, oversized or overdeep input remains raw text; preview formatting output is bounded. Android assembleDebug, unit tests and lint PASS; emulator verification will be combined with reconnect/model milestones. PDF rendering intentionally remains Open with per user scope.
+
 ## Attachment previews and remote folder memory
 
 [Plan](docs/superpowers/plans/2026-11-12-attachment-previews.md). Composer and sent/history messages now display clickable image thumbnails and file tiles. Full-screen image viewer supports pinch zoom; bounded UTF-8 text viewer supports selection; Open with grants temporary read access through a FileProvider limited to preview cache. Images decode at 384px for thumbnails/2048px for full preview. Files download via pinned SFTP into app-private cache, at most 20 MiB/file and approximately 100 MiB total; no external URLs fetched. Uncached previews need the file to remain available remotely. Remote browser is full-screen, starts at SSH home and stores each thread's last successful folder in the encrypted host snapshot, cleared on Forget.
