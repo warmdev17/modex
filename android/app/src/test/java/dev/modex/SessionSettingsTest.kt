@@ -19,6 +19,14 @@ class SessionSettingsTest {
         assertEquals("gpt-5.6-sol", turnStartParams("thread", "hello", "gpt-5.6-sol").getString("model"))
         assertEquals("custom-model", turnStartParams("thread", "hello", " custom-model ").getString("model"))
     }
+    @Test fun composerRejectsInvalidModelIds() {
+        assertTrue(validModelId(""))
+        assertTrue(validModelId("gpt-5.6-sol"))
+        assertFalse(validModelId("   "))
+        assertFalse(validModelId("bad\nmodel"))
+        assertFalse(validModelId("m".repeat(257)))
+        assertFalse(validModelId("é".repeat(129)))
+    }
     @Test fun missingSettingsAreUnknown() {
         val label = sessionSettingsLabel(JSONObject())
         assertTrue(label.contains("Sandbox: Unknown"))

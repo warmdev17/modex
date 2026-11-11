@@ -17,13 +17,15 @@ fun Instrumentation.chatUiSmoke() {
         var markdown by mutableStateOf("## Ready to build\n\nUse **native Android** with `Jetpack Compose`.\n\n- Keep the session ID\n- Render Markdown cleanly\n\n```kotlin\nval message = \"Hello, Modex\"\nprintln(message)\n```")
         var selected = "fixture-one"
         var attempted = ""
+        var attemptedModel = ""
         runOnMainSync { activity.setContent {
             var current by remember { mutableStateOf(selected) }
             ModexTheme { Surface { ChatWorkspace(
                 "laptop.local", true, false, current,
                 listOf("fixture-one","fixture-two"), mapOf("fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
                 listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone."), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
-                { current = it; selected = it }, {}, {}, { _, _ -> }, { attempted = it; false }, {}, {}
+                "gpt-5.6-sol", emptyList(), emptySet(),
+                { current = it; selected = it }, {}, {}, { _, _ -> }, { text, model -> attempted = text; attemptedModel = model; false }, { _, _ -> }, {}, {}
             ) } }
         } }
         fun node(label: String): AccessibilityNodeInfo? {
@@ -35,6 +37,10 @@ fun Instrumentation.chatUiSmoke() {
             }
             return walk(uiAutomation.rootInActiveWindow)
         }
+        waitForIdleSync()
+        val modelDeadline = System.currentTimeMillis() + 5000
+        while (node("Choose model") == null && System.currentTimeMillis() < modelDeadline) Thread.sleep(100)
+        check(node("Choose model") != null) { "Composer has no model control" }
         fun click(label: String) {
             val deadline = System.currentTimeMillis()+5000
             var n: AccessibilityNodeInfo? = null
@@ -57,6 +63,14 @@ fun Instrumentation.chatUiSmoke() {
         shot("drawer-mocha.png")
         click("SSH approval flow")
         runOnMainSync { check(selected == "fixture-two") }
+        click("Choose model")
+        var modelField = node("Model ID")
+        while (modelField != null && !modelField.isEditable) modelField = modelField.parent
+        check(modelField != null) { "Model ID field is not editable" }
+        val modelArgs = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "fixture-custom") }
+        check(modelField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, modelArgs)) { "Cannot enter model ID" }
+        click("Use model")
+        check(node("fixture-custom") != null) { "Queued model is not shown in composer" }
         fun shell(command: String) {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand(command)).use { it.readBytes() }
         }
@@ -68,7 +82,11 @@ fun Instrumentation.chatUiSmoke() {
         shell("input text Keep%sthis%sdraft")
         Thread.sleep(500)
         click("Send message")
-        runOnMainSync { check(attempted == "Keep this draft") { "Fixture did not type draft" }; attempted = "" }
+        runOnMainSync {
+            check(attempted == "Keep this draft") { "Fixture did not type draft" }
+            check(attemptedModel == "fixture-custom") { "Queued model did not reach send" }
+            attempted = ""
+        }
         click("Send message")
         runOnMainSync { check(attempted == "Keep this draft") { "Rejected send lost draft" } }
         Thread.sleep(700)
@@ -77,7 +95,7 @@ fun Instrumentation.chatUiSmoke() {
         runOnMainSync { markdown = "## Structured output\n\n| File | Status |\n| --- | --- |\n| MainActivity.kt | Updated |\n\n> Keep the existing session ID.\n\n1. Read **history**\n2. Resume safely\n\n[Documentation](https://example.com)" }
         shot("markdown-table.png")
         check(File(targetContext.filesDir, "markdown-table.png").length() > 0) { "Table screenshot missing" }
-        output.putString("result", "PASS: Mocha chat, code copy, drawer selection, rejected-send draft retained, composer focus")
+        output.putString("result", "PASS: Mocha chat, model control, code copy, drawer selection, rejected-send draft retained, composer focus")
         finish(-1,output)
     } catch (e: Throwable) { output.putString("result","FAIL: ${e.javaClass.simpleName}: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0,output) }
 }
@@ -91,7 +109,7 @@ fun Instrumentation.historyScrollSmoke() {
         var messages by mutableStateOf(listOf(ChatEntry(role = "You", text = "Old message")))
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             "fixture", true, false, "history", listOf("history"), emptyMap(),
-            messages, false, loading, false, "", "", {}, {}, {}, { _, _ -> }, { false }, {}, {}
+            messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _ -> }, { _, _ -> false }, { _, _ -> }, {}, {}
         ) } } } }
         waitForIdleSync(); Thread.sleep(700)
         runOnMainSync { loading = true }
@@ -157,7 +175,7 @@ fun Instrumentation.commandTimelineSmoke() {
             messages = updateChat(messages, "item/commandExecution/outputDelta", org.json.JSONObject("""{"itemId":"c","delta":"TOOL_OUTPUT_MARKER"}"""))
             activity.setContent { ModexTheme { Surface { ChatWorkspace(
                 "fixture", true, false, "tools", listOf("tools"), emptyMap(), messages,
-                false, false, false, "", "", {}, {}, {}, { _, _ -> }, { false }, {}, {}
+                false, false, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _ -> }, { _, _ -> false }, { _, _ -> }, {}, {}
             ) } } }
         }
         fun node(label: String, n: AccessibilityNodeInfo? = uiAutomation.rootInActiveWindow): AccessibilityNodeInfo? {

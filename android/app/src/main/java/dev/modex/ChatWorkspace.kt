@@ -30,8 +30,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
@@ -45,6 +46,7 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
             ChatIcon.Send -> { line(12f,19f,12f,5f); line(6f,11f,12f,5f); line(12f,5f,18f,11f) }
             ChatIcon.Close -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
             ChatIcon.More -> for (y in listOf(5f,12f,19f)) drawCircle(color,1.4f*u,Offset(12*u,y*u))
+            ChatIcon.Model -> { drawCircle(color, 7f*u, Offset(12*u,12*u), style = androidx.compose.ui.graphics.drawscope.Stroke(1.6f*u)); line(7f,12f,17f,12f); line(12f,7f,12f,17f) }
         }
     }
 }
@@ -54,8 +56,9 @@ internal fun ChatWorkspace(
     host: String, connected: Boolean, connecting: Boolean, selected: String,
     threads: List<String>, titles: Map<String,String>, messages: List<ChatEntry>,
     busy: Boolean, historyLoading: Boolean, hasMore: Boolean, error: String, sessionSettings: String,
+    sessionModel: String, decisions: List<JSONObject>, answeringDecisionIds: Set<String>,
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
-    onCreate: (String, String) -> Unit, onSend: (String) -> Boolean,
+    onCreate: (String, String) -> Unit, onSend: (String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit
 ) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -70,6 +73,14 @@ internal fun ChatWorkspace(
     LaunchedEffect(newChat) { if (newChat) permissionMode = "host-default" }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf("") }
+    var queuedModels by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
+    val queuedModel = queuedModels[selected].orEmpty()
+    LaunchedEffect(selected, sessionModel) {
+        if (queuedModel.isNotBlank() && queuedModel == sessionModel) queuedModels = HashMap(queuedModels).apply { remove(selected) }
+    }
+    var showModel by rememberSaveable { mutableStateOf(false) }
+    var modelInput by rememberSaveable { mutableStateOf("") }
+    val selectedDecisions = decisions.filter { it.optString("thread_id") == selected }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !busy && !historyLoading
     val status = when { connecting -> "Connecting…"; !connected -> "Disconnected"; historyLoading -> "Loading history…"; busy -> "Working…"; else -> "Connected · SSH" }
@@ -131,7 +142,7 @@ internal fun ChatWorkspace(
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
             var openAtLatest by remember(selected) { mutableStateOf(true) }
-            LaunchedEffect(selected, historyLoading, messages.size, messages.lastOrNull()) {
+            LaunchedEffect(selected, historyLoading, messages.size, messages.lastOrNull(), selectedDecisions.map { it.optString("decision_id") }) {
                 if (historyLoading) {
                     openAtLatest = true
                     return@LaunchedEffect
@@ -139,19 +150,19 @@ internal fun ChatWorkspace(
                 val layout = scroll.layoutInfo
                 val nearBottom = layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 2 } ?: true
                 if (messages.isNotEmpty() && (openAtLatest || nearBottom)) {
-                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == messages.size + 1 }
+                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == messages.size + selectedDecisions.size + 1 }
                     // The final spacer anchors the bottom even when the last message is taller than the viewport.
                     scroll.scrollToItem(messages.size)
                     openAtLatest = false
                 }
             }
-            if (messages.isEmpty()) {
+            if (messages.isEmpty() && selectedDecisions.isEmpty()) {
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {
                     Text("Your workspace.\nWithin reach.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Medium)
                     Text(if (selected.isBlank()) "Open a conversation from the sidebar, or start a new chat." else "Ask Codex to explore, build or fix something.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
                     if (selected.isBlank()) TextButton(onClick = { newChat = true }, enabled = canSwitch, modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
                 }
-            } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(messages) { entry ->
                     val role = entry.role; val body = entry.text
                     if (role == "You") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -160,10 +171,18 @@ internal fun ChatWorkspace(
                         }
                     } else if (role == "command") CommandCard(entry) else MarkdownMessage(body)
                 }
+                items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
+                    InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
+                }
                 item { Spacer(Modifier.height(1.dp)) }
             }
-            PromptComposer(prompt, { updatePrompt(it) }, busy, connected && !historyLoading && selected.isNotBlank() && !busy) {
-                if (onSend(prompt)) updatePrompt("")
+            PromptComposer(
+                prompt, { updatePrompt(it) }, busy,
+                queuedModel.ifBlank { sessionModel.ifBlank { "Host model" } }, connected && selected.isNotBlank(),
+                { modelInput = queuedModel.ifBlank { sessionModel }; showModel = true },
+                connected && !historyLoading && selected.isNotBlank() && !busy
+            ) {
+                if (onSend(prompt, queuedModel)) updatePrompt("")
             }
         }
     }
@@ -195,17 +214,42 @@ internal fun ChatWorkspace(
         text = { SelectionContainer { Text(sessionSettings.ifBlank { "Effective permissions are unknown. Select this session while connected to read Codex's resume settings." } + "\n\nReported at create/resume. Host policy and tool-specific approvals still apply.") } },
         confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Close") } }
     )
+    if (showModel) AlertDialog(
+        onDismissRequest = { showModel = false },
+        title = { Text("Model for next turn") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Codex applies this model to the next turn and later turns in this session.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(
+                modelInput, { modelInput = it }, singleLine = true, isError = !validModelId(modelInput),
+                label = { Text("Model ID") }, placeholder = { Text(sessionModel.ifBlank { "Host model" }) }, modifier = Modifier.fillMaxWidth(),
+                supportingText = { Text(if (validModelId(modelInput)) "Leave empty to keep the current session model." else "Use a single-line model ID up to 256 UTF-8 bytes.") }
+            )
+        } },
+        confirmButton = { TextButton(enabled = validModelId(modelInput), onClick = {
+            queuedModels = HashMap(queuedModels).apply { if (modelInput.isEmpty()) remove(selected) else put(selected, modelInput.trim()) }
+            showModel = false
+        }) { Text("Use model") } },
+        dismissButton = { TextButton(onClick = { showModel = false }) { Text("Cancel") } }
+    )
 }
 
 @Composable
-private fun PromptComposer(prompt: String, onChange: (String) -> Unit, busy: Boolean, enabled: Boolean, onSend: () -> Unit) {
+private fun PromptComposer(prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean, onSend: () -> Unit) {
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
             BasicTextField(prompt, onChange, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
                 decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex…", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (busy) "Codex is working" else "Codex", style = MaterialTheme.typography.labelMedium, color = Mocha.Subtext, modifier = Modifier.weight(1f))
+                TextButton(
+                    onClick = onModel, enabled = modelEnabled, shape = RoundedCornerShape(6.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
+                ) {
+                    ChatGlyph(ChatIcon.Model)
+                    Spacer(Modifier.width(6.dp))
+                    Text(model, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                    if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
+                }
                 FilledIconButton(onClick = onSend, enabled = enabled && prompt.isNotBlank(), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
                     if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Mocha.Blue) else ChatGlyph(ChatIcon.Send,"Send message")
                 }

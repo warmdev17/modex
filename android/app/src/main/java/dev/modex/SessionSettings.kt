@@ -19,8 +19,12 @@ internal fun newThreadParams(model: String, mode: String): JSONObject {
 
 internal fun turnStartParams(thread: String, text: String, model: String): JSONObject =
     JSONObject().put("thread_id", thread).put("text", text).apply {
+        require(validModelId(model))
         if (model.isNotBlank()) put("model", model.trim())
     }
+
+internal fun validModelId(value: String): Boolean = value.isEmpty() ||
+    (value.isNotBlank() && value.toByteArray(Charsets.UTF_8).size <= 256 && value.none { it == '\r' || it == '\n' || it == '\u0000' })
 
 internal fun sessionSettingsLabel(result: JSONObject): String {
     fun value(key: String) = result.optString(key).ifBlank { "Unknown" }

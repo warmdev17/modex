@@ -38,6 +38,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var selected by mutableStateOf(""); private set
     internal var messages by mutableStateOf(listOf<ChatEntry>()); private set
     var decisions by mutableStateOf(listOf<JSONObject>()); private set
+    var answeringDecisionIds by mutableStateOf(setOf<String>()); private set
     var busy by mutableStateOf(false); private set
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
@@ -64,7 +65,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 messages = readChat(data.optJSONArray("messages") ?: JSONArray())
                 decisions = data.optJSONArray("decisions")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } } ?: emptyList()
                 val requests = data.optJSONArray("pending") ?: JSONArray()
-                for (i in 0 until requests.length()) { val r = requests.getJSONObject(i); pending[r.getLong("id")] = r.getString("method") to r.getString("tag") }
+                for (i in 0 until requests.length()) {
+                    val r = requests.getJSONObject(i); pending[r.getLong("id")] = r.getString("method") to r.getString("tag")
+                    if (r.getString("method") == "decision/respond") answeringDecisionIds += r.getString("tag")
+                }
             }
         } catch (_: Exception) { error = "Saved host could not be unlocked. Forget it and import the SSH key again." }
     }
@@ -88,7 +92,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         sessionSettings = ""
         disconnect(); transport = null; connected = false; connecting = false; reconnectAllowed = false; saveJob?.cancel()
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
-        journal = JournalState(); config = null; savedConnection = null; pending.clear(); selected = ""; messages = emptyList(); decisions = emptyList(); threads = emptyList(); busy = false
+        journal = JournalState(); config = null; savedConnection = null; pending.clear(); selected = ""; messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList(); busy = false
     }
     private fun loadHistory() {
         if (selected.isBlank()) return
@@ -101,14 +105,14 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun reset() {
         if (connected || connecting) return
-        sessionSettings = ""
+        sessionSettings = ""; sessionModel = ""
         journal = JournalState(); pending.clear(); threads = emptyList()
-        selected = ""; messages = emptyList(); decisions = emptyList(); busy = false; error = ""
+        selected = ""; messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); busy = false; error = ""
         persist()
     }
     fun connect(value: Connection) {
         if (connected || connecting) return
-        sessionSettings = ""
+        sessionSettings = ""; sessionModel = ""
         if (key == null) { error = "Import an unencrypted SSH private key first."; return }
         if (config != null && config != value) { error = "Forget saved host before changing the target."; return }
         config = value; savedConnection = value; reconnectAllowed = true; error = ""; connecting = true
@@ -143,25 +147,27 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     fun disconnect() { sessionSettings = ""; sessionModel = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
     fun create(model: String, mode: String) {
         if (busy || historyLoading || switching()) return
-        sessionSettings = ""
+        sessionSettings = ""; sessionModel = ""
         request("threads/start", newThreadParams(model, mode))
     }
     fun select(id: String) {
         if (busy || historyLoading || switching()) return
-        sessionSettings = ""
+        sessionSettings = ""; sessionModel = ""
         request("threads/resume", JSONObject().put("thread_id", id), id)
     }
     fun refreshThreads() { request("threads/list", JSONObject().put("limit", 50)) }
     fun more() { nextCursor?.let { request("threads/list", JSONObject().put("limit", 50).put("cursor", it), "more") } }
     fun send(text: String, model: String): Boolean {
-        if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank()) return false
+        if (!connected || busy || historyLoading || switching() || selected.isEmpty() || text.isBlank() || !validModelId(model)) return false
         messages = messages + ChatEntry(role = "You", text = text); busy = true
         request("turn/start", turnStartParams(selected, text, model), model.trim())
         return true
     }
     fun answer(decision: JSONObject, result: JSONObject) {
+        if (!connected) return
         val id = decision.getString("decision_id")
         if (pending.values.any { it.first == "decision/respond" && it.second == id }) return
+        answeringDecisionIds += id
         request("decision/respond", JSONObject().put("decision_id", id).put("result", result), id)
     }
     private fun switching() = pending.values.any { it.first == "threads/start" || it.first == "threads/resume" }
@@ -178,7 +184,12 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private fun apply(frame: JSONObject) {
         if (frame.has("id")) {
             val operation = pending.remove(frame.getLong("id")) ?: return
-            if (frame.has("error")) { if (operation.first == "turn/start") busy = false; if (operation.first == "threads/read") historyLoading = false; error = explainHostRejection(operation.first, frame.optJSONObject("error")?.optString("message").orEmpty()); return }
+            if (frame.has("error")) {
+                if (operation.first == "turn/start") busy = false
+                if (operation.first == "threads/read") historyLoading = false
+                if (operation.first == "decision/respond") answeringDecisionIds -= operation.second
+                error = explainHostRejection(operation.first, frame.optJSONObject("error")?.optString("message").orEmpty()); return
+            }
             val result = frame.optJSONObject("result") ?: return
             when (operation.first) {
                 "threads/list" -> {
@@ -213,7 +224,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
-                "decision/respond" -> decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
+                "decision/respond" -> {
+                    answeringDecisionIds -= operation.second
+                    decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
+                }
                 "turn/start" -> if (operation.second.isNotBlank()) sessionModel = operation.second
             }
             return

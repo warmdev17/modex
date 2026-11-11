@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `fix/new-chat-empty-history`; base `dab46a9`. Git records final commits.
+Updated: 2026-11-11, Asia/Ho_Chi_Minh. Branch: `feat/inline-agent-controls`; base `e880d73`. Git records final commits.
+
+## Inline agent controls
+
+[Design](docs/superpowers/specs/2026-11-11-inline-agent-controls-design.md), [plan](docs/superpowers/plans/2026-11-11-inline-agent-controls.md). Bridge optional per-turn model override committed at `b554f9a`; muted expandable terminal rows committed at `507a0db`. Composer now queues a validated free-form model ID per session; omission keeps the current model. Approvals and non-secret question inputs render inline for the selected thread, with disabled disconnected/in-flight actions. Question drafts use saved Compose state so lazy-list disposal does not discard answers. File-change acceptance remains disabled pending a diff viewer.
+
+Verification: full Go suite and vet PASS on 2026-11-11; Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS on the final uncommitted tree (38 JVM tests, zero failures/errors; lint 11 warnings). Earlier emulator fixtures PASS for model selection reaching Send, rejected-send draft retention, inline approvals/questions, selected-thread filtering, disconnected controls, compact terminal expansion/status, history scroll and fresh New chat. Production-context screenshots visually inspected. Final saved-question-state/defensive-guard edits compile; runtime recheck pending because ADB currently has no devices. Independent reviewer failed to start with stream disconnect; self-review fallback. No live model-switch provider turn or physical-phone install in this slice. Existing supervisor was not restarted; per-turn override needs the new host binary before phone testing. No merge/push.
 
 ## New-chat empty-history fix
 
