@@ -6,7 +6,7 @@ import java.io.InputStream
 import java.util.UUID
 
 internal fun SshTransport.listRemoteDirectory(path: String): RemoteDirectory = withFiles { sftp ->
-    val current = sftp.realpath(path.ifBlank { "." })
+    val current = sftp.realpath(if (path.isBlank() || path == "~") "." else if (path.startsWith("~/")) sftp.home.trimEnd('/') + path.drop(1) else path)
     val parent = sftp.realpath("$current/..").takeUnless { it == current }
     val entries = mutableListOf<RemoteFile>()
     var truncated = false
@@ -47,4 +47,25 @@ internal fun SshTransport.uploadAttachment(state: String, name: String, input: I
         throw failure
     }
     // shortcut: retain completed uploads for stored conversations; add retention with explicit user controls.
+}
+
+internal fun SshTransport.downloadAttachment(file: Attachment, cache: java.io.File, host: String, checkCancelled: () -> Unit = {}): java.io.File = withFiles { sftp ->
+    checkCancelled()
+    val path = literalSftpPath(file.path)
+    val attrs = sftp.lstat(path)
+    require(attrs.isReg && !attrs.isLink && attrs.size <= MAX_ATTACHMENT_BYTES) { "File unavailable or over 20 MiB." }
+    val key = java.security.MessageDigest.getInstance("SHA-256").digest((host + "\n" + file.path + "\n" + attrs.mTime + "\n" + attrs.size).toByteArray()).joinToString("") { "%02x".format(it) }
+    val directory = java.io.File(cache, key).apply { mkdirs() }
+    val target = java.io.File(directory, attachmentName(file.name))
+    if (target.isFile && target.length() == attrs.size) return@withFiles target
+    val partial = java.io.File(directory, ".download")
+    try {
+        sftp.get(path).use { input -> partial.outputStream().use { copyAttachment(input, it, progress = { checkCancelled() }) } }
+        check(partial.length() == attrs.size && partial.renameTo(target))
+        var total = cache.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+        cache.listFiles().orEmpty().filter { it != directory }.sortedBy { it.lastModified() }.forEach {
+            if (total > 100L * 1024 * 1024) { val size = it.walkTopDown().filter { f -> f.isFile }.sumOf { f -> f.length() }; if (it.deleteRecursively()) total -= size }
+        }
+        target
+    } catch (e: Exception) { partial.delete(); throw e }
 }

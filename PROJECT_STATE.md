@@ -1,6 +1,16 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `feat/composer-attachments`; base `b86fdb8`, host milestone `1ac728e`. Git records the Android milestone commit.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `feat/attachment-previews`; base `f579145`. Git records the completed preview milestone commit.
+
+## Attachment previews and remote folder memory
+
+[Plan](docs/superpowers/plans/2026-11-12-attachment-previews.md). Composer and sent/history messages now display clickable image thumbnails and file tiles. Full-screen image viewer supports pinch zoom; bounded UTF-8 text viewer supports selection; Open with grants temporary read access through a FileProvider limited to preview cache. Images decode at 384px for thumbnails/2048px for full preview. Files download via pinned SFTP into app-private cache, at most 20 MiB/file and approximately 100 MiB total; no external URLs fetched. Uncached previews need the file to remain available remotely. Remote browser is full-screen, starts at SSH home and stores each thread's last successful folder in the encrypted host snapshot, cleared on Forget.
+
+Host history now includes path/name/kind attachment metadata and display_text while preserving legacy filename labels in text. Exact Modex file-reference JSON requires EOF; malformed/trailing text remains ordinary text. Android snapshots preserve original user text even when it matches generated filename labels. Read-only specialist review identified memory/cancellation/text-preservation risks; addressed with separate thumbnail decode bounds, coroutine checks during downloads, separate display_text and strict JSON consumption. Relevant regressions added. Review used source inspection/probes; final fixes verified by builder.
+
+Verification on this feature tree: Go full tests/vet and bridge race PASS; Android assembleDebug/assembleDebugAndroidTest/testDebugUnitTest/lintDebug PASS (48 JVM tests, 0 failures). Emulator viewer fixture PASS for sent/composer thumbnails, image/text preview navigation and FileProvider confinement; screenshots inspected. Full-screen remote picker fixture and existing chat/model/sidebar UI regressions PASS. Real loopback SSH/SFTP fixture PASS with exact preview bytes/cache reuse, cancellation cleanup, home start, per-thread folder isolation and serialized restoration. Paid third-party gpt-6.1-sol turn recognized a red PNG/read a unique file token; real history included both preview paths. Python discovery PASS (2 checks, 3 optional integrations skipped). Emulator shut down after tests; physical phone untouched and production supervisor not restarted.
+
+APK built at the normal debug path; update APK and rebuild/restart host only when idle to get preview metadata on history reload. Physical-phone, external PDF/document apps, Windows/macOS runtime and full accessibility/font-scale matrix unverified. Cache is app-private, not independently encrypted; Android may evict it. Image/file bytes remain outside the journal. No remote upload retention UI or offline archive added. Feature remains local; PR required before merge, no push/merge.
 
 ## Composer attachments
 

@@ -11,6 +11,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 @Composable
 internal fun RemoteFilePicker(initialPath: String, directory: RemoteDirectory?, working: Boolean, error: String, connected: Boolean, remaining: Int,
@@ -18,8 +20,13 @@ internal fun RemoteFilePicker(initialPath: String, directory: RemoteDirectory?, 
     var path by rememberSaveable { mutableStateOf(initialPath) }
     var chosen by remember { mutableStateOf(emptyList<RemoteFile>()) }
     LaunchedEffect(directory?.path) { directory?.let { path = it.path } }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Connected computer") }, text = {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+      Surface(Modifier.fillMaxSize(), color = Mocha.Base) {
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onDismiss) { ChatGlyph(ChatIcon.Close, "Close file browser") }
+                Text("Connected computer", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+            }
             OutlinedTextField(path, { path = it }, label = { Text("Folder path") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = connected && !working)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { directory?.parent?.let(onBrowse) }, enabled = connected && !working && directory?.parent != null) { Text("Up") }
@@ -28,7 +35,7 @@ internal fun RemoteFilePicker(initialPath: String, directory: RemoteDirectory?, 
             }
             if (!connected) Text("Reconnect to browse files.", color = Mocha.Red, style = MaterialTheme.typography.bodySmall)
             if (error.isNotEmpty()) Text(error, color = Mocha.Red, style = MaterialTheme.typography.bodySmall)
-            LazyColumn(Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 300.dp)) {
+            LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
                 if (directory?.files?.isEmpty() == true) item { Text("No regular files or folders here.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext) }
                 items(directory?.files.orEmpty(), key = { it.path }) { file ->
                     val selected = chosen.any { it.path == file.path }
@@ -46,8 +53,9 @@ internal fun RemoteFilePicker(initialPath: String, directory: RemoteDirectory?, 
                 }
             }
             if (directory?.truncated == true) Text("Showing the first 500 entries. Open a narrower folder.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
-            Text("${chosen.size} selected · up to $remaining more files · 20 MiB each", style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
+            Text("${chosen.size} of $remaining selected · 20 MiB per file", style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
+            Button(onClick = { onAttach(chosen) }, enabled = connected && !working && chosen.isNotEmpty(), modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)) { Text("Attach (${chosen.size})") }
         }
-    }, confirmButton = { TextButton(onClick = { onAttach(chosen) }, enabled = connected && !working && chosen.isNotEmpty()) { Text("Attach (${chosen.size})") } },
-    dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+      }
+    }
 }

@@ -41,3 +41,16 @@ internal fun attachmentMessage(text: String, files: List<Attachment>): String =
 internal fun literalSftpPath(path: String): String = buildString {
     path.forEach { char -> if (char == '\\' || char == '*' || char == '?') append('\\'); append(char) }
 }
+
+internal fun attachmentTextPreview(file: java.io.File): String? {
+    val bytes = file.inputStream().use { input ->
+        val buffer = ByteArray(256 * 1024 + 1)
+        var size = 0
+        while (size < buffer.size) { val n = input.read(buffer, size, buffer.size - size); if (n < 0) break; size += n }
+        buffer.copyOf(size)
+    }
+    if (bytes.any { it == 0.toByte() }) return null
+    val content = bytes.take(256 * 1024).toByteArray().decodeToString()
+    if (content.any { it == '\uFFFD' || (it.isISOControl() && it !in "\n\r\t") }) return null
+    return content + if (bytes.size > 256 * 1024) "\n[Preview limited to 256 KiB; use Open with for the complete file]" else ""
+}

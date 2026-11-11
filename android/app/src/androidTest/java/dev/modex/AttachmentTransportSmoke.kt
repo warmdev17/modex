@@ -52,6 +52,18 @@ internal fun Instrumentation.attachmentTransportSmoke(args: Bundle) {
         val note = transport.uploadAttachment(state, "../../report*?.txt", ByteArrayInputStream("mobile-upload".toByteArray())) {}
         check(note.name == "report*?.txt" && note.path.startsWith("$state/attachments/"))
         check(transport.withFiles { it.get(literalSftpPath(note.path)).use { stream -> stream.readBytes().decodeToString() } } == "mobile-upload")
+        val previewCache = File(targetContext.cacheDir, "attachment-preview-test")
+        try {
+            val local = transport.downloadAttachment(note, previewCache, "fixture")
+            check(local.readText() == "mobile-upload") { "Preview download changed file bytes" }
+            check(transport.downloadAttachment(note, previewCache, "fixture") == local) { "Cache not reused" }
+            var cancelled = false
+            try { transport.downloadAttachment(note, previewCache, "cancelled") { throw java.util.concurrent.CancellationException("fixture") } } catch (_: java.util.concurrent.CancellationException) { cancelled = true }
+            check(cancelled && previewCache.walkTopDown().none { it.name == ".download" }) { "Cancelled download not cleaned" }
+
+            try { transport.downloadAttachment(Attachment(root, "folder", "file"), previewCache, "fixture"); error("Directory downloaded") } catch (_: IllegalArgumentException) { }
+        } finally { previewCache.deleteRecursively() }
+        check(transport.listRemoteDirectory("~").path == transport.withFiles { it.home }) { "Default home mismatch" }
         val before = transport.listRemoteDirectory("$state/attachments").files.size
         try {
             transport.uploadAttachment(state, "broken.txt", object: InputStream() { override fun read(): Int = throw IOException("fixture") }) {}
@@ -81,6 +93,16 @@ internal fun Instrumentation.attachmentTransportSmoke(args: Bundle) {
             drafts.clear()
             drafts.fromPhone("stale-thread",listOf(Uri.fromFile(document)),old,targetContext.contentResolver)
             check(drafts.drafts.isEmpty() && !drafts.working) { "Stale picker accepted" }
+        }
+        runOnMainSync { drafts.browse(root, "origin-thread") }
+        var browsing = true
+        while (browsing && System.currentTimeMillis() < deadline + 10000) { runOnMainSync { browsing = drafts.working }; Thread.sleep(100) }
+        runOnMainSync {
+            check(drafts.directoryFor("origin-thread") == root) { "Last folder forgotten" }
+            check(drafts.directoryFor("other-thread") == ".") { "Folder leaked across threads" }
+            val restored = AttachmentState(scope, { transport }, { config })
+            restored.restoreDirectories(drafts.directoriesJson())
+            check(restored.directoryFor("origin-thread") == root) { "Folder snapshot not restored" }
         }
         transport.send(JSONObject().put("id",900003).put("method","turn/start").put("params",turnStartParams("fixture-thread","Inspect files","",attachments = listOf(note, Attachment("$root/image.png","image.png","image")))))
         check(response.await(15,TimeUnit.SECONDS) && failure.get() == null) { "Attachment turn failed: ${failure.get()?.message}" }

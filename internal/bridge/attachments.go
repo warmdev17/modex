@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -70,4 +71,33 @@ func turnInput(text string, raw json.RawMessage) ([]map[string]string, error) {
 		input = append(input, map[string]string{"type": "text", "text": "Attached files selected by the user (JSON paths):\n" + string(encoded)})
 	}
 	return input, nil
+}
+
+// Only the exact Modex file-reference format becomes preview metadata; never fetch URLs.
+func historyFileReferences(text string) []map[string]string {
+	const prefix = "Attached files selected by the user (JSON paths):\n"
+	if !strings.HasPrefix(text, prefix) {
+		return nil
+	}
+	var files []struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+	}
+	decoder := json.NewDecoder(strings.NewReader(strings.TrimPrefix(text, prefix)))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&files) != nil || len(files) < 1 || len(files) > 8 {
+		return nil
+	}
+	var trailing any
+	if decoder.Decode(&trailing) != io.EOF {
+		return nil
+	}
+	result := []map[string]string{}
+	for _, file := range files {
+		if !filepath.IsAbs(file.Path) || strings.ContainsAny(file.Path, "\r\n\x00") || len(file.Path) > 32768 {
+			return nil
+		}
+		result = append(result, map[string]string{"path": file.Path, "name": filepath.Base(file.Path), "kind": "file"})
+	}
+	return result
 }

@@ -305,8 +305,9 @@ It captures chat/drawer/composer/table screenshots and checks code copy, session
 
 In an open chat, tap **+** and choose **From this phone** or **From connected computer**.
 The phone source uses Android's document picker; the computer source browses the
-SSH account's readable folders, starting at the selected workspace. Select files,
-review/remove the composer chips, then Send. An attachment-only message is supported.
+SSH account's readable folders in a full-screen browser, starting at home (`~`).
+Each chat remembers its last successfully opened folder, including after app restart. Select files,
+review/remove the composer previews, then Send. An attachment-only message is supported.
 The separate OpenAI knot beside + opens the model/reasoning picker and follows the
 Catppuccin Mocha Blue accent.
 
@@ -317,6 +318,15 @@ Uploads publish only after completion, with a limit of **8 files per message** a
 **20 MiB per file**. PNG/JPEG/GIF/WebP use Codex native image inputs; other files
 are path references for agent tools, subject to the session's sandbox/approvals.
 Image support also depends on the selected model/provider.
+
+Images show thumbnails in the composer and sent messages; tap to open a full-screen
+viewer with pinch zoom. Tap files to read a bounded UTF-8 text preview or use **Open
+with** for PDF and other formats supported by installed phone apps. Previews download
+via SFTP into an app-private cache (20 MiB per file, approximately 100 MiB total).
+Only cached preview files can receive temporary read access through Android's file
+provider; no SSH key or connection snapshot is shared. Remote files must remain
+readable for uncached previews; this is not an offline file archive. Older hosts
+provide filename labels without tappable attachment metadata after history reload.
 
 Completed uploads are retained for conversation history, including abandoned drafts;
 there is no automatic retention cleanup yet. Draft selections survive rotation and

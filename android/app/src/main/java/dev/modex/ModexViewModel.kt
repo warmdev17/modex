@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
@@ -60,7 +62,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private var config: Connection? = null
     private var journal = JournalState()
     private var transport: SshTransport? = null
-    internal val attachments = AttachmentState(viewModelScope, { transport }, { config })
+    internal val attachments = AttachmentState(viewModelScope, { transport }, { config }, { persist() })
     // Avoid matching responses retained from an earlier app process.
     private var sequence = java.security.SecureRandom().nextLong().ushr(12) + 1
     private val pending = mutableMapOf<Long, Pair<String, String>>()
@@ -77,6 +79,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 journal = JournalState(data.optString("instance").ifEmpty { null }, data.optLong("cursor"))
                 selected = data.optString("selected")
                 selectedWorkspace = data.optString("selected_workspace")
+                attachments.restoreDirectories(data.optJSONObject("attachment_directories"))
                 messages = readChat(data.optJSONArray("messages") ?: JSONArray())
                 decisions = data.optJSONArray("decisions")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } } ?: emptyList()
                 val requests = data.optJSONArray("pending") ?: JSONArray()
@@ -92,7 +95,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         val privateKey = key ?: return
         val snapshot = JSONObject().put("connection", JSONObject().put("host", c.host).put("port", c.port).put("user", c.user).put("pin", c.pin).put("binary", c.binary).put("state", c.state))
             .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
-            .put("selected_workspace", selectedWorkspace)
+            .put("selected_workspace", selectedWorkspace).put("attachment_directories", attachments.directoriesJson())
             .put("messages", JSONArray().apply { messages.forEach { put(it.toJson()) } })
             .put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
         val revision = saved.revision()
@@ -100,6 +103,11 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         saveJob = viewModelScope.launch { kotlinx.coroutines.delay(150); withContext(Dispatchers.IO) {
             try { saved.save(snapshot, revision) } catch (_: Exception) { withContext(Dispatchers.Main) { error = "Could not save connection securely. Keep the app open or import again next time." } }
         } }
+    }
+    internal suspend fun attachmentFile(file: Attachment): java.io.File = withContext(Dispatchers.IO) {
+        val host = config ?: error("Reconnect to open this attachment.")
+        val cache = java.io.File(getApplication<Application>().cacheDir, "attachment-preview")
+        transport?.downloadAttachment(file, cache, host.toString(), currentCoroutineContext().let { job -> { job.ensureActive() } }) ?: error("Reconnect to open this attachment.")
     }
     fun foreground() {
         if (reconnectAllowed && !connected && !connecting) savedConnection?.let { connect(it) }
@@ -189,7 +197,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     fun send(text: String, model: String, effort: String = ""): Boolean {
         val files = attachments.drafts[selected].orEmpty()
         if (!connected || busy || attachments.working || historyLoading || switching() || selected.isEmpty() || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
-        messages = messages + ChatEntry(role = "You", text = attachmentMessage(text, files)); busy = true
+        messages = messages + ChatEntry(role = "You", text = text, attachments = files); busy = true
         val id = request("turn/start", withWorkspace(turnStartParams(selected, text, model, effort, files), selectedWorkspace), model.trim())
         if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         return true

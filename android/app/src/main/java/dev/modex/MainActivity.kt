@@ -83,8 +83,8 @@ private fun ModexApp() {
         if (phoneTarget == vm.savedConnection.toString()) vm.attachments.fromPhone(phoneThread, uris, phoneGeneration, context.contentResolver)
     }
     if (remoteThread.isNotEmpty()) RemoteFilePicker(
-        vm.selectedWorkspace, vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
-        MAX_ATTACHMENTS - vm.attachments.drafts[remoteThread].orEmpty().size, vm.attachments::browse,
+        vm.attachments.directoryFor(remoteThread), vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
+        MAX_ATTACHMENTS - vm.attachments.drafts[remoteThread].orEmpty().size, { vm.attachments.browse(it, remoteThread) },
         { files -> files.forEach { vm.attachments.addRemote(remoteThread, it) }; remoteThread = "" }, { remoteThread = "" }
     )
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
@@ -101,8 +101,9 @@ private fun ModexApp() {
             registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus,
             attachments = vm.attachments.drafts[vm.selected].orEmpty(), attachmentWorking = vm.attachments.working,
             attachmentProgress = vm.attachments.progress, attachmentError = vm.attachments.error,
+            loadAttachment = vm::attachmentFile,
             onPhoneFiles = { phoneThread = vm.selected; phoneGeneration = vm.attachments.generation; phoneTarget = vm.savedConnection.toString(); documentPicker.launch(arrayOf("*/*")) },
-            onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.selectedWorkspace) },
+            onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.attachments.directoryFor(remoteThread), remoteThread) },
             onRemoveAttachment = { vm.attachments.remove(vm.selected, it) }
         )
     } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(20.dp)) {

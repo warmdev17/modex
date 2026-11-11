@@ -78,8 +78,11 @@ internal fun ChatWorkspace(
     registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = "",
     attachments: List<Attachment> = emptyList(), attachmentWorking: Boolean = false,
     attachmentProgress: String = "", attachmentError: String = "",
+    loadAttachment: suspend (Attachment) -> java.io.File = { error("Reconnect to open attachment") },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {}
 ) {
+    var preview by remember(selected) { mutableStateOf<Attachment?>(null) }
+    preview?.let { file -> AttachmentViewer(file, loadAttachment) { preview = null } }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     BackHandler(drawer.isOpen) { scope.launch { drawer.close() } }
@@ -208,7 +211,12 @@ internal fun ChatWorkspace(
                     val role = entry.role; val body = entry.text
                     if (role == "You") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         Surface(color = Mocha.Surface, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(0.9f)) {
-                            SelectionContainer { Text(body, Modifier.padding(14.dp), style = MaterialTheme.typography.bodyLarge) }
+                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                if (entry.attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    entry.attachments.forEach { file -> AttachmentTile(file, loadAttachment, { preview = file }) }
+                                }
+                                if (body.isNotBlank()) SelectionContainer { Text(body, style = MaterialTheme.typography.bodyLarge) }
+                            }
                         }
                     } else if (role == "command") CommandCard(entry) else MarkdownMessage(body)
                 }
@@ -224,7 +232,7 @@ internal fun ChatWorkspace(
                 connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking,
                 attachments, attachmentWorking, attachmentProgress, attachmentError,
                 connected && selected.isNotBlank() && !busy && !attachmentWorking,
-                onPhoneFiles, onRemoteFiles, onRemoveAttachment
+                onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it }
             ) {
                 if (onSend(prompt, queuedModel, queuedEfforts[selected].orEmpty())) updatePrompt("")
             }
@@ -280,18 +288,13 @@ internal fun ChatWorkspace(
 private fun PromptComposer(
     prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
-    attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, onSend: () -> Unit
+    attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
             if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                attachments.forEach { file -> InputChip(
-                    selected = false, onClick = {}, label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 180.dp)) },
-                    leadingIcon = { ChatGlyph(if (file.kind == "image") ChatIcon.Image else ChatIcon.File) },
-                    trailingIcon = { IconButton(onClick = { onRemove(file.path) }, enabled = !busy && !attachmentWorking, modifier = Modifier.size(32.dp)) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
-                    shape = RoundedCornerShape(8.dp)
-                ) }
+                attachments.forEach { file -> AttachmentTile(file, loadAttachment, { onPreview(file) }, if (!busy && !attachmentWorking) ({ onRemove(file.path) }) else null) }
             }
             if (attachmentWorking) Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)

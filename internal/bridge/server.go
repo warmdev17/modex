@@ -375,25 +375,41 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						messages = append(messages, map[string]any{"id": item.ID, "role": "command", "text": output, "command": item.Command, "cwd": item.Cwd, "status": item.Status, "exit_code": item.ExitCode})
 						continue
 					}
-					role, text := "", ""
+					role, text, displayText := "", "", ""
+					attachments := []map[string]string{}
 					switch item.Type {
 					case "userMessage":
 						role = "user"
 						for _, part := range item.Content {
 							if part.Type == "text" {
-								text += part.Text
+								if files := historyFileReferences(part.Text); len(files) > 0 {
+									for _, file := range files {
+										attachments = append(attachments, file)
+										text += "\n[File: " + file["name"] + "]"
+									}
+								} else {
+									text += part.Text
+									displayText += part.Text
+								}
 							} else if part.Type == "localImage" {
 								text += "\n[Image: " + filepath.Base(part.Path) + "]"
+								if filepath.IsAbs(part.Path) {
+									attachments = append(attachments, map[string]string{"path": part.Path, "name": filepath.Base(part.Path), "kind": "image"})
+								} else {
+									displayText += "\n[Image: " + filepath.Base(part.Path) + "]"
+								}
 							} else if part.Type == "image" {
 								text += "\n[Image]"
+								displayText += "\n[Image]"
 							}
 						}
 					case "agentMessage":
 						role = "assistant"
 						text = item.Text
+						displayText = item.Text
 					}
 					if role != "" && text != "" {
-						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text})
+						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments})
 					}
 				}
 			}
