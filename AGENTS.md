@@ -8,5 +8,8 @@
 - Keep implementation, its necessary tests and directly related documentation together when they form one coherent change. Do not split a change into commits that knowingly leave the project broken.
 - Use clear commit messages describing the concrete change, for example `feat(bridge): handle one-time approval responses`. Avoid vague messages such as `update`, `misc fixes` or `changes`.
 - Before committing, review the staged diff, check for secrets and unintended files, and run checks appropriate to the change. Stage explicit paths or hunks; do not use blanket staging when unrelated changes are present.
+- Create a pull request before merging features or changes that affect project logic, quality, security, dependencies, build or runtime behavior. Include a summary of the changes and verification results.
+- Small changes that do not affect project logic or quality, such as instruction edits, typo fixes or removal of verified unused documentation, may be merged directly without a pull request after reviewing the diff and running appropriate checks.
+- For both pull requests and direct branch merges, use a merge commit that preserves every original commit. Do not squash or rebase-merge.
 - Report the branch, commits, checks and any remaining uncommitted changes when handing off implementation work.
 - Local branches and commits are part of the implementation workflow. These rules do not authorize pushing, merging, publishing or rewriting shared history without the user's instruction.
