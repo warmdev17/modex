@@ -130,6 +130,9 @@ func (p *Process) CallEvents(ctx context.Context, method string, params any, onN
 	select {
 	case result := <-done:
 		p.removePending(id)
+		if result.err == nil && method == "thread/list" {
+			result.raw = p.desktopMembership(result.raw)
+		}
 		return result.raw, result.err
 	case <-ctx.Done():
 		p.removePending(id)
