@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -55,10 +56,15 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	case "threads/start":
 		allowed["model"] = true
 		allowed["permission_mode"] = true
+		allowed["workspace"] = true
 	case "threads/list", "models/list":
+		if cmd.Method == "threads/list" {
+			allowed["all_workspaces"] = true
+		}
 		allowed["limit"] = true
 		allowed["cursor"] = true
 	case "threads/read", "threads/resume":
+		allowed["workspace"] = true
 		allowed["thread_id"] = true
 		if cmd.Method == "threads/read" {
 			allowed["include_turns"] = true
@@ -68,6 +74,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["text"] = true
 		allowed["model"] = true
 		allowed["effort"] = true
+		allowed["workspace"] = true
 	case "decision/respond":
 		allowed["decision_id"] = true
 		allowed["result"] = true
@@ -78,6 +85,13 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if !allowed[k] {
 			return nil, errors.New("unknown parameter")
 		}
+	}
+	if raw, ok := p["workspace"]; ok {
+		var workspace string
+		if json.Unmarshal(raw, &workspace) != nil || !filepath.IsAbs(workspace) || strings.ContainsAny(workspace, "\r\n\x00") || len(workspace) > 32768 {
+			return nil, errors.New("workspace must be an absolute path")
+		}
+		cwd = workspace
 	}
 	fetch := func(method string, params any) (json.RawMessage, error) {
 		r, err := call(ctx, method, params, emit)
@@ -186,7 +200,18 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("cursor must be a string")
 			}
 		}
-		params := map[string]any{"cwd": cwd, "limit": limit, "modelProviders": []string{}}
+		all := false
+		if raw, ok := p["all_workspaces"]; ok {
+			if string(raw) == "null" || json.Unmarshal(raw, &all) != nil {
+				return nil, errors.New("all_workspaces must be boolean")
+			}
+		}
+		params := map[string]any{"limit": limit, "modelProviders": []string{}, "sourceKinds": []string{}, "sortKey": "updated_at"}
+		if !all {
+			params["cwd"] = cwd
+		} else {
+			params["sourceKinds"] = []string{"cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview", "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"}
+		}
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
@@ -202,7 +227,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, errors.New("invalid thread list response")
 		}
 		for _, thread := range page.Data {
-			if thread.Cwd != cwd {
+			if !all && thread.Cwd != cwd {
 				return nil, errors.New("thread outside workspace")
 			}
 		}
@@ -368,7 +393,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, err
 		}
 		if cmd.Method == "threads/resume" {
-			raw, err := fetch("thread/resume", map[string]any{"threadId": id, "excludeTurns": true})
+			params := map[string]any{"threadId": id, "excludeTurns": true}
+			if _, explicit := p["workspace"]; explicit {
+				params["cwd"] = cwd
+			}
+			raw, err := fetch("thread/resume", params)
 			if err != nil {
 				return nil, err
 			}

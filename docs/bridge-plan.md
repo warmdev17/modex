@@ -76,3 +76,9 @@ Android reduces forwarded `item/started`, `item/completed`, `item/agentMessage/d
 `models/list {limit?:1..100,cursor?:string}` calls Codex `model/list` with visible models only. Result `{data:[{id,model,displayName,defaultReasoningEffort,supportedReasoningEfforts:[{reasoningEffort,description}]}],next_cursor:string|null}` projects picker fields only. Catalog may be bundled/cached; it is not proof of provider model access. Android follows cursor pages on connect and retains custom IDs if discovery fails.
 
 `turn/start` accepts optional `effort`: nonblank single-line string up to 64 UTF-8 bytes, forwarded unchanged to Codex. Omission inherits the session's current setting. Current schema advertises arbitrary effort strings; the Android slider only offers efforts from the chosen model. Changing model clears the queued effort; changes apply to the next explicit send. No provider HTTP calls or credentials on the phone.
+
+## Remote project extension (2026-11-11)
+
+`threads/list` accepts optional `all_workspaces:boolean` (default false). True omits the cwd filter, includes all known session sources/providers, and returns existing projected cwd/title metadata with normal cursor pagination. Non-archived sessions are sorted by updated_at; no filesystem project scan or desktop-private pin database is read.
+
+`threads/start`, `threads/read`, `threads/resume`, and `turn/start` accept optional `workspace`: absolute native-host path, at most 32768 UTF-8 bytes and no CR/LF/NUL. Omission retains the configured host workspace. The caller explicitly chooses a remote project; returned thread IDs and exact cwd remain checked before history access, resume and sending. Explicit resume passes the same cwd to Codex. New thread creation uses selected project cwd and existing permission mode behavior. This expands access via authenticated SSH to other Codex projects owned by that remote user; it is not a restricted single-workspace deployment when opted in.
