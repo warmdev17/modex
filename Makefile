@@ -9,6 +9,7 @@ HOST_BINARY ?= /tmp/modex-host
 WORKSPACE ?= $(CURDIR)
 STATE_DIR ?= $(HOME)/.local/state/modex-phone
 CODEX ?= codex
+PREFIX ?= $(HOME)/.local
 
 .PHONY: apk install-apk install-android launch-android
 
@@ -38,9 +39,15 @@ host-attach:
 host-stop:
 	"$(HOST_BINARY)" --stop --state-dir "$(STATE_DIR)"
 
-.PHONY: cli
+.PHONY: cli install-cli
 
-# Register this exact existing native session for explicit phone takeover.
+# Choose by title or create new; THREAD remains an optional shortcut.
 cli: host-build
-	@test -n "$(THREAD)" || (printf '%s\n' 'Usage: make cli THREAD=<session-uuid>'; exit 1)
 	"$(HOST_BINARY)" --cli --thread "$(THREAD)" --workspace "$(WORKSPACE)" --codex "$(CODEX)"
+
+install-cli:
+	@mkdir -p "$(PREFIX)/bin"
+	go build -o "$(PREFIX)/bin/modex-host.new" ./cmd/modex-host
+	go build -o "$(PREFIX)/bin/modex.new" ./cmd/modex
+	mv -f "$(PREFIX)/bin/modex-host.new" "$(PREFIX)/bin/modex-host"
+	mv -f "$(PREFIX)/bin/modex.new" "$(PREFIX)/bin/modex"

@@ -21,6 +21,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "cli" {
+		return launchCLI(os.Args[2:])
+	}
 	var o sshtransport.Options
 	flag.StringVar(&o.Target, "target", "", "SSH hostname, user@host, or configured alias")
 	flag.StringVar(&o.HostBinary, "host-binary", "", "Absolute POSIX path to remote modex-host")
