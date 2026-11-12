@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ func run() error {
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")
 	profile := flag.String("profile", "", "Named profile (not yet supported; fails explicitly)")
 	cli := flag.Bool("cli", false, "Launch a native Codex CLI registered for phone takeover (Linux/macOS)")
-	thread := flag.String("thread", "", "Exact existing session UUID for --cli")
+	thread := flag.String("thread", "", "Existing session UUID for --cli; omit to choose by title or create new")
 	serve := flag.Bool("serve", false, "Serve Modex commands over stdin/stdout for the lifetime of this connection")
 	background := flag.Bool("background", false, "Start a detached supervisor (Linux/macOS)")
 	supervise := flag.Bool("supervise", false, "Run a persistent foreground supervisor (Linux/macOS)")
@@ -72,7 +73,10 @@ func run() error {
 		return supervisorClient(*stateDir, *cursor, *instance, *stop)
 	}
 	if *workspace == "" {
-		return fmt.Errorf("--workspace is required")
+		if !*cli {
+			return fmt.Errorf("--workspace is required")
+		}
+		*workspace = "."
 	}
 	cwd, err := filepath.Abs(*workspace)
 	if err != nil {
@@ -93,6 +97,15 @@ func run() error {
 		*home = absolute
 	}
 	if *cli {
+		if *thread == "" {
+			*thread, err = chooseCLIThread(cwd, *binary, *home)
+			if errors.Is(err, errCLICancelled) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+		}
 		return runCLI(cwd, *binary, *home, *thread)
 	}
 	if *background {

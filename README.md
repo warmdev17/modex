@@ -202,10 +202,23 @@ The first uses a fake Codex process and checks auth, exclusive ownership, discon
 
 ## Explicit desktop CLI takeover (Linux/macOS)
 
-To make an existing session available for phone takeover, first close any normal CLI/Desktop writer of that session, then start its registered native terminal:
+Install the local commands once (Go 1.23+ required), then run from your project:
 
 ```sh
-make cli THREAD=<exact-session-uuid>
+make install-cli
+modex cli
+```
+
+The default install directory is `~/.local/bin`; add it to your PATH if needed, or invoke `~/.local/bin/modex cli`. `PREFIX=/your/prefix` overrides the install location. Keep `modex` and `modex-host` beside each other, or pass `modex cli --host-binary /absolute/modex-host`.
+
+Choose a session by its title and number, or `0` for a new conversation. `n`/`p` page through sessions; `q` cancels. Sessions are listed for the current working directory, most recently updated first; a missing title falls back to a preview. Pass `--workspace /absolute/project` to choose another directory. New conversations use the native TUI; Modex discovers their Codex-generated ID and registers takeover automatically. No ID copying or seed prompt is needed. A conversation appears on the phone once Codex has persisted it.
+
+From this repository, `make cli` also opens the picker. Exact-ID shortcuts remain available. To resume a session, first close any normal CLI/Desktop writer of it:
+
+```sh
+make cli
+# Optional shortcut:
+modex cli --thread <exact-session-uuid>
 # Or, for a different CODEX_HOME:
 /tmp/modex-host --cli --thread <exact-session-uuid> --workspace /absolute/project --codex-home /absolute/codex-home
 ```

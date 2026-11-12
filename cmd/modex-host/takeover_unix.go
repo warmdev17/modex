@@ -143,7 +143,7 @@ func runCLI(cwd, binary, home, id string) error {
 	signal.Notify(interrupts, os.Interrupt)
 	defer signal.Stop(interrupts)
 
-	if !validTakeoverThread(id) {
+	if id != "" && !validTakeoverThread(id) {
 		return errors.New("--thread must be an exact Codex session UUID")
 	}
 	root, err := takeoverRoot(home)
@@ -157,18 +157,15 @@ func runCLI(cwd, binary, home, id string) error {
 		return err
 	}
 	directory := filepath.Join(root, id)
-	if err = os.Mkdir(directory, 0700); err != nil {
+	if id == "" {
+		directory, err = os.MkdirTemp(root, "launch-")
+	} else {
+		err = os.Mkdir(directory, 0700)
+	}
+	if err != nil {
 		return errors.New("CLI registration already exists; close its launcher first (stale registration requires manual inspection)")
 	}
 	defer os.RemoveAll(directory)
-	listener, err := net.Listen("unix", filepath.Join(directory, "owner.sock"))
-	if err != nil {
-		return err
-	}
-	defer listener.Close()
-	if err = os.Chmod(filepath.Join(directory, "owner.sock"), 0600); err != nil {
-		return err
-	}
 	socket := filepath.Join(directory, "codex.sock")
 	env := os.Environ()
 	if home != "" {
@@ -207,7 +204,11 @@ func runCLI(cwd, binary, home, id string) error {
 	if !ready {
 		return errors.New("dedicated Codex server did not create its socket")
 	}
-	cli := exec.Command(binary, "--remote", "unix://"+socket, "resume", id)
+	args := []string{"--remote", "unix://" + socket}
+	if id != "" {
+		args = append(args, "resume", id)
+	}
+	cli := exec.Command(binary, args...)
 	cli.Dir, cli.Env = cwd, env
 	cli.Stdin, cli.Stdout, cli.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err = cli.Start(); err != nil {
@@ -216,6 +217,42 @@ func runCLI(cwd, binary, home, id string) error {
 	cliDone := make(chan struct{})
 	var cliErr error
 	go func() { cliErr = cli.Wait(); close(cliDone) }()
+	defer func() {
+		select {
+		case <-cliDone:
+			return
+		default:
+		}
+		_ = server.Process.Signal(syscall.SIGTERM)
+		_ = cli.Process.Signal(os.Interrupt)
+		if !waitOwned(cliDone, 3*time.Second) {
+			_ = cli.Process.Kill()
+			<-cliDone
+		}
+	}()
+	registration := directory
+	if id == "" {
+		id, err = waitCLIThread(ctx, cliDone, func(ctx context.Context) (json.RawMessage, error) { return loadedThreads(ctx, socket) })
+		if err != nil {
+			return err
+		}
+		if id == "" {
+			return cliErr
+		}
+		registration = filepath.Join(root, id)
+		if err = os.Mkdir(registration, 0700); err != nil {
+			return errors.New("new session registration already exists; inspect it before retrying")
+		}
+		defer os.RemoveAll(registration)
+	}
+	listener, err := net.Listen("unix", filepath.Join(registration, "owner.sock"))
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	if err = os.Chmod(filepath.Join(registration, "owner.sock"), 0600); err != nil {
+		return err
+	}
 	owner := &ownedCLI{id: id, cli: cli, server: server, cliDone: cliDone, serverDone: serverDone}
 	owner.inspect = func(ctx context.Context) (json.RawMessage, error) { return loadedThreads(ctx, socket) }
 
@@ -252,4 +289,43 @@ func runCLI(cwd, binary, home, id string) error {
 		return fmt.Errorf("registered Codex CLI exited: %w", cliErr)
 	}
 	return nil
+}
+
+// A native new conversation gets its ID from Codex, never from a synthetic seed or replay.
+func waitCLIThread(ctx context.Context, done <-chan struct{}, inspect func(context.Context) (json.RawMessage, error)) (string, error) {
+	for {
+		select {
+		case <-done:
+			return "", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		default:
+		}
+		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		raw, err := inspect(probeCtx)
+		cancel()
+		if err != nil {
+			return "", errors.New("cannot discover the new native session; no takeover was registered")
+		}
+		var page struct {
+			Data []string `json:"data"`
+			Next *string  `json:"nextCursor"`
+		}
+		if json.Unmarshal(raw, &page) != nil || page.Data == nil || page.Next != nil || len(page.Data) > 1 {
+			return "", errors.New("ambiguous native session; no takeover was registered")
+		}
+		if len(page.Data) == 1 {
+			if !validTakeoverThread(page.Data[0]) {
+				return "", errors.New("invalid native session ID")
+			}
+			return page.Data[0], nil
+		}
+		select {
+		case <-done:
+			return "", nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
 }
