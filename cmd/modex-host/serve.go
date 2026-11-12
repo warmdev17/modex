@@ -31,10 +31,10 @@ func serveHost(cwd, binary, home string) error {
 		return err
 	}
 	defer p.Close()
-	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd)
+	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd, home)
 }
 
-func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Writer, cwd string) error {
+func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Writer, cwd, home string) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	decisions := bridge.NewDecisions(func(ctx context.Context, id, result json.RawMessage) error {
@@ -76,6 +76,14 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 	})
 	defer sessions.Close()
 	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+		if method == "client/takeover" {
+			values, ok := params.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("invalid takeover")
+			}
+			id, _ := values["threadId"].(string)
+			return requestTakeover(ctx, home, id)
+		}
 		if method == "decision/respond" {
 			p, ok := params.(map[string]any)
 			if !ok {

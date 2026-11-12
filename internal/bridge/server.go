@@ -69,7 +69,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 		allowed["limit"] = true
 		allowed["cursor"] = true
-	case "threads/read", "threads/resume":
+	case "threads/read", "threads/resume", "threads/takeover":
+		if cmd.Method == "threads/takeover" {
+			allowed["confirm"] = true
+		}
 		allowed["workspace"] = true
 		allowed["thread_id"] = true
 		if cmd.Method == "threads/read" {
@@ -110,6 +113,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, errors.New("Codex request failed; raw error suppressed")
 		}
 		return r, nil
+	}
+	if cmd.Method == "threads/takeover" {
+		var confirm bool
+		if json.Unmarshal(p["confirm"], &confirm) != nil || !confirm {
+			return nil, errors.New("takeover requires explicit confirmation")
+		}
 	}
 	switch cmd.Method {
 	case "client/attached":
@@ -449,7 +458,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if err != nil {
 			return nil, err
 		}
-		if cmd.Method == "threads/resume" {
+		if cmd.Method == "threads/takeover" {
+			if _, err := fetch("client/takeover", map[string]any{"threadId": id}); err != nil {
+				return nil, err
+			}
+		}
+		if cmd.Method == "threads/resume" || cmd.Method == "threads/takeover" {
 			params := map[string]any{"threadId": id, "excludeTurns": true}
 			if _, explicit := p["workspace"]; explicit {
 				params["cwd"] = cwd
