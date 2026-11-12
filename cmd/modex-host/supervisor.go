@@ -82,10 +82,23 @@ func superviseHost(cwd, binary, home, dir string) error {
 	}()
 	endpoint := supervisorEndpoint{Address: listener.Addr().String(), Token: randomID(), Instance: randomID(), Workspace: cwd}
 	server := supervisor.NewServer(ctx, endpoint.Token, endpoint.Instance, input, stop)
+	server.OnAttachment = func(attached bool) error {
+		return json.NewEncoder(input).Encode(map[string]any{"id": 2147483646, "method": "client/attached", "params": map[string]bool{"attached": attached}})
+	}
 	go func() {
 		scanner := bufio.NewScanner(output)
 		scanner.Buffer(make([]byte, 4096), supervisor.MaxFrame)
 		for scanner.Scan() {
+			var lifecycle struct {
+				ID    int             `json:"id"`
+				Error json.RawMessage `json:"error"`
+			}
+			if json.Unmarshal(scanner.Bytes(), &lifecycle) == nil && lifecycle.ID == 2147483646 {
+				if len(lifecycle.Error) > 0 {
+					break
+				}
+				continue
+			}
 			if server.Journal.Append(json.RawMessage(scanner.Bytes())) != nil {
 				break
 			}

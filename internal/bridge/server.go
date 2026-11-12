@@ -26,9 +26,10 @@ type Thread struct {
 
 type threadListItem struct {
 	Thread
-	ProjectID *string `json:"projectId"`
-	Preview   string  `json:"preview,omitempty"`
-	Name      string  `json:"name,omitempty"`
+	ProjectID   *string `json:"projectId"`
+	Projectless bool    `json:"projectless,omitempty"`
+	Preview     string  `json:"preview,omitempty"`
+	Name        string  `json:"name,omitempty"`
 }
 
 func safePreview(value string) string {
@@ -55,6 +56,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "client/attached":
+		allowed["attached"] = true
 	case "status":
 	case "threads/start":
 		allowed["model"] = true
@@ -66,7 +69,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 		allowed["limit"] = true
 		allowed["cursor"] = true
-	case "threads/read", "threads/resume":
+	case "threads/read", "threads/resume", "threads/takeover":
+		if cmd.Method == "threads/takeover" {
+			allowed["confirm"] = true
+		}
 		allowed["workspace"] = true
 		allowed["thread_id"] = true
 		if cmd.Method == "threads/read" {
@@ -108,7 +114,19 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 		return r, nil
 	}
+	if cmd.Method == "threads/takeover" {
+		var confirm bool
+		if json.Unmarshal(p["confirm"], &confirm) != nil || !confirm {
+			return nil, errors.New("takeover requires explicit confirmation")
+		}
+	}
 	switch cmd.Method {
+	case "client/attached":
+		var attached bool
+		if raw, ok := p["attached"]; !ok || string(raw) == "null" || json.Unmarshal(raw, &attached) != nil {
+			return nil, errors.New("attached must be boolean")
+		}
+		return fetch("client/attached", map[string]any{"attached": attached})
 	case "threads/start":
 		params := map[string]any{"cwd": cwd}
 		if raw, ok := p["permission_mode"]; ok {
@@ -440,7 +458,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if err != nil {
 			return nil, err
 		}
-		if cmd.Method == "threads/resume" {
+		if cmd.Method == "threads/takeover" {
+			if _, err := fetch("client/takeover", map[string]any{"threadId": id}); err != nil {
+				return nil, err
+			}
+		}
+		if cmd.Method == "threads/resume" || cmd.Method == "threads/takeover" {
 			params := map[string]any{"threadId": id, "excludeTurns": true}
 			if _, explicit := p["workspace"]; explicit {
 				params["cwd"] = cwd

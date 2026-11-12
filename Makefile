@@ -37,3 +37,10 @@ host-attach:
 
 host-stop:
 	"$(HOST_BINARY)" --stop --state-dir "$(STATE_DIR)"
+
+.PHONY: cli
+
+# Register this exact existing native session for explicit phone takeover.
+cli: host-build
+	@test -n "$(THREAD)" || (printf '%s\n' 'Usage: make cli THREAD=<session-uuid>'; exit 1)
+	"$(HOST_BINARY)" --cli --thread "$(THREAD)" --workspace "$(WORKSPACE)" --codex "$(CODEX)"

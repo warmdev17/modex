@@ -51,6 +51,27 @@ class SessionSettingsTest {
         assertEquals(emptyList<String>(), groups["empty"])
         assertFalse(groups.values.flatten().contains("standalone"))
     }
+    @Test fun projectlessAndCanonicalMembershipRemainDistinctFromUnassigned() {
+        val data = org.json.JSONArray("""[{"id":"standalone","projectId":null,"projectless":true},{"id":"native","projectId":null},{"id":"empty","projectId":""},{"id":"canonical","projectId":"real","projectless":true}]""")
+        val membership = readProjectMembership(data)
+        assertEquals(mapOf("standalone" to "", "canonical" to "real"), membership)
+    }
+    @Test fun nativeSessionsJoinExistingProjectsByRootWithoutInventingProjects() {
+        val projects = listOf(RemoteProject("modex", "Modex", listOf("/work/modex")), RemoteProject("nested", "Nested", listOf("/work/modex/tools")))
+        val threads = listOf("current", "hello", "child", "outside", "standalone", "explicit", "other")
+        val paths = mapOf("current" to "/work/modex", "hello" to "/work/modex/", "child" to "/work/modex/tools/src", "outside" to "/work/modex-other", "standalone" to "/work/modex", "explicit" to "/work/modex/tools", "other" to "/tmp/new-chat")
+        val groups = projectSessions(projects, threads, mapOf("standalone" to "", "explicit" to "modex"), paths)
+        assertEquals(listOf("current", "hello", "explicit"), groups["modex"])
+        assertEquals(listOf("child"), groups["nested"])
+        assertEquals(2, groups.size)
+    }
+    @Test fun projectGroupingHandlesWindowsAndAmbiguousRoots() {
+        val projects = listOf(RemoteProject("windows", "Windows", listOf("C:\\Work\\Modex")), RemoteProject("a", "A", listOf("/same")), RemoteProject("b", "B", listOf("/same")))
+        val groups = projectSessions(projects, listOf("windows", "ambiguous"), emptyMap(), mapOf("windows" to "c:/work/modex/src", "ambiguous" to "/same"))
+        assertEquals(listOf("windows"), groups["windows"])
+        assertTrue(groups["a"].isNullOrEmpty())
+        assertTrue(groups["b"].isNullOrEmpty())
+    }
     @Test fun missingSettingsAreUnknown() {
         val label = sessionSettingsLabel(JSONObject())
         assertTrue(label.contains("Sandbox: Unknown"))

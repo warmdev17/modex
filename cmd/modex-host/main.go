@@ -27,6 +27,8 @@ func run() error {
 	binary := flag.String("codex", "codex", "Codex executable")
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")
 	profile := flag.String("profile", "", "Named profile (not yet supported; fails explicitly)")
+	cli := flag.Bool("cli", false, "Launch a native Codex CLI registered for phone takeover (Linux/macOS)")
+	thread := flag.String("thread", "", "Exact existing session UUID for --cli")
 	serve := flag.Bool("serve", false, "Serve Modex commands over stdin/stdout for the lifetime of this connection")
 	background := flag.Bool("background", false, "Start a detached supervisor (Linux/macOS)")
 	supervise := flag.Bool("supervise", false, "Run a persistent foreground supervisor (Linux/macOS)")
@@ -37,7 +39,7 @@ func run() error {
 	instance := flag.String("instance", "", "Supervisor instance from the attach acknowledgement")
 	flag.Parse()
 	modes := 0
-	for _, enabled := range []bool{*serve, *background, *supervise, *attach, *stop} {
+	for _, enabled := range []bool{*serve, *background, *supervise, *attach, *stop, *cli} {
 		if enabled {
 			modes++
 		}
@@ -59,6 +61,9 @@ func run() error {
 	}
 	if flag.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments")
+	}
+	if *thread != "" && !*cli {
+		return fmt.Errorf("--thread requires --cli")
 	}
 	if *profile != "" {
 		return fmt.Errorf("named profiles are not supported by this diagnostic; no profile was applied")
@@ -86,6 +91,9 @@ func run() error {
 			return err
 		}
 		*home = absolute
+	}
+	if *cli {
+		return runCLI(cwd, *binary, *home, *thread)
 	}
 	if *background {
 		return startBackground(cwd, *binary, *home, *stateDir)

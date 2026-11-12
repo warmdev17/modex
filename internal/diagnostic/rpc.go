@@ -38,6 +38,11 @@ func classifyRPCError(raw json.RawMessage) string {
 	_ = json.Unmarshal(raw, &detail)
 	s := detail.Code + " " + detail.Message
 	for _, known := range []struct{ key, category string }{
+		{"takeover_unmanaged", "takeover_unmanaged"},
+		{"takeover_mismatch", "takeover_mismatch"},
+		{"takeover_unavailable", "takeover_unavailable"},
+		{"takeover_uncertain", "takeover_uncertain"},
+		{"takeover_invalid", "takeover_invalid"},
 		{"active writer", "active_writer"},
 		{"already has an active writer", "active_writer"},
 		{"unauthorized", "unauthorized"},

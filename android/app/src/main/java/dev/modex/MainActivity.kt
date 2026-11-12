@@ -96,6 +96,7 @@ private fun ModexApp() {
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
             onCreate = vm::create, onSend = vm::send, onAnswer = vm::answer,
             onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect,
+            takeoverSession = vm.takeoverThread, onTakeover = vm::takeOver,
             models = vm.models, modelCatalogStatus = vm.modelCatalogStatus,
             threadWorkspaces = vm.threadWorkspaces, threadListLoading = vm.threadListLoading,
             registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus,

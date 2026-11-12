@@ -17,8 +17,15 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 
+internal fun takeoverTarget(method: String, detail: String, target: String): String =
+    if (method == "threads/resume" && detail.contains("active_writer", true)) target else ""
+
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
+        detail.contains("takeover_unmanaged") -> "This CLI was not started with the Modex launcher. Close it on your computer, or use make cli THREAD=<session-id> next time."
+        detail.contains("takeover_mismatch") -> "The registered CLI has changed sessions or loaded multiple sessions. Nothing was taken over. Close it on your computer."
+        detail.contains("takeover_unavailable") -> "The registered CLI is no longer available. Refresh the session before retrying."
+        detail.contains("takeover_uncertain") -> "Takeover result is uncertain. Do not retry takeover; refresh and inspect the session first."
         method == "turn/start" && (detail.contains("attachment", true) || detail.contains("select PNG")) -> "An attachment could not be read. Check the file still exists, is at most 20 MiB, and images are PNG, JPEG, GIF or WebP."
         detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
         detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
@@ -42,6 +49,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var threadListLoading by mutableStateOf(false); private set
     var titles by mutableStateOf(mapOf<String, String>()); private set
     var historyLoading by mutableStateOf(false); private set
+    var takeoverThread by mutableStateOf(""); private set
     private var saveJob: kotlinx.coroutines.Job? = null
     var connected by mutableStateOf(false); private set
     var connecting by mutableStateOf(false); private set
@@ -193,16 +201,26 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun disconnect() { sessionSettings = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
+    fun disconnect() { takeoverThread = ""; sessionSettings = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
     fun create(model: String, mode: String, effort: String = "") {
         if (busy || historyLoading || switching()) return
+        takeoverThread = ""
         sessionSettings = ""
         request("threads/start", withWorkspace(newThreadParams(model, mode), selectedWorkspace), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())
     }
     fun select(id: String) {
         if (busy || historyLoading || switching()) return
+        takeoverThread = ""
         sessionSettings = ""
         request("threads/resume", withWorkspace(JSONObject().put("thread_id", id), threadWorkspaces[id].orEmpty()), id)
+    }
+    fun takeOver() {
+        val target = takeoverThread
+        if (!connected || target.isBlank() || busy || historyLoading || switching()) return
+        takeoverThread = ""
+        error = ""
+        historyLoading = true
+        request("threads/takeover", withWorkspace(JSONObject().put("thread_id", target).put("confirm", true), threadWorkspaces[target].orEmpty()), target)
     }
     fun refreshThreads() {
         if (!connected || threadListLoading) return
@@ -231,7 +249,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         answeringDecisionIds += id
         request("decision/respond", JSONObject().put("decision_id", id).put("result", result), id)
     }
-    private fun switching() = pending.values.any { it.first == "threads/start" || it.first == "threads/resume" }
+    private fun switching() = pending.values.any { it.first == "threads/start" || it.first == "threads/resume" || it.first == "threads/takeover" }
     private fun request(method: String, params: JSONObject, tag: String = ""): Long? {
         if (!connected) return null
         val id = sequence++; pending[id] = method to tag
@@ -252,10 +270,12 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 if (operation.first == "projects/list") { projectStatus = "Project list unavailable. Update the host/Codex; chats remain in Recents."; return }
                 if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
                 if (operation.first == "turn/start") busy = false
-                if (operation.first == "threads/read") historyLoading = false
+                if (operation.first == "threads/read" || operation.first == "threads/takeover") historyLoading = false
                 if (operation.first == "threads/list") threadListLoading = false
                 if (operation.first == "decision/respond") answeringDecisionIds -= operation.second
-                error = explainHostRejection(operation.first, frame.optJSONObject("error")?.optString("message").orEmpty()); return
+                val detail = frame.optJSONObject("error")?.optString("message").orEmpty()
+                takeoverThread = takeoverTarget(operation.first, detail, operation.second)
+                error = explainHostRejection(operation.first, detail); return
             }
             val result = frame.optJSONObject("result") ?: return
             when (operation.first) {
@@ -280,7 +300,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     val list = result.optJSONArray("data") ?: JSONArray()
                     titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
                     val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
-                    val membership = (0 until list.length()).mapNotNull { i -> val t = list.getJSONObject(i); if (t.isNull("projectId")) null else t.getString("id") to t.optString("projectId") }.toMap()
+                    val membership = readProjectMembership(list)
                     projectMembership = if (operation.second == "more") projectMembership + membership else membership
                     threadWorkspaces = if (operation.second == "more") threadWorkspaces + paths else paths
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }
@@ -291,7 +311,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                         if (threadCursors.add(cursor)) more() else { nextCursor = null; error = "Session listing stopped because the host repeated a page cursor. Refresh to retry." }
                     }
                 }
-                "threads/start", "threads/resume" -> {
+                "threads/start", "threads/resume", "threads/takeover" -> {
+                    takeoverThread = ""
                     error = ""
                     sessionSettings = sessionSettingsLabel(result)
                     selected = result.getJSONObject("thread").getString("id")

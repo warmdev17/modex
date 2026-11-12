@@ -5,6 +5,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtocolTest {
+    @Test fun takeoverOnlyTargetsRejectedResumes() {
+        assertEquals("target", takeoverTarget("threads/resume", "Codex request failed: active_writer", "target"))
+        assertEquals("", takeoverTarget("turn/start", "active_writer", "target"))
+        assertEquals("", takeoverTarget("threads/resume", "request_rejected", "target"))
+        assertEquals("", takeoverTarget("threads/resume", "active_writer", ""))
+        assertTrue(explainHostRejection("threads/takeover", "takeover_unmanaged").contains("launcher"))
+        assertTrue(explainHostRejection("threads/takeover", "takeover_uncertain").contains("Do not retry"))
+    }
+
     @Test
     fun activeWriterRejectionExplainsDesktopOwnership() {
         assertEquals(

@@ -61,7 +61,7 @@ func TestServeBridgeApprovalRoundTripBeforeRPCResponse(t *testing.T) {
 	// Close pipe reads as well as the subprocess if the bounded test expires.
 	go func() { <-ctx.Done(); input.CloseWithError(ctx.Err()); output.CloseWithError(ctx.Err()) }()
 	done := make(chan error, 1)
-	go func() { done <- serveBridge(ctx, p, input, output, "/work") }()
+	go func() { done <- serveBridge(ctx, p, input, output, "/work", "") }()
 	if _, err := io.WriteString(clientWrite, "{\"id\":1,\"method\":\"status\"}\n"); err != nil {
 		t.Fatal(err)
 	}

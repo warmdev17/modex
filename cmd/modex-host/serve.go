@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,15 +31,16 @@ func serveHost(cwd, binary, home string) error {
 		return err
 	}
 	defer p.Close()
-	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd)
+	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd, home)
 }
 
-func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Writer, cwd string) error {
+func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Writer, cwd, home string) error {
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 	decisions := bridge.NewDecisions(func(ctx context.Context, id, result json.RawMessage) error {
 		return p.Respond(ctx, id, result)
 	})
+
 	var emitMu sync.RWMutex
 	var currentEmit func(string, json.RawMessage)
 	p.SetRequestHandler(func(id json.RawMessage, method string, params json.RawMessage) {
@@ -64,7 +66,24 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 	if err != nil {
 		return err
 	}
+	sessions := newThreadProcesses(ctx, p, func(method string, params json.RawMessage) {
+		emitMu.RLock()
+		emit := currentEmit
+		emitMu.RUnlock()
+		if emit != nil {
+			emit(method, params)
+		}
+	})
+	defer sessions.Close()
 	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+		if method == "client/takeover" {
+			values, ok := params.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("invalid takeover")
+			}
+			id, _ := values["threadId"].(string)
+			return requestTakeover(ctx, home, id)
+		}
 		if method == "decision/respond" {
 			p, ok := params.(map[string]any)
 			if !ok {
@@ -75,7 +94,13 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 			if !ok || !resultOK {
 				return nil, fmt.Errorf("invalid decision response")
 			}
-			if err := decisions.Answer(ctx, id, result); err != nil {
+			var answerErr error
+			if strings.Contains(id, "/") {
+				answerErr = sessions.Answer(ctx, id, result)
+			} else {
+				answerErr = decisions.Answer(ctx, id, result)
+			}
+			if err := answerErr; err != nil {
 				return nil, err
 			}
 			return json.RawMessage(`{"delivered":true}`), nil
@@ -85,10 +110,11 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 		emitMu.Unlock()
 		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		return p.CallEvents(requestCtx, method, params, func(eventMethod string, eventParams json.RawMessage) {
+		p.SetNotificationHandler(func(eventMethod string, eventParams json.RawMessage) {
 			decisions.Resolve(eventMethod, eventParams)
 			emit(eventMethod, eventParams)
 		})
+		return sessions.Call(requestCtx, method, params)
 	}
 	return bridge.ServeEvents(ctx, in, out, cwd, call)
 }
