@@ -74,6 +74,7 @@ internal fun ChatWorkspace(
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
     onCreate: (String, String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
+    runningThreads: Set<String> = emptySet(),
     takeoverSession: String = "", onTakeover: () -> Unit = {},
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
     sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
@@ -115,7 +116,7 @@ internal fun ChatWorkspace(
     var modelInput by rememberSaveable { mutableStateOf("") }
     val selectedDecisions = decisions.filter { it.optString("thread_id") == selected }
     var menu by remember { mutableStateOf(false) }
-    val canSwitch = connected && !busy && !historyLoading
+    val canSwitch = connected && !historyLoading
     val status = when { connecting -> "Connecting…"; !connected -> "Disconnected"; historyLoading -> "Loading history…"; busy -> "Working…"; else -> "Connected · SSH" }
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -125,7 +126,7 @@ internal fun ChatWorkspace(
                     Text("modex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     IconButton(onClick = { scope.launch { drawer.close() } }) { ChatGlyph(ChatIcon.Close,"Close sessions") }
                 }
-                FilledTonalButton(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = Mocha.Blue), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentPadding = PaddingValues(14.dp)) {
+                FilledTonalButton(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentPadding = PaddingValues(14.dp)) {
                     ChatGlyph(ChatIcon.New); Spacer(Modifier.width(12.dp)); Text("New chat"); Spacer(Modifier.weight(1f))
                 }
                 OutlinedTextField(search, { search = it }, placeholder = { Text("Search sessions or projects") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))
@@ -155,12 +156,12 @@ internal fun ChatWorkspace(
                             }
                         }
                         if (path !in collapsedProjects || search.isNotEmpty()) items(ids, key = { "project:$it" }) { id ->
-                            SessionSidebarRow(id, titles[id], id == selected, canSwitch, Modifier.padding(start = 20.dp)) { onSelect(id); scope.launch { drawer.close() } }
+                            SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, Modifier.padding(start = 20.dp)) { onSelect(id); scope.launch { drawer.close() } }
                         }
                     }
                     if (visible.isNotEmpty()) item { Text("Recents", Modifier.padding(horizontal = 12.dp, vertical = 12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
                     items(visible, key = { "recent:$it" }) { id ->
-                        SessionSidebarRow(id, titles[id], id == selected, canSwitch) { onSelect(id); scope.launch { drawer.close() } }
+                        SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads) { onSelect(id); scope.launch { drawer.close() } }
                     }
                     if (threadListLoading) item { Text("Loading sessions…", Modifier.padding(12.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) }
                     if (hasMore && !threadListLoading) item { TextButton(onClick = onMore, enabled = connected) { Text("Load more") } }
@@ -215,7 +216,7 @@ internal fun ChatWorkspace(
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {
                     Text("Your workspace.\nWithin reach.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Medium)
                     Text(if (selected.isBlank()) "Open a conversation from the sidebar, or start a new chat." else "Ask Codex to explore, build or fix something.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
-                    if (selected.isBlank()) TextButton(onClick = { newChat = true }, enabled = canSwitch, modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
+                    if (selected.isBlank()) Button(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
                 }
             } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(messages) { entry ->
@@ -346,8 +347,11 @@ private fun PromptComposer(
 }
 
 @Composable
-private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, enabled: Boolean, running: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(onClick = onClick, enabled = enabled, color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = modifier.fillMaxWidth().semantics { this.selected = selected }) {
-        Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            if (running) CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = "Session running" }, strokeWidth = 2.dp, color = if (selected) Mocha.Base else Mocha.Blue)
+        }
     }
 }
