@@ -1,6 +1,14 @@
 # Modex project state
 
-Updated: 2026-11-13T05:56+07:00. Branch: `feat/emulator-bootstrap`; base `3157825`. Checks ran on the accompanying uncommitted implementation tree.
+Updated: 2026-11-13. Integration baseline: `main` at `757c42319f19`; this documentation-only update records the completed integration.
+
+## PR integration and branch cleanup
+
+PRs [#3](https://github.com/warmdev17/modex/pull/3), [#4](https://github.com/warmdev17/modex/pull/4), [#5](https://github.com/warmdev17/modex/pull/5), [#6](https://github.com/warmdev17/modex/pull/6) and [#7](https://github.com/warmdev17/modex/pull/7) were merged using two-parent merge commits. No squash or rebase merge. Every original local branch tip remains reachable from main. Main's complete tree at `757c42319f19` exactly matches tested feature head `1205b61`. Deleted 13 merged local feature branches and 7 merged remote feature branches; only main remained before this temporary documentation branch. Local main and origin/main were synchronized and the working tree clean. The feature sections below retain their original validation context; their earlier no-push/no-merge statements are historical.
+
+Integration verification on `1205b61`: `go test -race ./...` and `go vet ./...` PASS; Python discovery: 17 tests, 8 pass and 9 optional integration fixtures skipped. Android JDK 21: `:app:testDebugUnitTest --rerun :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS, 62 JVM tests without failures/errors/skips. macOS/Windows amd64 CLI and host cross-build PASS; runtime validation Linux only. Primary-agent source review completed; independent reviewer capability unavailable. No new emulator/device execution, paid provider turn, phone installation or production supervisor restart during integration. Emulator dev supervisor and ignored local credentials/config were preserved.
+
+Next: physical-phone validation of multi-session navigation and first-attempt takeover; shared-backend continuation remains deferred.
 
 ## Pixel emulator installation and saved SSH profile
 
