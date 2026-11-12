@@ -45,7 +45,7 @@ for line in sys.stdin:
  if m=='initialized':continue
  if m=='initialize':result={}
  elif m=='config/read':result={'config':{'model':'fixture','model_provider':'fixture'}}
- elif m=='thread/read':result={'thread':{'id':'one','cwd':__import__('os').getcwd()}}
+ elif m in ('thread/read','thread/resume'):result={'thread':{'id':'one','cwd':__import__('os').getcwd()}}
  elif m=='turn/start':
   result={'turn':{'id':'turn'}}
   threading.Thread(target=delayed,daemon=True).start()

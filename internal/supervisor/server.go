@@ -30,6 +30,7 @@ type Server struct {
 	stop            context.CancelFunc
 	mu              sync.Mutex
 	attached        bool
+	OnAttachment    func(bool) error
 	childMu         sync.Mutex
 }
 
@@ -81,7 +82,27 @@ func (s *Server) Handle(conn net.Conn) {
 	}
 	s.attached = true
 	s.mu.Unlock()
-	defer func() { s.mu.Lock(); s.attached = false; s.mu.Unlock() }()
+	attachment := func(value bool) error {
+		if s.OnAttachment == nil || s.ctx.Err() != nil {
+			return nil
+		}
+		s.childMu.Lock()
+		defer s.childMu.Unlock()
+		return s.OnAttachment(value)
+	}
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if attachment(false) != nil {
+			s.stop()
+		}
+		s.attached = false
+	}()
+	if attachment(true) != nil {
+		s.stop()
+		return
+	}
 	if send(map[string]any{"ready": true, "instance": s.instance}) != nil {
 		return
 	}

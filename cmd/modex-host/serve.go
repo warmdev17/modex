@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +40,7 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 	decisions := bridge.NewDecisions(func(ctx context.Context, id, result json.RawMessage) error {
 		return p.Respond(ctx, id, result)
 	})
+
 	var emitMu sync.RWMutex
 	var currentEmit func(string, json.RawMessage)
 	p.SetRequestHandler(func(id json.RawMessage, method string, params json.RawMessage) {
@@ -64,6 +66,15 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 	if err != nil {
 		return err
 	}
+	sessions := newThreadProcesses(ctx, p, func(method string, params json.RawMessage) {
+		emitMu.RLock()
+		emit := currentEmit
+		emitMu.RUnlock()
+		if emit != nil {
+			emit(method, params)
+		}
+	})
+	defer sessions.Close()
 	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
 		if method == "decision/respond" {
 			p, ok := params.(map[string]any)
@@ -75,7 +86,13 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 			if !ok || !resultOK {
 				return nil, fmt.Errorf("invalid decision response")
 			}
-			if err := decisions.Answer(ctx, id, result); err != nil {
+			var answerErr error
+			if strings.Contains(id, "/") {
+				answerErr = sessions.Answer(ctx, id, result)
+			} else {
+				answerErr = decisions.Answer(ctx, id, result)
+			}
+			if err := answerErr; err != nil {
 				return nil, err
 			}
 			return json.RawMessage(`{"delivered":true}`), nil
@@ -85,10 +102,11 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 		emitMu.Unlock()
 		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		return p.CallEvents(requestCtx, method, params, func(eventMethod string, eventParams json.RawMessage) {
+		p.SetNotificationHandler(func(eventMethod string, eventParams json.RawMessage) {
 			decisions.Resolve(eventMethod, eventParams)
 			emit(eventMethod, eventParams)
 		})
+		return sessions.Call(requestCtx, method, params)
 	}
 	return bridge.ServeEvents(ctx, in, out, cwd, call)
 }

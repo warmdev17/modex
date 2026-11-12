@@ -1,6 +1,14 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/project-session-discovery`; base `b5db2bf` (PR #1 merged all six attachment/model commits). Git records the project-grouping fix commit.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/idle-session-handoff`; base `772969b`. Project-session discovery fix is committed and user confirmed mobile success. Git records the handoff fix milestone commit.
+
+## Phone to desktop writer handoff
+
+User confirmed the project discovery fix and sent messages from the phone, then reported Desktop could not reopen the same session after closing Modex. The persistent bridge app-server retained writer ownership across client disconnect. Real disposable-thread probe confirmed thread/unsubscribe returns unsubscribed yet another app-server still receives active writer; closing the owner permits same-ID resume. Unsubscribe-only prototype was discarded.
+
+Implementation: independent writer app-server per loaded thread, retaining configured executable/args/environment. Supervisor propagates ordered attached/detached state without exposing internal responses in journal. While connected, shell/MCP continuity remains intact. Detach releases persisted idle workers; active turns and approval waits continue offline and release after matching completion only while detached. Empty unpersisted chats stay loaded until their first completed turn. Later sends acquire the same ID without automatic fork/retry; another writer rejects dispatch. Independent decision namespaces preserve routing for simultaneous approval ID collisions and approvals arriving before turn/start acknowledgement. Graceful idle EOF shutdown has a two-second bound; active/uncertain failures keep fail-closed behavior.
+
+Evidence on implementation tree: Go full tests/vet/race PASS; Python discovery 11 tests, 10 pass, real SSH fixture skipped without client binary. Six new handoff process/supervisor tests cover offline completion, independent busy/empty threads, same-ID reacquisition, colliding approval IDs, approval before turn ACK and socket-driven detach, and preservation after uncertain turn acknowledgement. Linux/macOS/Windows host cross-builds PASS; Windows supervisor runtime remains unsupported. Original binary fails the new handoff regression; fixed binary passes. EOF cleanup regression observed failing before CloseIdle implementation. Paid third-party gpt-6.1-sol handoff probe passed two completed turns, same-ID computer resume after each detach, read-only selection/detach release and blocked prompt absent from history. Paid existing provider suite also passed streaming, exact command approval, same-ID resume and new chat. Production supervisor/session untouched; no global config changes, physical-phone installation or emulator. Android code unchanged, so Gradle/device tests not repeated. Self-review only. Before phone retest, rebuild/restart host when idle, then reconnect/reset cursor if required. Use explicit Disconnect because swiping the task can leave foreground SSH connected. No push/merge.
 
 ## Native sessions missing from project groups
 

@@ -69,6 +69,9 @@ func TestChildProtocol(t *testing.T) {
 		}
 		_ = encoder.Encode(map[string]any{"id": request.ID, "result": map[string]any{"ok": true}})
 	}
+	if marker := os.Getenv("MODEX_CLOSE_MARKER"); marker != "" {
+		_ = os.WriteFile(marker, []byte("closed"), 0600)
+	}
 	os.Exit(0)
 }
 
@@ -167,5 +170,23 @@ func TestProcessTimeoutAndCrashTerminateCleanly(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s did not fail", method)
 		}
+	}
+}
+
+func TestProcessCloseIdleAllowsEOFShutdown(t *testing.T) {
+	t.Setenv("MODEX_FAKE_CHILD", "1")
+	marker := t.TempDir() + "/graceful-close"
+	t.Setenv("MODEX_CLOSE_MARKER", marker)
+	p, err := StartProcess(context.Background(), os.Args[0], []string{"-test.run=^TestChildProtocol$"}, t.TempDir(), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if _, err = p.Call(context.Background(), "status", nil); err != nil {
+		t.Fatal(err)
+	}
+	p.CloseIdle()
+	if raw, err := os.ReadFile(marker); err != nil || string(raw) != "closed" {
+		t.Fatalf("child did not finish EOF cleanup: %v", err)
 	}
 }

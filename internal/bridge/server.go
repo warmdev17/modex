@@ -56,6 +56,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "client/attached":
+		allowed["attached"] = true
 	case "status":
 	case "threads/start":
 		allowed["model"] = true
@@ -110,6 +112,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		return r, nil
 	}
 	switch cmd.Method {
+	case "client/attached":
+		var attached bool
+		if raw, ok := p["attached"]; !ok || string(raw) == "null" || json.Unmarshal(raw, &attached) != nil {
+			return nil, errors.New("attached must be boolean")
+		}
+		return fetch("client/attached", map[string]any{"attached": attached})
 	case "threads/start":
 		params := map[string]any{"cwd": cwd}
 		if raw, ok := p["permission_mode"]; ok {

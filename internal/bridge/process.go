@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/warmdev/modex/internal/diagnostic"
 )
@@ -86,7 +87,17 @@ func StartProcess(ctx context.Context, binary string, args []string, cwd string,
 	return p, nil
 }
 
-func (p *Process) Close() {
+// Fork starts an independent app-server with the exact same executable, workspace and environment.
+func (p *Process) Fork(ctx context.Context) (*Process, error) {
+	return StartProcess(ctx, p.cmd.Path, p.cmd.Args[1:], p.cmd.Dir, p.cmd.Environ())
+}
+
+func (p *Process) Close() { p.close(false) }
+
+// CloseIdle lets Codex flush persisted history and stop its tools before reaping it.
+func (p *Process) CloseIdle() { p.close(true) }
+
+func (p *Process) close(idle bool) {
 	p.once.Do(func() {
 		p.mu.Lock()
 		p.closed = true
@@ -95,9 +106,20 @@ func (p *Process) Close() {
 			ch <- processResponse{err: errors.New("Codex connection closed")}
 		}
 		p.mu.Unlock()
-		_ = p.cmd.Process.Kill()
 		_ = p.stdin.Close()
-		_ = p.cmd.Wait()
+		if !idle {
+			_ = p.cmd.Process.Kill()
+			_ = p.cmd.Wait()
+			return
+		}
+		done := make(chan struct{})
+		go func() { _ = p.cmd.Wait(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			_ = p.cmd.Process.Kill()
+			<-done
+		}
 	})
 }
 
