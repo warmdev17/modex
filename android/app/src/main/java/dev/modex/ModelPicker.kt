@@ -19,11 +19,10 @@ internal fun ModelPicker(models: List<ModelOption>, status: String, value: Strin
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box {
             OutlinedButton(onClick = { expanded = true }, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth()) {
-                Text(models.firstOrNull { it.model == value }?.name ?: value.ifBlank { "Host default" }, modifier = Modifier.weight(1f))
+                Text(models.firstOrNull { it.model == value }?.name ?: value.ifBlank { "Choose model" }, modifier = Modifier.weight(1f))
                 Text("▾")
             }
             DropdownMenu(expanded, { expanded = false }, modifier = Modifier.heightIn(max = 280.dp)) {
-                DropdownMenuItem(text = { Text("Host default") }, onClick = { custom = false; onChange(""); expanded = false })
                 models.forEach { model ->
                     DropdownMenuItem(text = { Column { Text(model.name); if (model.name != model.model) Text(model.model, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) } }, onClick = { custom = false; onChange(model.model); expanded = false })
                 }
@@ -39,11 +38,11 @@ internal fun ModelPicker(models: List<ModelOption>, status: String, value: Strin
 internal fun ReasoningControl(model: ModelOption?, value: String, onChange: (String) -> Unit) {
     val efforts = model?.efforts.orEmpty()
     if (efforts.isEmpty()) {
-        Text("Reasoning · Keep current / host default", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+        Text("Reasoning · ${value.ifBlank { "Unavailable for this model" }}", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
         return
     }
-    val choices = listOf("" to "Keep the session’s current setting, or inherit the host default for a new session.") + efforts
-    val index = choices.indexOfFirst { it.first == value }.coerceAtLeast(0)
+    val choices = efforts
+    val index = choices.indexOfFirst { it.first == value }.takeIf { it >= 0 } ?: choices.indexOfFirst { it.first == model?.defaultEffort }.coerceAtLeast(0)
     val color = when (value) {
         "none", "minimal", "low" -> Color(0xFFA6E3A1)
         "medium" -> Mocha.Blue
@@ -55,8 +54,8 @@ internal fun ReasoningControl(model: ModelOption?, value: String, onChange: (Str
         else -> Color(0xFFCBA6F7)
     }
     Column {
-        Text("Reasoning · ${value.ifBlank { "Keep current" }}", color = color, style = MaterialTheme.typography.labelLarge)
-        Slider(value = index.toFloat(), onValueChange = { onChange(choices[it.roundToInt().coerceIn(choices.indices)].first) },
+        Text("Reasoning · ${value.ifBlank { choices[index].first }}", color = color, style = MaterialTheme.typography.labelLarge)
+        if (choices.size > 1) Slider(value = index.toFloat(), onValueChange = { onChange(choices[it.roundToInt().coerceIn(choices.indices)].first) },
             valueRange = 0f..choices.lastIndex.toFloat(), steps = (choices.size - 2).coerceAtLeast(0),
             colors = SliderDefaults.colors(thumbColor = color, activeTrackColor = color),
             modifier = Modifier.semantics { contentDescription = "Reasoning effort" })

@@ -72,7 +72,7 @@ Codex notifications are forwarded as event lines while the turn runs, for exampl
 {"event":"turn/started","params":{"threadId":"...","turn":{"id":"..."}}}
 ```
 
-The final response keeps the request ID. Modex validates the thread's exact workspace before sending. It exposes text turns and supported decision responses; interruption, attachments and background supervision remain unimplemented. A request timeout closes the Codex connection because replaying an uncertain turn could duplicate work.
+The final response keeps the request ID. Modex validates the thread's exact workspace before sending. It exposes text/image/file turns and supported decision responses; interruption remains unimplemented. Background supervision is described below. A request timeout closes the Codex connection because replaying an uncertain turn could duplicate work.
 
 ### Respond to approvals and questions
 
@@ -249,7 +249,7 @@ APK: `android/app/build/outputs/apk/debug/app-debug.apk` from the repository roo
 
 Start the host supervisor as documented above. In the app enter hostname/IP, SSH port/user, absolute remote binary and state-directory paths, then import the key. Obtain the SSH server's SHA256 fingerprint **on the target or through another trusted channel**, for example `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256` on Linux. Do not trust an unverified network scan. The pin must match the host key algorithm negotiated with the server.
 
-Connect, choose an existing workspace session or create a new one (optional model), then send a message. A blank model uses the host default; HTTP 403 may mean that model is not allowed for your provider key. Choose an allowed model explicitly for a new chat. The left session drawer offers search over loaded sessions, Refresh and Load more. Labels prefer the Codex session name, then first-message preview, then an untitled label; failed turns show fixed error guidance without raw provider details. The UI shows streamed live messages and one-time command approvals/non-secret questions. Approval review separates the exact command, working directory, reason and any extra filesystem/network permissions; command text can be selected and copied. Disconnect leaves the target supervisor working. Reconnect uses the same instance and last handled cursor, without resending prompts. Reset clears local session/cursor state; observe remote state before retrying an uncertain operation.
+Connect, choose an existing workspace session or create a new one, then send a message. New chats initialize model and reasoning from the host configuration (or the advertised model default effort). The model picker has no Keep current option. Choosing Use model immediately saves model and effort per thread in the encrypted snapshot, before sending; reconnecting or reopening the app preserves the choice, and later turns explicitly send it. The composer shows the model and effort, or Reasoning unavailable when Codex supplies no effort information. Unknown custom models do not inherit an unrelated model’s effort; HTTP 403 may mean that model is not allowed for your provider key. Choose an allowed model explicitly for a new chat. The left session drawer offers search over loaded sessions, Refresh and Load more. Labels prefer the Codex session name, then first-message preview, then an untitled label; failed turns show fixed error guidance without raw provider details. The UI shows streamed live messages and one-time command approvals/non-secret questions. Approval review separates the exact command, working directory, reason and any extra filesystem/network permissions; command text can be selected and copied. Disconnect leaves the target supervisor working. Reconnect uses the same instance and last handled cursor, without resending prompts. Reset clears local session/cursor state; observe remote state before retrying an uncertain operation.
 
 The native chat uses Catppuccin Mocha with blue accents, a left conversation drawer, and a restrained multiline composer. Drafts survive session switches; rejected sends keep the draft. Assistant messages render CommonMark headings, emphasis, links, quotes, lists and GFM tables. Fenced/indented code uses a selectable monospace block with horizontal scrolling and Copy code. Code is not syntax highlighted. HTML is inert text; images are not fetched; only HTTP(S) links can open externally.
 
@@ -300,3 +300,44 @@ adb -s emulator-5554 shell am instrument -w -e preview chat-ui dev.modex.test/de
 ```
 
 It captures chat/drawer/composer/table screenshots and checks code copy, session selection and draft retention after a rejected send. Install both debug APKs first as above.
+
+## Android attachments
+
+In an open chat, tap **+** and choose **From this phone** or **From connected computer**.
+The phone source uses Android's document picker; the computer source browses the
+SSH account's readable folders in a full-screen browser, starting at home (`~`).
+Each chat remembers its last successfully opened folder, including after app restart. Select files,
+review/remove the composer previews, then Send. An attachment-only message is supported.
+The separate OpenAI knot beside + opens the model/reasoning picker and follows the
+Catppuccin Mocha Blue accent.
+
+The SSH server must enable SFTP (for OpenSSH, `Subsystem sftp internal-sftp`).
+Phone files stream over the existing pinned SSH connection into private directories
+under `<supervisor state>/attachments`; no provider credentials reach the phone.
+Uploads publish only after completion, with a limit of **8 files per message** and
+**20 MiB per file**. PNG/JPEG/GIF/WebP use Codex native image inputs; other files
+are path references for agent tools, subject to the session's sandbox/approvals.
+Image support also depends on the selected model/provider.
+
+Images show thumbnails in the composer and sent messages; tap to open a full-screen
+viewer with pinch zoom. Tap files to read a bounded UTF-8 text preview or use **Open
+with** for PDF and other formats supported by installed phone apps. Previews download
+via SFTP into an app-private cache (20 MiB per file, approximately 100 MiB total).
+Only cached preview files can receive temporary read access through Android's file
+provider; no SSH key or connection snapshot is shared. Remote files must remain
+readable for uncached previews; this is not an offline file archive. Older hosts
+provide filename labels without tappable attachment metadata after history reload.
+
+Completed uploads are retained for conversation history, including abandoned drafts;
+there is no automatic retention cleanup yet. Draft selections survive rotation and
+reconnect in the same app process, but are not restored after process death. No
+failed/uncertain prompt is automatically resent. Update both the host and APK;
+restart the host only when its active work can safely detach.
+
+Attachment integration uses a temporary loopback SSH/SFTP server and emulator:
+
+```sh
+python3 scripts/test_android_transport.py --host /path/to/modex-host --adb /path/to/adb --attachments
+```
+
+This does not restart a production supervisor or install on a physical phone.

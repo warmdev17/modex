@@ -28,3 +28,11 @@ func TestSummaryRejectsInvalidResponse(t *testing.T) {
 		}
 	}
 }
+
+func TestSummaryIncludesReasoningWithoutRawConfig(t *testing.T) {
+	s, err := Summarize([]byte(`{"config":{"model":"m","model_reasoning_effort":"high","api_key":"never expose"}}`))
+	raw, _ := json.Marshal(s)
+	if err != nil || !strings.Contains(string(raw), `"effort":"high"`) || strings.Contains(string(raw), "never expose") {
+		t.Fatalf("missing safe reasoning summary: %s", raw)
+	}
+}

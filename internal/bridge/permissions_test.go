@@ -80,3 +80,16 @@ func TestResumeProjectsPermissionsWithoutOverridingThem(t *testing.T) {
 		t.Fatalf("result %s calls %d", b, calls)
 	}
 }
+
+func TestProjectSessionReasoning(t *testing.T) {
+	for _, tc := range []struct{ raw, effort string }{
+		{`{"thread":{"id":"one","reasoningEffort":"low"},"model":"custom","reasoningEffort":"high"}`, "high"},
+		{`{"thread":{"id":"one","reasoningEffort":"low"},"model":"custom"}`, "low"},
+		{`{"thread":{"id":"one"},"model":"custom"}`, ""},
+	} {
+		result, err := projectSession(json.RawMessage(tc.raw))
+		if err != nil || result.Model != "custom" || result.Effort != tc.effort {
+			t.Fatalf("unexpected session settings: %+v, %v", result, err)
+		}
+	}
+}

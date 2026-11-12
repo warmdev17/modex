@@ -20,6 +20,8 @@ type Thread struct {
 	ID       string `json:"id"`
 	Cwd      string `json:"cwd"`
 	Provider string `json:"modelProvider"`
+	Model    string `json:"model,omitempty"`
+	Effort   string `json:"reasoningEffort,omitempty"`
 }
 
 type threadListItem struct {
@@ -71,6 +73,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			allowed["include_turns"] = true
 		}
 	case "turn/start":
+		allowed["attachments"] = true
 		allowed["thread_id"] = true
 		allowed["text"] = true
 		allowed["model"] = true
@@ -261,8 +264,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if json.Unmarshal(p["thread_id"], &id) != nil || id == "" {
 			return nil, errors.New("thread_id is required")
 		}
-		if json.Unmarshal(p["text"], &text) != nil || strings.TrimSpace(text) == "" {
-			return nil, errors.New("text is required")
+		if string(p["text"]) == "null" || json.Unmarshal(p["text"], &text) != nil {
+			return nil, errors.New("text must be a string")
+		}
+		input, err := turnInput(text, p["attachments"])
+		if err != nil {
+			return nil, err
 		}
 		var model string
 		if raw, ok := p["model"]; ok {
@@ -289,7 +296,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if metadata.Thread.Cwd != cwd {
 			return nil, errors.New("thread outside workspace")
 		}
-		params := map[string]any{"threadId": id, "input": []map[string]string{{"type": "text", "text": text}}}
+		params := map[string]any{"threadId": id, "input": input}
 		if model != "" {
 			params["model"] = model
 		}
@@ -340,6 +347,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 							Content  []struct {
 								Type string `json:"type"`
 								Text string `json:"text"`
+								Path string `json:"path"`
 							} `json:"content"`
 						} `json:"items"`
 					} `json:"turns"`
@@ -369,21 +377,44 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						messages = append(messages, map[string]any{"id": item.ID, "role": "command", "text": output, "command": item.Command, "cwd": item.Cwd, "status": item.Status, "exit_code": item.ExitCode})
 						continue
 					}
-					role, text := "", ""
+					role, text, displayText := "", "", ""
+					attachments := []map[string]string{}
 					switch item.Type {
 					case "userMessage":
 						role = "user"
 						for _, part := range item.Content {
 							if part.Type == "text" {
-								text += part.Text
+								if index := strings.LastIndex(part.Text, "Attached files selected by the user (JSON paths):\n"); index >= 0 && len(historyFileReferences(part.Text[index:])) > 0 {
+									text += part.Text[:index]
+									displayText += part.Text[:index]
+									files := historyFileReferences(part.Text[index:])
+									for _, file := range files {
+										attachments = append(attachments, file)
+										text += "\n[File: " + file["name"] + "]"
+									}
+								} else {
+									text += part.Text
+									displayText += part.Text
+								}
+							} else if part.Type == "localImage" {
+								text += "\n[Image: " + filepath.Base(part.Path) + "]"
+								if filepath.IsAbs(part.Path) {
+									attachments = append(attachments, map[string]string{"path": part.Path, "name": filepath.Base(part.Path), "kind": "image"})
+								} else {
+									displayText += "\n[Image: " + filepath.Base(part.Path) + "]"
+								}
+							} else if part.Type == "image" {
+								text += "\n[Image]"
+								displayText += "\n[Image]"
 							}
 						}
 					case "agentMessage":
 						role = "assistant"
 						text = item.Text
+						displayText = item.Text
 					}
 					if role != "" && text != "" {
-						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text})
+						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments})
 					}
 				}
 			}

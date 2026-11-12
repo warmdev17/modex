@@ -17,9 +17,10 @@ internal fun newThreadParams(model: String, mode: String): JSONObject {
     }
 }
 
-internal fun turnStartParams(thread: String, text: String, model: String, effort: String = ""): JSONObject =
+internal fun turnStartParams(thread: String, text: String, model: String, effort: String = "", attachments: List<Attachment> = emptyList()): JSONObject =
     JSONObject().put("thread_id", thread).put("text", text).apply {
         require(validModelId(model) && validEffort(effort))
+        if (attachments.isNotEmpty()) put("attachments", org.json.JSONArray().apply { attachments.forEach { put(it.toJson()) } })
         if (model.isNotBlank()) put("model", model.trim())
         if (effort.isNotBlank()) put("effort", effort)
     }

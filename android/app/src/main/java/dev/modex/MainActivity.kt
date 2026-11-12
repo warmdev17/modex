@@ -75,18 +75,36 @@ private fun ModexApp() {
             importError = "The file provider could not open this file. Copy it to Downloads and select it again."
         }
     }
+    var phoneThread by rememberSaveable { mutableStateOf("") }
+    var phoneGeneration by rememberSaveable { mutableStateOf(0) }
+    var phoneTarget by rememberSaveable { mutableStateOf("") }
+    var remoteThread by rememberSaveable { mutableStateOf("") }
+    val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (phoneTarget == vm.savedConnection.toString()) vm.attachments.fromPhone(phoneThread, uris, phoneGeneration, context.contentResolver)
+    }
+    if (remoteThread.isNotEmpty()) RemoteFilePicker(
+        vm.attachments.directoryFor(remoteThread), vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
+        MAX_ATTACHMENTS - vm.attachments.drafts[remoteThread].orEmpty().size, { vm.attachments.browse(it, remoteThread) },
+        { files -> files.forEach { vm.attachments.addRemote(remoteThread, it) }; remoteThread = "" }, { remoteThread = "" }
+    )
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
         ChatWorkspace(
             host = vm.savedConnection?.host.orEmpty(), connected = vm.connected, connecting = vm.connecting,
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
             busy = vm.busy, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
-            sessionModel = vm.sessionModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
+            sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
             onCreate = vm::create, onSend = vm::send, onAnswer = vm::answer,
             onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect,
             models = vm.models, modelCatalogStatus = vm.modelCatalogStatus,
             threadWorkspaces = vm.threadWorkspaces, threadListLoading = vm.threadListLoading,
-            registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus
+            registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus,
+            attachments = vm.attachments.drafts[vm.selected].orEmpty(), attachmentWorking = vm.attachments.working,
+            attachmentProgress = vm.attachments.progress, attachmentError = vm.attachments.error,
+            loadAttachment = vm::attachmentFile,
+            onPhoneFiles = { phoneThread = vm.selected; phoneGeneration = vm.attachments.generation; phoneTarget = vm.savedConnection.toString(); documentPicker.launch(arrayOf("*/*")) },
+            onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.attachments.directoryFor(remoteThread), remoteThread) },
+            onRemoveAttachment = { vm.attachments.remove(vm.selected, it) }
         )
     } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

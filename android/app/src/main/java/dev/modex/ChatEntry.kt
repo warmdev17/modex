@@ -5,10 +5,10 @@ import org.json.JSONObject
 
 internal data class ChatEntry(
     val id: String = "", val role: String, val text: String = "", val command: String = "",
-    val status: String = "", val exitCode: Int? = null, val cwd: String = ""
+    val status: String = "", val exitCode: Int? = null, val cwd: String = "", val attachments: List<Attachment> = emptyList()
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("role", when (role) { "You" -> "user"; "Codex" -> "assistant"; else -> role })
-        .put("text", text).put("command", command).put("status", status).put("cwd", cwd).put("exit_code", exitCode ?: JSONObject.NULL)
+        .put("attachments", JSONArray().apply { attachments.forEach { put(it.toJson().put("name", it.name).put("size", it.size)) } }).put("text", text).put("command", command).put("status", status).put("cwd", cwd).put("exit_code", exitCode ?: JSONObject.NULL)
 }
 
 private const val OUTPUT_LIMIT = 65536
@@ -20,9 +20,16 @@ private fun boundedOutput(text: String): String {
 
 internal fun readChat(list: JSONArray): List<ChatEntry> = (0 until list.length()).map { i ->
     val m = list.getJSONObject(i)
+    var files = m.optJSONArray("attachments")?.let { a -> (0 until a.length()).map { n ->
+        val f = a.getJSONObject(n); Attachment(f.getString("path"), f.optString("name").ifBlank { attachmentName(f.getString("path")) }, f.getString("kind"), f.optLong("size"))
+    } }.orEmpty()
+    var body = if (m.has("display_text")) m.getString("display_text") else m.optString("text")
+    if (m.optString("role") in listOf("user", "You") && files.isEmpty()) {
+        val recovered = legacyFileAttachments(body); body = recovered.first; files = recovered.second
+    }
     val role = when (val r = m.optString("role")) { "user" -> "You"; "assistant" -> "Codex"; else -> r }
-    ChatEntry(m.optString("id"), role, if (role == "command") boundedOutput(m.optString("text")) else m.optString("text"),
-        m.optString("command"), m.optString("status"), if (m.isNull("exit_code")) null else m.optInt("exit_code"), m.optString("cwd"))
+    ChatEntry(m.optString("id"), role, if (role == "command") boundedOutput(m.optString("text")) else body,
+        m.optString("command"), m.optString("status"), if (m.isNull("exit_code")) null else m.optInt("exit_code"), m.optString("cwd"), files)
 }
 
 /** Apply only events already checked against the selected thread by the caller. */
