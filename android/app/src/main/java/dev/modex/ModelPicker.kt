@@ -12,6 +12,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
+internal fun reasoningColor(effort: String): Color = when (effort) {
+    "none", "minimal", "low" -> Color(0xFFA6E3A1)
+    "medium" -> Mocha.Blue
+    "high" -> Color(0xFFF9E2AF)
+    "xhigh" -> Color(0xFFFAB387)
+    "max" -> Color(0xFFCBA6F7)
+    "ultra" -> Mocha.Red
+    "" -> Mocha.Subtext
+    else -> Color(0xFFCBA6F7)
+}
+
 @Composable
 internal fun ModelPicker(models: List<ModelOption>, status: String, value: String, onChange: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
@@ -43,16 +54,7 @@ internal fun ReasoningControl(model: ModelOption?, value: String, onChange: (Str
     }
     val choices = efforts
     val index = choices.indexOfFirst { it.first == value }.takeIf { it >= 0 } ?: choices.indexOfFirst { it.first == model?.defaultEffort }.coerceAtLeast(0)
-    val color = when (value) {
-        "none", "minimal", "low" -> Color(0xFFA6E3A1)
-        "medium" -> Mocha.Blue
-        "high" -> Color(0xFFF9E2AF)
-        "xhigh" -> Color(0xFFFAB387)
-        "max" -> Color(0xFFCBA6F7)
-        "ultra" -> Mocha.Red
-        "" -> Mocha.Subtext
-        else -> Color(0xFFCBA6F7)
-    }
+    val color = reasoningColor(value)
     Column {
         Text("Reasoning · ${value.ifBlank { choices[index].first }}", color = color, style = MaterialTheme.typography.labelLarge)
         if (choices.size > 1) Slider(value = index.toFloat(), onValueChange = { onChange(choices[it.roundToInt().coerceIn(choices.indices)].first) },

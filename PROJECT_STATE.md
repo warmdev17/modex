@@ -1,6 +1,13 @@
 # Modex project state
 
-Updated: 2026-11-13T00:23+07:00. Branch: `fix/takeover-shutdown-order`; base `5d0971e` (CLI picker). This snapshot accompanies the shutdown fix; verification below ran on the identical implementation tree before commit.
+Updated: 2026-11-13T03:48+07:00. Branch: `feat/composer-effort-color`; base `862a5c6`. This snapshot accompanies the composer effort-color commit; checks below ran on its identical implementation tree before commit.
+
+## Composer model effort colors
+
+User requested the OpenAI logo, model name and effort label beside upload to change color together with reasoning effort, before any shared-backend implementation. Extracted the existing Catppuccin Mocha slider palette into reasoningColor and reused it as the composer model TextButton content color. ChatGlyph already consumes LocalContentColor, so logo and text inherit one tint; blank effort remains Subtext and disabled state keeps Material disabled colors. Existing per-session/default effort resolution is reused; no new persistence, network or backend behavior. Changed only ChatWorkspace.kt, ModelPicker.kt and this state snapshot.
+
+Verification: Android `:app:assembleDebug :app:testDebugUnitTest :app:lintDebug --offline --no-daemon` PASS using JDK 21 and Gradle 8.14.3. Initial compilation found the missing Color import; added it and all three tasks passed on the final tree. `git diff --check` PASS. APK built, not installed. No emulator or phone visual run, no new tests for simple color reuse, no host restart, push, PR or merge. Shared-backend work remains deferred. Next: `make install-apk` to test colors on the physical phone.
+
 
 ## Takeover shutdown ordering
 

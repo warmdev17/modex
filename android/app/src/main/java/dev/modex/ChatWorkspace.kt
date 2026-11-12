@@ -22,6 +22,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.contentDescription
@@ -242,7 +243,8 @@ internal fun ChatWorkspace(
                 connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking,
                 attachments, attachmentWorking, attachmentProgress, attachmentError,
                 connected && selected.isNotBlank() && !busy && !attachmentWorking,
-                onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it }
+                onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
+                modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) })
             ) {
                 if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) })) updatePrompt("")
             }
@@ -298,7 +300,8 @@ internal fun ChatWorkspace(
 private fun PromptComposer(
     prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
-    attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit, onSend: () -> Unit
+    attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
+    modelColor: Color, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
@@ -324,6 +327,7 @@ private fun PromptComposer(
                 }
                 TextButton(
                     onClick = onModel, enabled = modelEnabled, shape = RoundedCornerShape(6.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = modelColor),
                     contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
                 ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
