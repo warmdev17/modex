@@ -200,6 +200,22 @@ python3 scripts/live_supervisor_smoke.py --host /tmp/modex-host --model gpt-6.1-
 
 The first uses a fake Codex process and checks auth, exclusive ownership, disconnect/replay, CLI attach, orphan cleanup and stop. The second makes a paid real-provider turn, detaches after acknowledgement, reconnects by instance/cursor, verifies exact streamed output, then stops the fixture supervisor.
 
+## Explicit desktop CLI takeover (Linux/macOS)
+
+To make an existing session available for phone takeover, first close any normal CLI/Desktop writer of that session, then start its registered native terminal:
+
+```sh
+make cli THREAD=<exact-session-uuid>
+# Or, for a different CODEX_HOME:
+/tmp/modex-host --cli --thread <exact-session-uuid> --workspace /absolute/project --codex-home /absolute/codex-home
+```
+
+Use the same Codex home as the supervisor. This opens the real Codex TUI against its own private Unix app-server and registers a private control socket under `$CODEX_HOME/modex-cli/<thread-id>/` (default `~/.codex`). The installed Codex must support `--remote unix://...`, `app-server --listen unix://...` and `thread/loaded/list`.
+
+On Android, selecting a session held by another writer shows **Take over on phone**. Confirmation closes only the registered launcher's children, waits for both backend and TUI exit, then resumes the same ID and reloads history. The launcher pauses its TUI while checking that its dedicated server has exactly that session loaded. Changed/multiple loaded sessions are refused and the TUI continues. No PID lookup, global process killing, session forking or prompt resending is used. Normal CLI/Desktop instances must still be closed manually.
+
+Takeover can interrupt active turns, approvals or file writes; background shell processes may survive. It transfers persisted history, not an in-flight computation. If the result is uncertain, refresh/read state before any manual retry. There is no forced SIGKILL escalation in the takeover operation. Ordinary launcher shutdown handles TERM/HUP and reaps its own children; a killed/crashed launcher can leave a stale registration, which requires manual inspection rather than guessing a process to stop. The host uses [coder/websocket](https://github.com/coder/websocket) v1.8.14 under its [ISC license](docs/licenses/coder-websocket-ISC.txt). This launcher is unavailable on Windows. Rebuild/restart the supervisor while idle and install the updated APK before phone testing.
+
 ## OpenSSH client transport
 
 The desktop/CLI transport uses the system OpenSSH executable; it does not install SSH or upload the host. Start the supervisor on the target first, then build the client locally:

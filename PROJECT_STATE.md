@@ -1,6 +1,16 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/idle-session-handoff`; base `772969b`. Project-session discovery fix is committed and user confirmed mobile success. Git records the handoff fix milestone commit.
+Updated: 2026-11-12T21:03+07:00. Branch: `feat/cli-takeover`; base `c3df09d`. Host milestone `3c9b4a5`; Android milestone accompanies this snapshot.
+
+## Explicit registered CLI takeover
+
+Implemented the user-approved registered-launcher approach. `make cli THREAD=<exact-native-session-uuid>` runs the real Codex TUI on a dedicated Unix app-server and registers a private CODEX_HOME-scoped control socket. Android offers Take over on phone only for a rejected resume with active_writer, shows the target title and interruption warning, then sends explicitly confirmed threads/takeover. Host checks workspace before release and resumes the same ID once after both owned processes exit. No PID discovery, arbitrary Desktop/CLI killing, fork or prompt replay. Multiple/changed loaded sessions are refused and the paused TUI is resumed. Uncertain outcomes remain manual observation/recovery. Ordinary CLI/Desktop requires manual close; launcher works on Linux/macOS, Windows explicitly unsupported.
+
+Findings verified against installed Codex: standalone Unix listener uses WebSocket, not daemon stdio proxy; native socket path is a symlink, requiring Stat readiness inside the private launcher directory. Added pinned coder/websocket v1.8.14 plus its ISC notice. TERM/HUP cleanup reaps owned children and removes registration. Plan: [CLI takeover](docs/superpowers/plans/2026-11-12-cli-takeover.md); contract: [bridge](docs/bridge-plan.md#explicit-registered-cli-takeover-2026-11-12).
+
+Verification: full go test ./..., go vet ./... and host/bridge/supervisor race PASS on host 3c9b4a5 implementation; Linux/macOS/Windows amd64 cross-build PASS (runtime Linux only). Android assembleDebug/testDebugUnitTest/lintDebug PASS, 57 JVM tests with no failures/errors; assembleDebugAndroidTest PASS on the accompanying Android tree. Python discovery 11 tests, 10 pass and real SSH integration skipped without client binary. Real paid gpt-6.1-sol disposable seed persisted; real native Codex PTY reproduced failures before transport/readiness fixes, then passed active-writer rejection, explicit takeover, native TUI exit, exact same-ID/history recovery and no prompt replay. Separate real native TERM and HUP probes both removed registration and allowed peer same-ID resume. No registered launcher directories left after fixtures. Author self-review only; independent reviewer and physical-phone/UI/emulator execution not performed.
+
+Delivery: two coherent local commits, host/protocol then Android/related docs. Existing unmerged handoff/project fixes remain branch ancestors. No push, PR, merge, production supervisor restart, physical-device install or emulator started. Before device testing, rebuild/restart the supervisor when idle and install the debug APK; open the desired existing session through make cli. Active turns/approvals/file writes may be interrupted and background shell processes may survive: takeover resumes persisted history, not an in-flight computation. Stale registration after SIGKILL/crash requires manual inspection. Existing approval/permissions behavior is inherited without a global policy change.
 
 ## Phone to desktop writer handoff
 

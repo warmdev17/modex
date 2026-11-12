@@ -73,6 +73,7 @@ internal fun ChatWorkspace(
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
     onCreate: (String, String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
+    takeoverSession: String = "", onTakeover: () -> Unit = {},
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
     sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
     threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
@@ -82,6 +83,14 @@ internal fun ChatWorkspace(
     loadAttachment: suspend (Attachment) -> java.io.File = { error("Reconnect to open attachment") },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {}
 ) {
+    var showTakeover by remember(takeoverSession) { mutableStateOf(false) }
+    if (showTakeover && takeoverSession.isNotBlank()) AlertDialog(
+        onDismissRequest = { showTakeover = false },
+        title = { Text("Take over on phone?") },
+        text = { Text("Close the registered CLI for “${titles[takeoverSession] ?: takeoverSession}” on your computer. Running work can be interrupted; background commands may continue. Modex reopens the same session without resending prompts.") },
+        confirmButton = { TextButton(onClick = { showTakeover = false; onTakeover() }) { Text("Close CLI and take over") } },
+        dismissButton = { TextButton(onClick = { showTakeover = false }) { Text("Cancel") } }
+    )
     var preview by remember(selected) { mutableStateOf<Attachment?>(null) }
     preview?.let { file -> AttachmentViewer(file, loadAttachment) { preview = null } }
     val drawer = rememberDrawerState(DrawerValue.Closed)
@@ -179,7 +188,10 @@ internal fun ChatWorkspace(
                 }
             }
             if (error.isNotBlank()) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-                SelectionContainer { Text(error, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
+                Column(Modifier.padding(12.dp)) {
+                    SelectionContainer { Text(error, style = MaterialTheme.typography.bodySmall) }
+                    if (takeoverSession.isNotBlank()) TextButton(onClick = { showTakeover = true }, enabled = connected && !historyLoading) { Text("Take over on phone") }
+                }
             }
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
