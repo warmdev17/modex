@@ -1,6 +1,16 @@
 # Modex project state
 
-Updated: 2026-11-13. Branch: `feat/android-multi-session`; navigation commit `6279676`. Final checks below include the uncommitted New chat styling follow-up.
+Updated: 2026-11-13T05:56+07:00. Branch: `feat/emulator-bootstrap`; base `3157825`. Checks ran on the accompanying uncommitted implementation tree.
+
+## Pixel emulator installation and saved SSH profile
+
+Implemented `make emulator-start`, `make emulator` (build and install), `make emulator-install` (reuse APKs), `make emulator-stop` and `make emulator-host` (separate local dev supervisor). Bare `make` remains APK-only, and parallel make cannot install before building. Installer selects an explicit emulator serial plus ro.kernel.qemu verification; never targets a USB phone. An ignored `.modex/emulator.json` references the key file, which is sent through ADB stdin into app-private storage. Test-APK-only instrumentation checks debug/emulator context, imports an unencrypted identity and saves through the existing Keystore-backed SavedHost store. Temporary credential data is removed before reporting success; existing encrypted snapshots are preserved instead of replaced. No production Android source or host protocol changes.
+
+Verified: six Python tests PASS (initial red was missing installer module), including key bounds/encoding, invalid configuration, physical-device rejection and failed-import cleanup/no launch. JDK 21 / Gradle 8.14.3 `:app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest :app:lintDebug --offline --no-daemon` PASS; unchanged 62 JVM tests up-to-date, debug runner compiled and lint passed. Real Pixel_4_XL import PASS; UI Connected SSH without form entry PASS; repeat import preserved encrypted snapshot byte-for-byte and left no temporary credential file; reinstall preserved profile and reconnected PASS. `make -n` and `git diff --check` PASS. Pixel started for these tests was stopped and ADB verified emulator-5554 absent. No USB-phone install, prompt/provider turn, production supervisor restart, push, PR or merge. Author self-review.
+
+Runtime prepared for bradar: local profile has the verified laptop host fingerprint, existing authorized unencrypted modex_phone identity path and 10.0.2.2. Credentials are not tracked. Dev supervisor is intentionally left ready at ~/.local/state/modex-emulator; phone state remains separate. Initial reuse of the old phone relay hit an existing replay-gap condition for a cursor-zero client; this work avoids it with an independent dev relay rather than changing journal behavior. Only the empty emulator profile created during this test was replaced when switching to that dev relay. Next: `make emulator-start`, then `make emulator` (or emulator-install for the already-built APK). After a dev host restart, review/reset a stale cursor in the app if requested; never replay uncertain prompts automatically.
+
+Guide: [Pixel setup](docs/emulator.md). Plan: [emulator bootstrap](docs/superpowers/plans/2026-11-13-emulator-bootstrap.md).
 
 ## Android multi-session navigation
 
