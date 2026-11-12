@@ -37,6 +37,8 @@ internal fun explainHostRejection(method: String, detail: String): String {
 // State survives rotations, but not process death. No automatic command retries.
 class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private val saved = SavedHost(application)
+    private val sessions = SessionState()
+    private val historyVersions = mutableMapOf<Long, Long>()
     var savedConnection by mutableStateOf<Connection?>(null); private set
     private var reconnectAllowed = true
     internal var projects by mutableStateOf(emptyList<RemoteProject>()); private set
@@ -55,11 +57,12 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var connecting by mutableStateOf(false); private set
     var error by mutableStateOf(""); private set
     var threads by mutableStateOf(listOf<String>()); private set
-    var selected by mutableStateOf(""); private set
-    internal var messages by mutableStateOf(listOf<ChatEntry>()); private set
+    val selected: String get() = sessions.selected
+    internal val messages: List<ChatEntry> get() = sessions.messages
+    val runningThreads: Set<String> get() = sessions.runningThreads
     var decisions by mutableStateOf(listOf<JSONObject>()); private set
     var answeringDecisionIds by mutableStateOf(setOf<String>()); private set
-    var busy by mutableStateOf(false); private set
+    val busy: Boolean get() = sessions.busy
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
     internal var hostChoice by mutableStateOf(ModelChoice()); private set
@@ -101,10 +104,11 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 journal = JournalState(data.optString("instance").ifEmpty { null }, data.optLong("cursor"))
                 modelChoices = readModelChoices(data.optJSONObject("model_choices"))
                 hostChoice = readModelChoice(data.optJSONObject("host_choice")) ?: ModelChoice()
-                selected = data.optString("selected")
+                sessions.open(data.optString("selected"))
+                sessions.restoreActivity(data.optJSONObject("active_turns"))
                 selectedWorkspace = data.optString("selected_workspace")
                 attachments.restoreDirectories(data.optJSONObject("attachment_directories"))
-                messages = readChat(data.optJSONArray("messages") ?: JSONArray())
+                sessions.loadHistory(selected, readChat(data.optJSONArray("messages") ?: JSONArray()), busy)
                 decisions = data.optJSONArray("decisions")?.let { list -> (0 until list.length()).map { list.getJSONObject(it) } } ?: emptyList()
                 val requests = data.optJSONArray("pending") ?: JSONArray()
                 for (i in 0 until requests.length()) {
@@ -120,6 +124,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         val snapshot = JSONObject().put("connection", JSONObject().put("host", c.host).put("port", c.port).put("user", c.user).put("pin", c.pin).put("binary", c.binary).put("state", c.state))
             .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
             .put("model_choices", modelChoicesJson(modelChoices)).put("host_choice", hostChoice.toJson()).put("selected_workspace", selectedWorkspace).put("attachment_directories", attachments.directoriesJson())
+            .put("active_turns", sessions.activityJson())
             .put("messages", JSONArray().apply { messages.forEach { put(it.toJson()) } })
             .put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
         val revision = saved.revision()
@@ -146,12 +151,13 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         disconnect(); transport = null; connected = false; connecting = false; reconnectAllowed = false; saveJob?.cancel()
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
         threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
-        journal = JournalState(); config = null; savedConnection = null; pending.clear(); selected = ""; messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList(); busy = false
+        journal = JournalState(); config = null; savedConnection = null; pending.clear(); historyVersions.clear(); sessions.reset(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList()
     }
     private fun loadHistory() {
         if (selected.isBlank()) return
         historyLoading = true
-        request("threads/read", withWorkspace(JSONObject().put("thread_id", selected).put("include_turns", true), selectedWorkspace), selected)
+        val version = sessions.activityVersion(selected)
+        request("threads/read", withWorkspace(JSONObject().put("thread_id", selected).put("include_turns", true), selectedWorkspace), selected)?.let { historyVersions[it] = version }
     }
     fun importKey(bytes: ByteArray) {
         require(!connected && !connecting && bytes.size in 1..(256 * 1024))
@@ -161,7 +167,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (connected || connecting) return
         sessionSettings = ""; threadListLoading = false; titles = emptyMap()
         journal = JournalState(); pending.clear(); sentAttachmentPaths.clear(); threads = emptyList()
-        selected = ""; selectedWorkspace = ""; threadWorkspaces = emptyMap(); messages = emptyList(); decisions = emptyList(); answeringDecisionIds = emptySet(); busy = false; error = ""
+        sessions.reset(); historyVersions.clear(); historyLoading = false; selectedWorkspace = ""; threadWorkspaces = emptyMap(); decisions = emptyList(); answeringDecisionIds = emptySet(); error = ""
         persist()
     }
     fun connect(value: Connection) {
@@ -203,16 +209,23 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun disconnect() { takeoverThread = ""; sessionSettings = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
     fun create(model: String, mode: String, effort: String = "") {
-        if (busy || historyLoading || switching()) return
-        takeoverThread = ""
-        sessionSettings = ""
-        request("threads/start", withWorkspace(newThreadParams(model, mode), selectedWorkspace), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())
+        if (!connected || historyLoading || switching()) return
+        val workspace = selectedWorkspace
+        clearSelection()
+        request("threads/start", withWorkspace(newThreadParams(model, mode), workspace), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())
     }
     fun select(id: String) {
-        if (busy || historyLoading || switching()) return
+        if (!connected || id.isBlank() || historyLoading || switching()) return
+        clearSelection()
+        request("threads/resume", withWorkspace(JSONObject().put("thread_id", id), threadWorkspaces[id].orEmpty()), id)
+    }
+    private fun clearSelection() {
+        sessions.clearSelection()
+        selectedWorkspace = ""
         takeoverThread = ""
         sessionSettings = ""
-        request("threads/resume", withWorkspace(JSONObject().put("thread_id", id), threadWorkspaces[id].orEmpty()), id)
+        error = ""
+        historyLoading = true
     }
     fun takeOver() {
         val target = takeoverThread
@@ -237,8 +250,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
         if (!connected || busy || attachments.working || historyLoading || switching() || selected.isEmpty() || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
-        messages = messages + ChatEntry(role = "You", text = text, attachments = files); busy = true
-        val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files), selectedWorkspace), model.trim())
+        sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
+        val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files), selectedWorkspace), selected)
         if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         return true
     }
@@ -264,17 +277,23 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private fun apply(frame: JSONObject) {
         if (frame.has("id")) {
             val id = frame.getLong("id")
+            val historyVersion = historyVersions.remove(id)
             val sentAttachments = sentAttachmentPaths.remove(id)
             val operation = pending.remove(id) ?: return
             if (frame.has("error")) {
                 if (operation.first == "projects/list") { projectStatus = "Project list unavailable. Update the host/Codex; chats remain in Recents."; return }
                 if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
-                if (operation.first == "turn/start") busy = false
-                if (operation.first == "threads/read" || operation.first == "threads/takeover") historyLoading = false
+                if (operation.first == "turn/start") {
+                    sessions.rejectTurn(operation.second)
+                    if (operation.second != selected) return
+                }
+                if (operation.first == "threads/read" && operation.second != selected) return
+                if (operation.first in listOf("threads/read", "threads/resume", "threads/start", "threads/takeover")) historyLoading = false
                 if (operation.first == "threads/list") threadListLoading = false
                 if (operation.first == "decision/respond") answeringDecisionIds -= operation.second
                 val detail = frame.optJSONObject("error")?.optString("message").orEmpty()
-                takeoverThread = takeoverTarget(operation.first, detail, operation.second)
+                if (operation.first == "threads/resume" || operation.first == "threads/takeover")
+                    takeoverThread = takeoverTarget(operation.first, detail, operation.second)
                 error = explainHostRejection(operation.first, detail); return
             }
             val result = frame.optJSONObject("result") ?: return
@@ -315,7 +334,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     takeoverThread = ""
                     error = ""
                     sessionSettings = sessionSettingsLabel(result)
-                    selected = result.getJSONObject("thread").getString("id")
+                    sessions.open(result.getJSONObject("thread").getString("id"))
                     val reported = ModelChoice(result.optString("model"), result.optString("effort"))
                     if (operation.first == "threads/start") {
                         val chosen = runCatching { readModelChoice(JSONObject(operation.second)) }.getOrNull()
@@ -327,8 +346,6 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     threads = (listOf(selected) + threads).distinct()
                     if (operation.first == "threads/start") {
                         // Codex cannot read persisted turns until a new thread has its first turn.
-                        messages = emptyList()
-                        busy = false
                         historyLoading = false
                     } else loadHistory()
                 }
@@ -340,8 +357,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             val thread = result.optJSONObject("thread")
                             rememberChoice(selected, thread?.let { ModelChoice(it.optString("model"), it.optString("reasoningEffort")) })
-                            messages = readChat(result.getJSONArray("messages"))
-                            busy = result.optBoolean("active_turn")
+                            sessions.loadHistory(selected, readChat(result.getJSONArray("messages")), result.optBoolean("active_turn"), historyVersion)
                         }
                     }
                 }
@@ -354,17 +370,14 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val params = frame.optJSONObject("params") ?: return
+        sessions.event(frame.optString("event"), params)
         when (frame.optString("event")) {
             "decision/required" -> if (decisions.none { it.optString("decision_id") == params.optString("decision_id") }) decisions = decisions + params
-            "turn/started" -> if (params.optString("threadId") == selected) busy = true
-            "item/started", "item/completed", "item/agentMessage/delta", "item/commandExecution/outputDelta" ->
-                if (params.optString("threadId") == selected) messages = updateChat(messages, frame.getString("event"), params)
             "error" -> if (params.optString("threadId") == selected) {
                 turnFailure(params)?.let { error = it }
             }
             "turn/completed" -> {
                 if (params.optString("threadId") == selected) {
-                    busy = false
                     turnFailure(params)?.let { error = it }
                 }
                 decisions = decisions.filterNot { it.optString("thread_id") == params.optString("threadId") && it.optString("turn_id") == params.optJSONObject("turn")?.optString("id") }

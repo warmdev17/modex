@@ -1,5 +1,15 @@
 # Modex project state
 
+Updated: 2026-11-13. Branch: `feat/android-multi-session`; base `1ef6cbf`. Checks below ran on the uncommitted implementation tree.
+
+## Android multi-session navigation
+
+Opening/creating another conversation now clears selected ID, visible messages and session-specific UI before requesting the host. CLI ownership rejection leaves an empty workspace with the existing takeover option, rather than retaining the previous chat. Navigation no longer depends on selected-session busy state. SessionState tracks active turn IDs independently; live output renders only for the selected conversation, background completion/rejection cannot clear another conversation's busy state, stale completions cannot clear a newer known turn, and older history responses cannot undo newer activity. Active IDs persist in the existing encrypted snapshot; history remains authoritative on the host. Projects and Recents share a compact circular running indicator with accessible label and base tint on selected blue rows. Existing thread-keyed prompts, models, attachments and decisions remain routed by thread.
+
+Verification: JDK 21 / Gradle 8.14.3 `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --no-daemon` PASS; 62 JVM tests, zero failures/errors/skips, including five SessionState regressions. `git diff --check` PASS. Wrapper download initially failed inside the sandbox; the authorized build downloaded Gradle and passed. Existing deprecation warnings remain. No physical-phone or emulator execution, APK installation, production host restart, provider turn, push, PR or merge. Backend source unchanged; Go checks not repeated. Author self-review. Next: blue/base New chat styling, then physical-phone multi-session and CLI-conflict validation.
+
+Plan: [Android multi-session](docs/superpowers/plans/2026-11-13-android-multi-session.md).
+
 Updated: 2026-11-13T03:48+07:00. Branch: `feat/composer-effort-color`; base `862a5c6`. This snapshot accompanies the composer effort-color commit; checks below ran on its identical implementation tree before commit.
 
 ## Composer model effort colors
