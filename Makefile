@@ -1,3 +1,4 @@
+.DEFAULT_GOAL := apk
 ANDROID_DIR ?= android
 ADB ?= adb
 GRADLE ?= ./gradlew
@@ -10,6 +11,32 @@ WORKSPACE ?= $(CURDIR)
 STATE_DIR ?= $(HOME)/.local/state/modex-phone
 CODEX ?= codex
 PREFIX ?= $(HOME)/.local
+EMULATOR ?= emulator
+AVD ?= Pixel_4_XL
+EMULATOR_SERIAL ?= emulator-5554
+EMULATOR_PROFILE ?= .modex/emulator.json
+
+.PHONY: emulator emulator-apk emulator-install emulator-start emulator-stop emulator-host
+
+emulator-host:
+	$(MAKE) host STATE_DIR="$(HOME)/.local/state/modex-emulator"
+
+emulator-apk:
+	cd $(ANDROID_DIR) && JAVA_HOME=$(MODEX_JAVA_HOME) GRADLE_USER_HOME=$(if $(GRADLE_USER_HOME),$(GRADLE_USER_HOME),/tmp/modex-gradle) $(GRADLE) assembleDebug assembleDebugAndroidTest
+
+emulator: emulator-apk
+	$(MAKE) emulator-install
+
+emulator-install:
+	python3 scripts/install_emulator.py --adb "$(ADB)" --serial "$(EMULATOR_SERIAL)" --profile "$(EMULATOR_PROFILE)"
+
+emulator-start:
+	@mkdir -p .modex
+	@nohup "$(EMULATOR)" -avd "$(AVD)" -port "$(patsubst emulator-%,%,$(EMULATOR_SERIAL))" -no-snapshot > .modex/emulator.log 2>&1 &
+	@echo "Pixel starting. Run make emulator to install and open Modex."
+
+emulator-stop:
+	$(ADB) -s "$(EMULATOR_SERIAL)" emu kill
 
 .PHONY: apk install-apk install-android launch-android
 
