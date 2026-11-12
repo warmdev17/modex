@@ -280,7 +280,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     val list = result.optJSONArray("data") ?: JSONArray()
                     titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
                     val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
-                    val membership = (0 until list.length()).mapNotNull { i -> val t = list.getJSONObject(i); if (t.isNull("projectId")) null else t.getString("id") to t.optString("projectId") }.toMap()
+                    val membership = readProjectMembership(list)
                     projectMembership = if (operation.second == "more") projectMembership + membership else membership
                     threadWorkspaces = if (operation.second == "more") threadWorkspaces + paths else paths
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }

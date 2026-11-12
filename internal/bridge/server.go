@@ -26,9 +26,10 @@ type Thread struct {
 
 type threadListItem struct {
 	Thread
-	ProjectID *string `json:"projectId"`
-	Preview   string  `json:"preview,omitempty"`
-	Name      string  `json:"name,omitempty"`
+	ProjectID   *string `json:"projectId"`
+	Projectless bool    `json:"projectless,omitempty"`
+	Preview     string  `json:"preview,omitempty"`
+	Name        string  `json:"name,omitempty"`
 }
 
 func safePreview(value string) string {

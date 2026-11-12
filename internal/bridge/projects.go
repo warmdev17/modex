@@ -45,7 +45,12 @@ func desktopMembership(raw json.RawMessage, state []byte, home string) json.RawM
 		_ = json.Unmarshal(thread["projectId"], &project)
 		assignment := legacy.Assignments[id]
 		mapped := legacy.IDs["local:"+home][assignment.ID]
-		if project != "" || excluded[id] || assignment.Kind != "local" || mapped == "" {
+		if project == "" && excluded[id] {
+			thread["projectless"] = json.RawMessage(`true`)
+			changed = true
+			continue
+		}
+		if project != "" || assignment.Kind != "local" || mapped == "" {
 			continue
 		}
 		thread["projectId"], _ = json.Marshal(mapped)

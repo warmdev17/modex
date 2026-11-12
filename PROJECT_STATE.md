@@ -1,6 +1,14 @@
 # Modex project state
 
-Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/session-model-persistence`; base `5b57ca4`. JSON preview (`8f0630d`) and attachment reconnect (`5b57ca4`) are committed on stacked branches; Git records the third milestone commit.
+Updated: 2026-11-12, Asia/Ho_Chi_Minh. Branch: `fix/project-session-discovery`; base `b5db2bf` (PR #1 merged all six attachment/model commits). Git records the project-grouping fix commit.
+
+## Native sessions missing from project groups
+
+User reported this exact active CLI session and the Desktop hello session missing from Modex's Modex project. Read-only SQLite metadata and real app-server/host probes confirmed both have cwd /home/warmdev/Workspace/modex, null projectId, no legacy assignment and no explicit projectless exclusion. Host pagination already returned both; Android grouping required explicit membership and consequently omitted them from the project.
+
+Fix: group unassigned sessions by the longest matching root of an existing registered project. Canonical/legacy assignments win; explicit projectless exclusions now survive the bridge as projectless:true and stay outside project groups. Boundary matching avoids sibling-prefix matches, Windows drive paths normalize separators/case, equal-depth ambiguous roots stay in Recents. No invented projects, no remote state/database mutations, no changed session source or archive filters.
+
+Checks on this fix tree: Go regression failed before adding the projectless projection and then passed; full go test ./..., go vet ./... and bridge race PASS. Android assembleDebug/testDebugUnitTest/lintDebug PASS, 56 JVM tests with zero failures. Real read-only Codex versus host comparison over 5-item pages returned identical 16-session sets; four projects loaded over 2-item pages. Exact current session 01a1b731-2a1a-79e0-80fa-c6f24b2bd3b6 and hello 01a1c791-646c-7c13-a7f1-bd07437449f0 both match the registered Modex root; five explicit standalone markers preserved. No resume, prompt, provider turn, active supervisor restart, physical-phone install or emulator used. No push/merge for this fix. Self-review only. Install updated APK and rebuild/restart the host when idle, then Refresh sessions; phone confirmation still pending.
 
 ## Per-thread model and reasoning persistence
 

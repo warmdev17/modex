@@ -124,7 +124,7 @@ internal fun ChatWorkspace(
                     TextButton(onClick = onRefresh, enabled = connected && !threadListLoading) { Text("Refresh") }
                 }
                 val visible = threads.filter { (titles[it] ?: it).contains(search, ignoreCase = true) || it.contains(search,ignoreCase = true) || threadWorkspaces[it].orEmpty().contains(search, ignoreCase = true) }
-                val projects = projectSessions(registeredProjects, visible, projectMembership)
+                val projects = projectSessions(registeredProjects, visible, projectMembership, threadWorkspaces)
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (visible.isEmpty()) item { Text(if (threadListLoading) "Loading sessions…" else if (search.isBlank()) "No conversations yet" else "No matching conversations", Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodyMedium) }
                     item { Text("Projects", Modifier.padding(horizontal = 12.dp, vertical = 10.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }

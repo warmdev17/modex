@@ -81,5 +81,32 @@ internal fun readProjects(result: JSONObject): List<RemoteProject> {
     }
 }
 
-internal fun projectSessions(projects: List<RemoteProject>, threads: List<String>, membership: Map<String,String>): Map<String,List<String>> =
-    projects.associate { project -> project.id to threads.filter { membership[it] == project.id } }
+// Empty membership marks a deliberate Desktop projectless assignment; absent membership can use roots.
+internal fun readProjectMembership(data: org.json.JSONArray): Map<String, String> =
+    (0 until data.length()).mapNotNull { i ->
+        val thread = data.getJSONObject(i)
+        val project = thread.optString("projectId").takeUnless { thread.isNull("projectId") || it.isBlank() }
+        when {
+            project != null -> thread.getString("id") to project
+            thread.optBoolean("projectless") -> thread.getString("id") to ""
+            else -> null
+        }
+    }.toMap()
+
+internal fun projectSessions(projects: List<RemoteProject>, threads: List<String>, membership: Map<String,String>, workspaces: Map<String,String> = emptyMap()): Map<String,List<String>> {
+    fun path(value: String): String {
+        val normalized = value.replace('\\', '/').trimEnd('/')
+        return if (normalized.length >= 2 && normalized[1] == ':') normalized.lowercase(java.util.Locale.ROOT) else normalized
+    }
+    val roots = projects.flatMap { p -> p.roots.filter { it.isNotBlank() }.map { path(it) to p.id } }
+    val assignments = threads.associateWith { id ->
+        if (membership.containsKey(id)) membership[id]
+        else workspaces[id]?.takeIf { it.isNotBlank() }?.let { cwd ->
+            val directory = path(cwd)
+            val matches = roots.filter { (root, _) -> directory == root || directory.startsWith("$root/") }
+            val longest = matches.maxOfOrNull { it.first.length }
+            matches.filter { it.first.length == longest }.map { it.second }.distinct().singleOrNull()
+        }
+    }
+    return projects.associate { project -> project.id to threads.filter { assignments[it] == project.id } }
+}
