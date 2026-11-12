@@ -1,6 +1,17 @@
 # Modex project state
 
-Updated: 2026-11-12T23:54+07:00. Branch: `feat/cli-session-picker`; base `f37dec4` (PR #2 merged with all four original commits preserved). This snapshot accompanies the CLI picker feature commit; checks below ran on its identical implementation tree before commit.
+Updated: 2026-11-13T00:23+07:00. Branch: `fix/takeover-shutdown-order`; base `5d0971e` (CLI picker). This snapshot accompanies the shutdown fix; verification below ran on the identical implementation tree before commit.
+
+## Takeover shutdown ordering
+
+User reported first takeover returning takeover_uncertain, followed by successful refresh/reopen, and possible interruption of the active computer turn. Confirmed from source that explicit takeover can interrupt active work; it transfers persisted history, not the running computation. Found a reproducible shutdown ordering defect: the launcher waited up to three seconds for the backend while keeping the native TUI paused, and only interrupted the TUI after backend exit. A backend waiting for its client to close therefore reported uncertainty. The independent wait also ignored the request deadline. Two process regressions failed against the original implementation for these exact reasons, then passed after the fix. This reproduces a cause consistent with the screenshot; the exact device event has no retained stage-specific diagnostic proving its individual cause.
+
+Fix: request backend TERM, queue the owned TUI interrupt while it is paused, resume it, then await both actual exit channels under the same request context. Handler budget is ten seconds within the existing twelve-second socket deadline. No acknowledgement before both exits, no automatic takeover retry/prompt replay, and no SIGKILL escalation in takeover. Existing confirmation, same-session inspection, workspace checks and mismatch recovery remain. Source and tests are confined to takeover_unix.go and takeover_unix_test.go.
+
+Verification: full `go test ./...`, `go test -race ./...`, `go vet ./...` PASS; macOS/Windows amd64 host cross-build PASS (runtime Linux only). Disposable real Codex PTY probe PASS for new-session registration, explicit takeover and clean child/registration exit; fixture and private provider copy removed. Tests cover a backend waiting for TUI exit and a backend that does not exit before deadline, including refusal to claim success or escalate to kill. Physical phone retest and real active provider-tool shutdown have not been repeated. Android unchanged, so APK/Gradle/emulator checks not repeated. Author self-review only; no push/PR/merge or deployment of this fix.
+
+Runtime context: the preceding SSH attach failure was traced to a state directory containing only attachments, with no endpoint.json or owner.lock. `make host` was run with the existing /home/warmdev/.local/state/modex-phone and returned supervisor ready. The user's subsequent phone screenshot shows Connected SSH. The running supervisor/launcher for the current conversation has not been stopped or replaced for these fix tests. To apply the correction, close the old launcher when convenient and start a fresh `make cli`; installed CLI users can rebuild with make install-cli and start a new modex cli. Existing Android protocol is unchanged.
+
 
 ## Native CLI session picker
 

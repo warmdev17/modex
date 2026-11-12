@@ -106,13 +106,16 @@ func (owner *ownedCLI) release(ctx context.Context, id string, confirm bool) str
 	if err != nil || !singleLoadedThread(raw, id) {
 		return "takeover_mismatch"
 	}
-	if owner.server.Process.Signal(syscall.SIGTERM) != nil || !waitOwned(owner.serverDone, 3*time.Second) {
-		return "takeover_uncertain"
-	}
-	_ = owner.cli.Process.Signal(syscall.SIGCONT)
+	_ = owner.server.Process.Signal(syscall.SIGTERM)
+	// Queue the interrupt while paused; backend shutdown may need its TUI connection closed.
 	_ = owner.cli.Process.Signal(os.Interrupt)
-	if !waitOwned(owner.cliDone, 3*time.Second) {
-		return "takeover_uncertain"
+	_ = owner.cli.Process.Signal(syscall.SIGCONT)
+	for _, done := range []<-chan struct{}{owner.serverDone, owner.cliDone} {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return "takeover_uncertain"
+		}
 	}
 	owner.released = true
 	return ""
@@ -130,7 +133,7 @@ func (owner *ownedCLI) handle(conn net.Conn) {
 	if decoder.Decode(&request) != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	code := owner.release(ctx, request.ThreadID, request.Confirm)
 	_ = json.NewEncoder(conn).Encode(map[string]any{"released": code == "", "error": code})
