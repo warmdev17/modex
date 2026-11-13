@@ -11,7 +11,7 @@ func TestDecodeCommandRequiresSupportedMethod(t *testing.T) {
 	if err != nil || cmd.ID != 7 || cmd.Method != "threads/list" {
 		t.Fatalf("command=%+v err=%v", cmd, err)
 	}
-	if _, err := DecodeCommand([]byte(`{"id":7,"method":"turn/interrupt"}`)); err == nil {
+	if _, err := DecodeCommand([]byte(`{"id":7,"method":"threads/delete"}`)); err == nil {
 		t.Fatal("accepted unsupported mutating method")
 	}
 }

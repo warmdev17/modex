@@ -78,6 +78,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if cmd.Method == "threads/read" {
 			allowed["include_turns"] = true
 		}
+	case "turn/interrupt":
+		allowed["thread_id"] = true
+		allowed["turn_id"] = true
+		allowed["workspace"] = true
 	case "turn/start":
 		allowed["attachments"] = true
 		allowed["thread_id"] = true
@@ -277,6 +281,27 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			Data []threadListItem `json:"data"`
 			Next *string          `json:"next_cursor"`
 		}{page.Data, page.Next}, nil
+	case "turn/interrupt":
+		var id, turn string
+		for key, dest := range map[string]*string{"thread_id": &id, "turn_id": &turn} {
+			if json.Unmarshal(p[key], dest) != nil || strings.TrimSpace(*dest) == "" || len(*dest) > 256 || strings.ContainsAny(*dest, "\r\n\x00") {
+				return nil, errors.New("thread_id and turn_id must be nonempty single-line strings")
+			}
+		}
+		raw, err := fetch("thread/read", map[string]any{"threadId": id, "includeTurns": false})
+		if err != nil {
+			return nil, err
+		}
+		var metadata struct {
+			Thread Thread `json:"thread"`
+		}
+		if json.Unmarshal(raw, &metadata) != nil || metadata.Thread.ID != id {
+			return nil, errors.New("invalid thread response")
+		}
+		if metadata.Thread.Cwd != cwd {
+			return nil, errors.New("thread outside workspace")
+		}
+		return fetch("turn/interrupt", map[string]any{"threadId": id, "turnId": turn})
 	case "turn/start":
 		var id, text string
 		if json.Unmarshal(p["thread_id"], &id) != nil || id == "" {
@@ -352,21 +377,18 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				Thread struct {
 					Thread
 					Turns []struct {
-						Status string `json:"status"`
-						Items  []struct {
-							ID       string `json:"id"`
-							Command  string `json:"command"`
-							Cwd      string `json:"cwd"`
-							Status   string `json:"status"`
-							Output   string `json:"aggregatedOutput"`
-							ExitCode *int   `json:"exitCode"`
-							Type     string `json:"type"`
-							Text     string `json:"text"`
-							Content  []struct {
-								Type string `json:"type"`
-								Text string `json:"text"`
-								Path string `json:"path"`
-							} `json:"content"`
+						turnMetadata
+						Items []struct {
+							ID       string          `json:"id"`
+							Command  string          `json:"command"`
+							Cwd      string          `json:"cwd"`
+							Status   string          `json:"status"`
+							Output   string          `json:"aggregatedOutput"`
+							ExitCode *int            `json:"exitCode"`
+							Type     string          `json:"type"`
+							Text     string          `json:"text"`
+							Summary  []string        `json:"summary"`
+							Content  json.RawMessage `json:"content"`
 						} `json:"items"`
 					} `json:"turns"`
 				} `json:"thread"`
@@ -381,6 +403,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			active := false
 			outputBudget := 1024 * 1024
 			for _, turn := range response.Thread.Turns {
+				first := len(messages)
 				if turn.Status == "inProgress" {
 					active = true
 				}
@@ -400,7 +423,15 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 					switch item.Type {
 					case "userMessage":
 						role = "user"
-						for _, part := range item.Content {
+						var content []struct {
+							Type string `json:"type"`
+							Text string `json:"text"`
+							Path string `json:"path"`
+						}
+						if json.Unmarshal(item.Content, &content) != nil {
+							return nil, errors.New("invalid user message content")
+						}
+						for _, part := range content {
 							if part.Type == "text" {
 								if index := strings.LastIndex(part.Text, "Attached files selected by the user (JSON paths):\n"); index >= 0 && len(historyFileReferences(part.Text[index:])) > 0 {
 									text += part.Text[:index]
@@ -426,6 +457,13 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 								displayText += "\n[Image]"
 							}
 						}
+					case "reasoning":
+						role = "reasoning"
+						text = strings.Join(item.Summary, "\n\n")
+						if len(text) > 65536 {
+							text = strings.ToValidUTF8(text[:65536], "") + "\n[Summary truncated]"
+						}
+						displayText = text
 					case "agentMessage":
 						role = "assistant"
 						text = item.Text
@@ -435,8 +473,17 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments})
 					}
 				}
+				for _, message := range messages[first:] {
+					turn.project(message)
+				}
 			}
-			return map[string]any{"thread": response.Thread.Thread, "messages": messages, "active_turn": active}, nil
+			activeID := ""
+			for _, turn := range response.Thread.Turns {
+				if turn.Status == "inProgress" {
+					activeID = turn.ID
+				}
+			}
+			return map[string]any{"thread": response.Thread.Thread, "messages": messages, "active_turn": active, "active_turn_id": activeID}, nil
 		}
 		read := func(method string, params any) (Thread, error) {
 			raw, err := fetch(method, params)

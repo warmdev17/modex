@@ -143,6 +143,14 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 		}
 		return json.RawMessage(`{"updated":true}`), nil
 	}
+	if method == "turn/interrupt" {
+		turn, _ := p["turnId"].(string)
+		w := s.workers[id]
+		if w == nil || !w.busy || turn == "" || (w.turn != "" && w.turn != turn) {
+			return nil, errors.New("active turn is not owned by this supervisor; refresh session state")
+		}
+		return w.process.Call(ctx, method, params)
+	}
 	if method != "thread/start" && method != "thread/resume" && method != "turn/start" && method != "thread/read" {
 		return s.root.Call(ctx, method, params)
 	}
