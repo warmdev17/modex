@@ -30,9 +30,10 @@ internal fun isSafeMarkdownLink(url: String): Boolean = try {
 private fun Node.children(): List<Node> = buildList { var child = firstChild; while (child != null) { add(child); child = child.next } }
 
 @Composable
-internal fun MarkdownMessage(text: String) {
+internal fun MarkdownMessage(text: String, selectable: Boolean = true) {
     val document = remember(text) { markdownDocument(text) }
-    SelectionContainer { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) { MarkdownBlocks(document) } }
+    val content: @Composable () -> Unit = { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) { MarkdownBlocks(document) } }
+    if (selectable) SelectionContainer { content() } else content()
 }
 
 @Composable

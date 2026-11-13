@@ -1,5 +1,19 @@
 # Modex project state
 
+Updated: 2026-11-13. Active branch: `feat/chat-interactions`; backend milestone `756cccc`. Android implementation and this snapshot accompany the next local commit.
+
+## Chat interactions
+
+Implemented compact expandable Codex reasoning summaries, display-only Unicode-safe live text reveal, known per-prompt wall time, and Send/Stop for the exact active turn. Interrupt acknowledgement does not finish a turn; completion does. Missing/stale workers cannot be acquired by Stop. History exposes summaries only and optional timing; raw reasoning content is excluded. Reconnect reconciles uncertain stop state without replaying commands.
+
+Long press opens Edit / Copy / Select text for user messages, Copy / Select text for other messages. Edit loads text into the per-session composer, focuses the keyboard and confirms replacement of a nonempty draft; explicit Send creates a new turn and preserves history. Select text opens a full-screen selectable plain-text snapshot, with Close and Copy all. Clipboard uses canonical text, not the animated display. Existing attachment previews and code copy remain available.
+
+Verified on the uncommitted Android implementation tree and backend `756cccc`: `go test -race ./...`, `go vet ./...`, `git diff --check` PASS. JDK 21 / Gradle `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS; 69 JVM tests, zero failures/errors/skips. Initial Android regression was an old test treating reasoning as unsupported; retained unknown-item coverage with an actually unknown type. Gradle needed sandbox socket access. Author source review only. No emulator or phone runtime execution, installation, provider turn, production supervisor restart, push, PR or merge. No emulator was started.
+
+Next: install the built APK when requested, update the host when idle, then verify real long-press gestures, native text selection, draft replacement, summary streaming and Stop during an active/approval-waiting turn. UI interaction runtime and process-level concurrent interrupt coverage remain unverified. Plan: [chat interactions](docs/superpowers/plans/2026-11-13-chat-interactions.md).
+
+Earlier entries below retain their historical branch and verification context.
+
 Updated: 2026-11-13. Integration baseline: `main` at `757c42319f19`; this documentation-only update records the completed integration.
 
 ## PR integration and branch cleanup

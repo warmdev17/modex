@@ -1,6 +1,9 @@
 package dev.modex
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
@@ -74,6 +77,7 @@ internal fun ChatWorkspace(
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
     onCreate: (String, String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
+    stopping: Boolean = false, onStop: () -> Unit = {},
     runningThreads: Set<String> = emptySet(),
     takeoverSession: String = "", onTakeover: () -> Unit = {},
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
@@ -101,8 +105,13 @@ internal fun ChatWorkspace(
     var collapsedProjects by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     var search by rememberSaveable { mutableStateOf("") }
     var drafts by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
+    val focus = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    var editing by remember(selected) { mutableStateOf<String?>(null) }
     val prompt = drafts[selected].orEmpty()
     fun updatePrompt(value: String) { drafts = HashMap(drafts).apply { put(selected, value) } }
+    fun applyEdit(text: String) { updatePrompt(text); scope.launch { focus.requestFocus(); keyboard?.show() } }
+    editing?.let { text -> AlertDialog(onDismissRequest = { editing = null }, title = { Text("Replace draft?") }, text = { Text("Your current draft will be replaced. The message will be sent as a new turn only when you press Send.") }, confirmButton = { TextButton(onClick = { applyEdit(text); editing = null }) { Text("Replace") } }, dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } }) }
     var newChat by rememberSaveable { mutableStateOf(false) }
     var permissionMode by rememberSaveable { mutableStateOf("host-default") }
     LaunchedEffect(newChat) { if (newChat) permissionMode = "host-default" }
@@ -221,16 +230,20 @@ internal fun ChatWorkspace(
             } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 items(messages) { entry ->
                     val role = entry.role; val body = entry.text
+                    val display = liveMessageText(entry.id, body, entry.status == "inProgress")
+                    MessageActions(body, if (role == "You") ({ if (prompt.isNotBlank() && prompt != body) editing = body else applyEdit(body) }) else null) {
                     if (role == "You") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         Surface(color = Mocha.Surface, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(0.9f)) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 if (entry.attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     entry.attachments.forEach { file -> AttachmentTile(file, loadAttachment, { preview = file }) }
                                 }
-                                if (body.isNotBlank()) SelectionContainer { Text(body, style = MaterialTheme.typography.bodyLarge) }
+                                if (body.isNotBlank()) Text(body, style = MaterialTheme.typography.bodyLarge)
+                                WorkTimer(entry)
                             }
                         }
-                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(body)
+                    } else if (role == "command") CommandCard(entry) else if (role == "reasoning") ThinkingSummary(display) else MarkdownMessage(display, selectable = false)
+                    }
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
                     InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
@@ -245,7 +258,8 @@ internal fun ChatWorkspace(
                 attachments, attachmentWorking, attachmentProgress, attachmentError,
                 connected && selected.isNotBlank() && !busy && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
-                modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) })
+                modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) }),
+                focus = focus, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop
             ) {
                 if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) })) updatePrompt("")
             }
@@ -302,7 +316,7 @@ private fun PromptComposer(
     prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
     attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
-    modelColor: Color, onSend: () -> Unit
+    modelColor: Color, focus: FocusRequester, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
@@ -316,7 +330,7 @@ private fun PromptComposer(
             }
             if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
             BasicTextField(prompt, onChange, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
-                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
                 decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex…", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box {
@@ -338,8 +352,8 @@ private fun PromptComposer(
                         if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
                     }
                 }
-                FilledIconButton(onClick = onSend, enabled = enabled && (prompt.isNotBlank() || attachments.isNotEmpty()), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
-                    if (busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Mocha.Blue) else ChatGlyph(ChatIcon.Send,"Send message")
+                FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else enabled && (prompt.isNotBlank() || attachments.isNotEmpty()), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
+                    if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp) else if (busy) Text("■", modifier = Modifier.semantics { contentDescription = "Stop response" }) else ChatGlyph(ChatIcon.Send,"Send message")
                 }
             }
         }
