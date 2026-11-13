@@ -1,5 +1,25 @@
 # Modex project state
 
+Updated: 2026-11-13. Active branch: `feat/chat-interactions`; prior milestones `756cccc` and `b9944c0`. This snapshot accompanies the single-row thinking follow-up commit.
+
+## Single reasoning status per prompt
+
+Fixed a UI defect reported on phone: each reasoning item rendered its own literal Thinking button with the useful summary collapsed. The display timeline now groups reasoning items by user prompt (turn ID fallback before any user item), preserving commands, replies and canonical persisted messages. Mixed missing/known turn IDs do not duplicate a prompt row. The collapsed label shows the latest nonempty actual summary/title, with muted styling and activity indicator; expanding retains earlier summaries. Empty summaries produce no placeholder row. Scroll counts use the projected timeline so grouping cannot leave the bottom-anchor effect waiting for nonexistent items.
+
+Verified: Android `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS, JDK 21, 73 tests, zero failures/errors/skips; `git diff --check` PASS. Four new tests cover grouping across tool output, latest actual label/details, prompt boundaries including legacy IDs, and empty-summary suppression. Initial targeted red failed because the new projection functions were not yet implemented. No host source changes, so Go checks were not repeated. Author source review only. No provider call, APK installation, phone/emulator UI execution, production restart, push, PR or merge. ADB inspection found an existing emulator; this task did not start, modify or stop it. Real summary availability still depends on provider events; no invented model activity text.
+
+## Chat interactions
+
+Implemented compact expandable Codex reasoning summaries, display-only Unicode-safe live text reveal, known per-prompt wall time, and Send/Stop for the exact active turn. Interrupt acknowledgement does not finish a turn; completion does. Missing/stale workers cannot be acquired by Stop. History exposes summaries only and optional timing; raw reasoning content is excluded. Reconnect reconciles uncertain stop state without replaying commands.
+
+Long press opens Edit / Copy / Select text for user messages, Copy / Select text for other messages. Edit loads text into the per-session composer, focuses the keyboard and confirms replacement of a nonempty draft; explicit Send creates a new turn and preserves history. Select text opens a full-screen selectable plain-text snapshot, with Close and Copy all. Clipboard uses canonical text, not the animated display. Existing attachment previews and code copy remain available.
+
+Verified on the uncommitted Android implementation tree and backend `756cccc`: `go test -race ./...`, `go vet ./...`, `git diff --check` PASS. JDK 21 / Gradle `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS; 69 JVM tests, zero failures/errors/skips. Initial Android regression was an old test treating reasoning as unsupported; retained unknown-item coverage with an actually unknown type. Gradle needed sandbox socket access. Author source review only. No emulator or phone runtime execution, installation, provider turn, production supervisor restart, push, PR or merge. No emulator was started.
+
+Next: install the built APK when requested, update the host when idle, then verify real long-press gestures, native text selection, draft replacement, summary streaming and Stop during an active/approval-waiting turn. UI interaction runtime and process-level concurrent interrupt coverage remain unverified. Plan: [chat interactions](docs/superpowers/plans/2026-11-13-chat-interactions.md).
+
+Earlier entries below retain their historical branch and verification context.
+
 Updated: 2026-11-13. Integration baseline: `main` at `757c42319f19`; this documentation-only update records the completed integration.
 
 ## PR integration and branch cleanup

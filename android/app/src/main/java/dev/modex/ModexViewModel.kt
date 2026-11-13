@@ -62,6 +62,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     val runningThreads: Set<String> get() = sessions.runningThreads
     var decisions by mutableStateOf(listOf<JSONObject>()); private set
     var answeringDecisionIds by mutableStateOf(setOf<String>()); private set
+    val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
@@ -255,6 +256,11 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         return true
     }
+    fun stop() {
+        if (!connected || historyLoading || switching()) return
+        val target = sessions.requestStop() ?: return
+        request("turn/interrupt", withWorkspace(target, selectedWorkspace), target.toString())
+    }
     fun answer(decision: JSONObject, result: JSONObject) {
         if (!connected) return
         val id = decision.getString("decision_id")
@@ -283,6 +289,11 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             if (frame.has("error")) {
                 if (operation.first == "projects/list") { projectStatus = "Project list unavailable. Update the host/Codex; chats remain in Recents."; return }
                 if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
+                if (operation.first == "turn/interrupt") {
+                    val target = JSONObject(operation.second)
+                    sessions.interruptRejected(target.getString("thread_id"), target.getString("turn_id"))
+                    if (target.getString("thread_id") != selected) return
+                }
                 if (operation.first == "turn/start") {
                     sessions.rejectTurn(operation.second)
                     if (operation.second != selected) return
@@ -357,7 +368,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             val thread = result.optJSONObject("thread")
                             rememberChoice(selected, thread?.let { ModelChoice(it.optString("model"), it.optString("reasoningEffort")) })
-                            sessions.loadHistory(selected, readChat(result.getJSONArray("messages")), result.optBoolean("active_turn"), historyVersion)
+                            sessions.loadHistory(selected, readChat(result.getJSONArray("messages")), result.optBoolean("active_turn"), historyVersion, result.optString("active_turn_id"))
                         }
                     }
                 }
@@ -365,7 +376,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     answeringDecisionIds -= operation.second
                     decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
                 }
-                "turn/start" -> { sentAttachments?.let { attachments.sent(it.first, it.second) } }
+                "turn/start" -> { result.optJSONObject("turn")?.let { sessions.acknowledgeTurn(operation.second, it) }; sentAttachments?.let { attachments.sent(it.first, it.second) } }
             }
             return
         }

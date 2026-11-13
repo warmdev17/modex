@@ -38,6 +38,6 @@ class ChatEntryTest {
         assertTrue(items.single().text.contains("truncated"))
     }
     @Test fun unknownItemsDoNotBecomeChatMessages() {
-        assertTrue(updateChat(emptyList(), "item/started", event("""{"item":{"id":"x","type":"reasoning"}}""")).isEmpty())
+        assertTrue(updateChat(emptyList(), "item/started", event("""{"item":{"id":"x","type":"unknownFutureItem"}}""")).isEmpty())
     }
 }

@@ -5,10 +5,12 @@ import org.json.JSONObject
 
 internal data class ChatEntry(
     val id: String = "", val role: String, val text: String = "", val command: String = "",
-    val status: String = "", val exitCode: Int? = null, val cwd: String = "", val attachments: List<Attachment> = emptyList()
+    val status: String = "", val exitCode: Int? = null, val cwd: String = "", val attachments: List<Attachment> = emptyList(),
+    val turnId: String = "", val startedAtMs: Long? = null, val durationMs: Long? = null, val summaryParts: List<String> = emptyList()
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("role", when (role) { "You" -> "user"; "Codex" -> "assistant"; else -> role })
-        .put("attachments", JSONArray().apply { attachments.forEach { put(it.toJson().put("name", it.name).put("size", it.size)) } }).put("text", text).put("command", command).put("status", status).put("cwd", cwd).put("exit_code", exitCode ?: JSONObject.NULL)
+        .put("turn_id", turnId).put("started_at_ms", startedAtMs ?: JSONObject.NULL).put("duration_ms", durationMs ?: JSONObject.NULL)
+        .put("summary_parts", JSONArray(summaryParts)).put("attachments", JSONArray().apply { attachments.forEach { put(it.toJson().put("name", it.name).put("size", it.size)) } }).put("text", text).put("command", command).put("status", status).put("cwd", cwd).put("exit_code", exitCode ?: JSONObject.NULL)
 }
 
 private const val OUTPUT_LIMIT = 65536
@@ -18,7 +20,7 @@ private fun boundedOutput(text: String): String {
     return if (bytes.size <= OUTPUT_LIMIT) text else bytes.decodeToString(0, OUTPUT_LIMIT).trimEnd('\uFFFD') + TRUNCATED
 }
 
-internal fun readChat(list: JSONArray): List<ChatEntry> = (0 until list.length()).map { i ->
+internal fun readChat(list: JSONArray, now: Long = System.currentTimeMillis()): List<ChatEntry> = (0 until list.length()).map { i ->
     val m = list.getJSONObject(i)
     var files = m.optJSONArray("attachments")?.let { a -> (0 until a.length()).map { n ->
         val f = a.getJSONObject(n); Attachment(f.getString("path"), f.optString("name").ifBlank { attachmentName(f.getString("path")) }, f.getString("kind"), f.optLong("size"))
@@ -29,7 +31,10 @@ internal fun readChat(list: JSONArray): List<ChatEntry> = (0 until list.length()
     }
     val role = when (val r = m.optString("role")) { "user" -> "You"; "assistant" -> "Codex"; else -> r }
     ChatEntry(m.optString("id"), role, if (role == "command") boundedOutput(m.optString("text")) else body,
-        m.optString("command"), m.optString("status"), if (m.isNull("exit_code")) null else m.optInt("exit_code"), m.optString("cwd"), files)
+        m.optString("command"), m.optString("status").ifBlank { m.optString("turn_status") }, if (m.isNull("exit_code")) null else m.optInt("exit_code"), m.optString("cwd"), files, m.optString("turn_id"),
+        when { !m.isNull("started_at_ms") -> m.optLong("started_at_ms").takeIf { it >= 0 }; !m.isNull("elapsed_ms") -> (now - m.optLong("elapsed_ms").coerceAtLeast(0)).coerceAtLeast(0); else -> null },
+        if (m.isNull("duration_ms")) null else m.optLong("duration_ms").takeIf { it >= 0 },
+        m.optJSONArray("summary_parts")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty())
 }
 
 /** Apply only events already checked against the selected thread by the caller. */
@@ -39,14 +44,30 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
     if (id.isBlank()) return entries
     val index = entries.indexOfFirst { it.id == id }
     val previous = entries.getOrNull(index)
+    val turnId = params.optString("turnId").ifBlank { previous?.turnId.orEmpty() }
     val entry = when (event) {
-        "item/agentMessage/delta" -> (previous ?: ChatEntry(id, "Codex")).copy(text = (previous?.text ?: "") + params.optString("delta"))
+        "item/agentMessage/delta" -> {
+            if (previous?.status == "completed") return entries
+            (previous ?: ChatEntry(id, "Codex", turnId = turnId)).copy(text = (previous?.text ?: "") + params.optString("delta"), status = "inProgress")
+        }
+        "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" -> {
+            val part = params.optInt("summaryIndex", -1)
+            if (part !in 0..127 || previous?.status == "completed") return entries
+            val parts = previous?.summaryParts.orEmpty().toMutableList()
+            while (parts.size <= part) parts.add("")
+            if (event.endsWith("summaryTextDelta")) parts[part] = boundedOutput(parts[part] + params.optString("delta"))
+            ChatEntry(id, "reasoning", parts.joinToString("\n\n"), status = "inProgress", turnId = turnId, summaryParts = parts)
+        }
         "item/commandExecution/outputDelta" -> {
             if (previous?.role != "command") return entries
             previous.copy(text = if (previous.text.endsWith(TRUNCATED)) previous.text else boundedOutput(previous.text + params.optString("delta")))
         }
         "item/started", "item/completed" -> when (item?.optString("type")) {
-            "agentMessage" -> ChatEntry(id, "Codex", item.optString("text").ifEmpty { previous?.text.orEmpty() })
+            "agentMessage" -> ChatEntry(id, "Codex", item.optString("text").ifEmpty { previous?.text.orEmpty() }, status = if (event == "item/started") "inProgress" else "completed", turnId = turnId)
+            "reasoning" -> {
+                val parts = item.optJSONArray("summary")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().ifEmpty { previous?.summaryParts.orEmpty() }
+                ChatEntry(id, "reasoning", parts.joinToString("\n\n"), status = if (event == "item/started") "inProgress" else "completed", turnId = turnId, summaryParts = parts)
+            }
             "commandExecution" -> ChatEntry(id, "command",
                 boundedOutput(if (item.has("aggregatedOutput") && !item.isNull("aggregatedOutput")) item.getString("aggregatedOutput") else previous?.text.orEmpty()),
                 item.optString("command", previous?.command.orEmpty()), item.optString("status", if (event == "item/started") "inProgress" else "completed"),
