@@ -1,6 +1,8 @@
 # Modex
 
-Android native control of Codex on your own laptop or VPS, preserving the target's provider and configuration. Early development: this repository currently contains a host diagnostic, not a usable mobile product.
+Prebuilt distribution is being prepared: [installation and platform support](docs/install.md), [maintainer signing/release setup](docs/releasing.md). The pipeline creates draft releases; no public release is implied until the owner publishes one.
+
+Android native control of Codex on your own laptop or VPS, preserving the target's provider and configuration. Early development: native Android and host/CLI source builds are available; public prebuilt releases are being prepared.
 
 ## First executable milestone
 

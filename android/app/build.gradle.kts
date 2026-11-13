@@ -3,14 +3,36 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+val releaseVersion = providers.environmentVariable("MODEX_RELEASE_VERSION").orNull
+val releaseCode = providers.environmentVariable("MODEX_VERSION_CODE").orNull?.toIntOrNull()
+val signingValues = listOf("MODEX_KEYSTORE", "MODEX_STORE_PASSWORD", "MODEX_KEY_ALIAS", "MODEX_KEY_PASSWORD")
+    .associateWith { providers.environmentVariable(it).orNull }
+val hasSigning = signingValues.values.all { !it.isNullOrBlank() }
+
+gradle.taskGraph.whenReady {
+    if (allTasks.any { it.project == project && it.name.contains("Release") }) {
+        require(hasSigning) { "Release signing requires MODEX_KEYSTORE, MODEX_STORE_PASSWORD, MODEX_KEY_ALIAS and MODEX_KEY_PASSWORD; no debug fallback" }
+        require(releaseVersion?.matches(Regex("[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?")) == true) { "MODEX_RELEASE_VERSION must be a release version without v" }
+        require(releaseCode != null && releaseCode in 2..2100000000) { "MODEX_VERSION_CODE must be a monotonically increasing integer >= 2" }
+    }
+}
 android {
     signingConfigs.getByName("debug") {
         // Keep upgrades compatible when Gradle caches move or are recreated.
         storeFile = file(System.getProperty("user.home") + "/.android/debug.keystore")
     }
+    if (hasSigning) {
+        signingConfigs.create("release") {
+            storeFile = file(signingValues.getValue("MODEX_KEYSTORE")!!)
+            storePassword = signingValues.getValue("MODEX_STORE_PASSWORD")
+            keyAlias = signingValues.getValue("MODEX_KEY_ALIAS")
+            keyPassword = signingValues.getValue("MODEX_KEY_PASSWORD")
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("release")
+    }
     namespace = "dev.modex"
     compileSdk = 36
-    defaultConfig { applicationId = "dev.modex"; minSdk = 26; targetSdk = 36; versionCode = 1; versionName = "0.1.0" }
+    defaultConfig { applicationId = "dev.modex"; minSdk = 26; targetSdk = 36; versionCode = releaseCode ?: 1; versionName = releaseVersion ?: "0.1.0" }
     packaging { resources.excludes += "META-INF/versions/**/OSGI-INF/MANIFEST.MF" }
     buildFeatures { compose = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }

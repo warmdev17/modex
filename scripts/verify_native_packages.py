@@ -31,6 +31,10 @@ def verify(root):
                 listing = subprocess.check_output(['dpkg-deb', '-c', str(matches[0])], text=True)
                 if './usr/bin/modex\n' not in listing or './usr/bin/modex-host\n' not in listing:
                     raise ValueError('DEB lacks sibling binaries')
+            else:
+                listing = subprocess.check_output(['bsdtar', '-tf', str(matches[0])], text=True).splitlines()
+                if set(listing) != {'/usr/bin/modex', '/usr/bin/modex-host'}:
+                    raise ValueError('RPM must contain exactly the sibling binaries')
     print('Verified six native archives and four Linux packages')
 
 if __name__ == '__main__':
