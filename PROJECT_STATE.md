@@ -1,5 +1,9 @@
 # Modex project state
 
+## Release distribution implementation
+
+Updated 2026-11-13. Branch `feat/release-distribution`, baseline `39b8d2b` (PR #8 merged preserving all chat commits). User approved implementation of the release design. Importing original documentation commit without squash; chat status retained below. Scope: prebuilt packages/version diagnostics, crash-safe ownership and user services, checksum installer, signed APK pipeline and delivery docs. No live service restart, phone installation or release publication. Signing credentials remain owner-provisioned.
+
 Updated: 2026-11-13. Active branch: `feat/chat-interactions`; prior milestones `756cccc` and `b9944c0`. This snapshot accompanies the single-row thinking follow-up commit.
 
 ## Single reasoning status per prompt
