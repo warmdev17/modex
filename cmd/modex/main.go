@@ -10,8 +10,9 @@ import (
 	"os/exec"
 	"os/signal"
 
-	"github.com/warmdev/modex/internal/version"
+	"github.com/warmdev/modex/internal/service"
 	"github.com/warmdev/modex/internal/sshtransport"
+	"github.com/warmdev/modex/internal/version"
 )
 
 func main() {
@@ -22,6 +23,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "service" {
+		return service.Run(os.Args[2:], os.Stdout)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--version" {
 		fmt.Println(version.String("modex"))
 		return nil

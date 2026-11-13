@@ -23,7 +23,8 @@ class SupervisorLifecycleTests(unittest.TestCase):
                        "--state-dir", str(state), "--codex", str(Path(directory) / "missing-codex")]
             failed = subprocess.run(command, capture_output=True, text=True, timeout=10)
             self.assertNotEqual(failed.returncode, 0)
-            self.assertFalse((state / "owner.lock").exists())
+            if (state / "owner.lock").exists():
+                self.assertEqual((state / "owner.lock").read_text(), "modex-flock-v1\n")
             self.assertFalse((state / "endpoint.json").exists())
 
     def test_detach_replay_auth_exclusive_stop_and_cleanup(self):
@@ -128,9 +129,9 @@ for line in sys.stdin:
                 stopped = subprocess.run(base + ["--stop"], capture_output=True, text=True, timeout=5)
                 self.assertEqual(stopped.returncode, 0, stopped.stderr)
                 deadline = time.monotonic() + 5
-                while (state / "owner.lock").exists() and time.monotonic() < deadline:
+                while (state / "endpoint.json").exists() and time.monotonic() < deadline:
                     time.sleep(.02)
-                self.assertFalse((state / "owner.lock").exists())
+                self.assertEqual((state / "owner.lock").read_text(), "modex-flock-v1\n")
                 self.assertFalse((state / "endpoint.json").exists())
                 pid = int((root / "fixture.pid").read_text())
                 deadline = time.monotonic() + 3

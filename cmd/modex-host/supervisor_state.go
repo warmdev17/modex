@@ -23,20 +23,7 @@ func claimSupervisorState(dir string) (func(), error) {
 	if err := checkPrivatePath(dir, true); err != nil {
 		return nil, err
 	}
-	lock := filepath.Join(dir, "owner.lock")
-	file, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if err != nil {
-		return nil, errors.New("supervisor state already owned; do not delete locks of a live supervisor")
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(lock)
-		return nil, err
-	}
-	if _, err := os.Lstat(filepath.Join(dir, "endpoint.json")); !os.IsNotExist(err) {
-		_ = os.Remove(lock)
-		return nil, errors.New("existing supervisor endpoint; verify old supervisor stopped before manually recovering stale state")
-	}
-	return func() { _ = os.Remove(filepath.Join(dir, "endpoint.json")); _ = os.Remove(lock) }, nil
+	return lockSupervisorState(dir)
 }
 
 func writeEndpoint(dir string, endpoint supervisorEndpoint) error {
