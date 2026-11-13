@@ -4,6 +4,8 @@
 
 Updated 2026-11-13. Branch `feat/release-distribution`, baseline `39b8d2b` (PR #8 merged preserving all chat commits). User approved implementation of the release design. Importing original documentation commit without squash; chat status retained below. Scope: prebuilt packages/version diagnostics, crash-safe ownership and user services, checksum installer, signed APK pipeline and delivery docs. No live service restart, phone installation or release publication. Signing credentials remain owner-provisioned.
 
+Native delivery milestone: shared --version diagnostics, GoReleaser 2.8.2 matrix (6 archives / 4 DEB-RPM packages), installer/platform guide and archive validator implemented. GoReleaser check and snapshot packaging PASS on implementation tree; archive/package contents and local version metadata verified. Isolated staged native-only tree Go tests and CLI version output PASS. Service/installer/signing work remains uncommitted and in progress. Native macOS/Windows runtime and hosted GitHub workflow execution are not yet validated.
+
 Updated: 2026-11-13. Active branch: `feat/chat-interactions`; prior milestones `756cccc` and `b9944c0`. This snapshot accompanies the single-row thinking follow-up commit.
 
 ## Single reasoning status per prompt
