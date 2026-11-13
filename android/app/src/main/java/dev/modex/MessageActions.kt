@@ -73,5 +73,5 @@ internal fun WorkTimer(entry: ChatEntry) {
     var now by remember(entry.id) { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(entry.id, entry.status) { while (entry.status == "inProgress") { now = System.currentTimeMillis(); delay(1000) } }
     val duration = if (entry.status == "inProgress") entry.startedAtMs?.let { now - it } else entry.durationMs
-    if (duration != null) Text("${if (entry.status == "inProgress") "Working" else "Worked"} · ${formatWorkDuration(duration)}", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+    if (duration != null) Text("${workStatusLabel(entry.status)} · ${formatWorkDuration(duration)}", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
 }

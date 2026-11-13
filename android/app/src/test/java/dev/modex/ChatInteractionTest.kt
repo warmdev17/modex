@@ -107,5 +107,25 @@ class ChatInteractionTest {
         assertFalse(state.stopping)
     }
 
+    @Test fun interruptedTurnKeepsItsOutcomeLiveAndAfterReload() {
+        val state = SessionState { 3000L }
+        state.open("a")
+        state.sent(ChatEntry("u", "You", "stop this"))
+        state.event("turn/started", turn("a", "t"))
+        state.requestStop()
+        state.event("turn/completed", turn("a", "t").apply {
+            getJSONObject("turn").put("status", "interrupted").put("durationMs", 1200)
+        })
+        assertFalse(state.busy)
+        assertEquals("Interrupted", workStatusLabel(state.messages.single().status))
+        val restored = readChat(JSONArray().put(state.messages.single().toJson())).single()
+        assertEquals("Interrupted", workStatusLabel(restored.status))
+        assertEquals(1200L, restored.durationMs)
+        assertEquals("Failed", workStatusLabel("failed"))
+        assertEquals("Worked", workStatusLabel("completed"))
+        assertEquals("Working", workStatusLabel("inProgress"))
+        assertEquals("Ended", workStatusLabel("unknown"))
+    }
+
     private fun turn(thread: String, turn: String) = JSONObject().put("threadId", thread).put("turn", JSONObject().put("id", turn))
 }
