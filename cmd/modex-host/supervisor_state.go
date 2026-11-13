@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/warmdev/modex/internal/hoststate"
 )
 
 type supervisorEndpoint struct {
@@ -17,13 +19,25 @@ type supervisorEndpoint struct {
 }
 
 func claimSupervisorState(dir string) (func(), error) {
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return nil, errors.New("cannot create private supervisor directory")
-	}
-	if err := checkPrivatePath(dir, true); err != nil {
+	release, err := hoststate.Acquire(dir)
+	if err != nil {
 		return nil, err
 	}
-	return lockSupervisorState(dir)
+	endpoint := filepath.Join(dir, "endpoint.json")
+	if _, err := os.Lstat(endpoint); err == nil {
+		if err := checkPrivatePath(endpoint, false); err != nil {
+			release()
+			return nil, err
+		}
+		if err := os.Remove(endpoint); err != nil {
+			release()
+			return nil, err
+		}
+	} else if !os.IsNotExist(err) {
+		release()
+		return nil, err
+	}
+	return func() { _ = os.Remove(endpoint); release() }, nil
 }
 
 func writeEndpoint(dir string, endpoint supervisorEndpoint) error {

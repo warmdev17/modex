@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/warmdev/modex/internal/hoststate"
 )
 
 func registration(home string) (string, error) {
@@ -168,15 +170,12 @@ func install(args []string, home, path string, out io.Writer) error {
 	if *codexHome != "" && !filepath.IsAbs(*codexHome) {
 		return errors.New("CODEX_HOME must be absolute")
 	}
-	// Do not migrate, probe or stop an existing supervisor as an install side effect.
-	for _, name := range []string{"owner.lock", "endpoint.json"} {
-		if _, err := os.Lstat(filepath.Join(*state, name)); !os.IsNotExist(err) {
-			return errors.New("state already has supervisor ownership; choose a new state directory")
-		}
-	}
-	if err := privateState(*state); err != nil {
+	// Hold exclusive ownership until registration is written; preserve endpoint and attachments.
+	release, err := hoststate.Acquire(*state)
+	if err != nil {
 		return err
 	}
+	defer release()
 	content, err := Render(runtime.GOOS, Config{*binary, *workspace, *codex, *state, os.Getenv("PATH"), *codexHome})
 	if err != nil {
 		return err

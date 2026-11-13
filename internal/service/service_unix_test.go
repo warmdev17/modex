@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/warmdev/modex/internal/hoststate"
 )
 
 func TestInstallIsPrivateExplicitAndDoesNotStartManager(t *testing.T) {
@@ -69,12 +71,45 @@ func TestInstallRejectsInvalidPaths(t *testing.T) {
 	}
 	public := filepath.Join(root, "public")
 	os.Mkdir(public, 0755)
-	if err := privateState(public); err == nil {
+	if err := hoststate.Validate(public, true); err == nil {
 		t.Fatal("accepted public state")
 	}
 	link := filepath.Join(root, "link")
 	os.Symlink(public, link)
-	if err := privateState(link); err == nil {
+	if err := hoststate.Validate(link, true); err == nil {
 		t.Fatal("accepted symlink")
+	}
+}
+
+func TestReinstallCanReuseStoppedNewFormatState(t *testing.T) {
+	root := t.TempDir()
+	state := filepath.Join(root, "state")
+	os.Mkdir(state, 0700)
+	os.WriteFile(filepath.Join(state, "owner.lock"), []byte("modex-flock-v1\n"), 0600)
+	attachment := filepath.Join(state, "keep")
+	os.WriteFile(attachment, []byte("attachment"), 0600)
+	binary := filepath.Join(root, "binary")
+	os.WriteFile(binary, []byte("#!/bin/sh\n"), 0700)
+	t.Setenv("CODEX_HOME", "")
+	args := []string{"--workspace", root, "--state-dir", state, "--host-binary", binary, "--codex", binary}
+	release, err := hoststate.Acquire(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := filepath.Join(state, "endpoint.json")
+	os.WriteFile(endpoint, []byte("private stale endpoint"), 0600)
+	if err := install(args, root, filepath.Join(root, "unit"), &bytes.Buffer{}); err == nil {
+		release()
+		t.Fatal("accepted live owner")
+	}
+	release()
+	if err := install(args, root, filepath.Join(root, "unit"), &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(endpoint); string(b) != "private stale endpoint" {
+		t.Fatal("install mutated endpoint")
+	}
+	if b, _ := os.ReadFile(attachment); string(b) != "attachment" {
+		t.Fatal("lost state")
 	}
 }

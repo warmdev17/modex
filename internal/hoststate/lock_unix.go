@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package hoststate
 
 import (
 	"errors"
@@ -12,7 +12,13 @@ import (
 
 const ownershipFormat = "modex-flock-v1\n"
 
-func lockSupervisorState(dir string) (func(), error) {
+func Acquire(dir string) (func(), error) {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, err
+	}
+	if err := Validate(dir, true); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(dir, "owner.lock")
 	endpoint := filepath.Join(dir, "endpoint.json")
 	// Unknown state is never evidence that an old supervisor is dead.
@@ -32,7 +38,7 @@ func lockSupervisorState(dir string) (func(), error) {
 	}
 	file := os.NewFile(uintptr(fd), path)
 	fail := func(err error) (func(), error) { file.Close(); return nil, err }
-	if err := checkPrivatePath(path, false); err != nil {
+	if err := Validate(path, false); err != nil {
 		return fail(err)
 	}
 	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
@@ -51,16 +57,6 @@ func lockSupervisorState(dir string) (func(), error) {
 			return fail(err)
 		}
 	}
-	if _, err := os.Lstat(endpoint); err == nil {
-		if err := checkPrivatePath(endpoint, false); err != nil {
-			return fail(err)
-		}
-		if err := os.Remove(endpoint); err != nil {
-			return fail(err)
-		}
-	} else if !os.IsNotExist(err) {
-		return fail(err)
-	}
 	// Never unlink the lock inode: another process may already have opened it.
-	return func() { _ = os.Remove(endpoint); _ = file.Close() }, nil
+	return func() { _ = file.Close() }, nil
 }

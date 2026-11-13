@@ -13,7 +13,3 @@ func checkPrivatePath(string, bool) error {
 func detachSupervisor(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000008 | 0x00000200}
 }
-
-func lockSupervisorState(string) (func(), error) {
-	return nil, errors.New("Windows native supervisor is unsupported; use WSL2")
-}

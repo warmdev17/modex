@@ -10,6 +10,8 @@ Service milestone: `modex service install/start/status/stop/uninstall` generates
 
 Installer milestone: POSIX script downloads an explicit HTTPS release, verifies the exact checksum entry, streams only the two binary members into private staging and replaces files individually without restarting anything. Nine fake-download regressions PASS (Linux/macOS CPU mapping, successful replacement, checksum/HTTP failure cleanup, missing sibling, archive symlink and unsupported OS/CPU). `sh -n` PASS. No actual release download/install or service restart; per-file replacement is atomic, not a two-file transaction.
 
+Review correction: reinstalling a stopped new-format state now works using shared `internal/hoststate` ownership instead of rejecting every persistent lock marker. Install holds the same exclusive lock through registration and never deletes its existing endpoint or attachments. Regression failed on the old install guard, then passed for stopped reuse, live-owner refusal and data preservation. Shared-lock final Go race/vet, 28 Python integration/unit tests and six-archive/four-package snapshot checks PASS. Legacy markers still fail closed.
+
 Updated: 2026-11-13. Active branch: `feat/chat-interactions`; prior milestones `756cccc` and `b9944c0`. This snapshot accompanies the single-row thinking follow-up commit.
 
 ## Single reasoning status per prompt

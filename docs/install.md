@@ -84,9 +84,9 @@ modex service uninstall
 ```
 
 For upgrade: stop when safe, install the new binaries, then start again. For
-configuration changes, stop/uninstall first and install with a **new** state path
-if the previous one has an ownership marker. Installation conservatively refuses
-any existing ownership marker; normal start/restart reuses a configured state.
+configuration changes, stop/uninstall first, then install using the same new-format
+state path. Installation checks exclusive ownership and preserves attachments; it
+refuses a live owner or legacy state. Normal start/restart reuses configured state.
 Crash-released advisory locking allows new-format state recovery after process
 death while retaining attachments. A legacy empty `owner.lock` or unidentified
 endpoint fails closed: explicitly stop the old supervisor before migration, or
