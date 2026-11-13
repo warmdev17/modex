@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-13. Integration baseline: `main` at `757c42319f19`; this documentation-only update records the completed integration.
+Updated: 2026-11-13. Branch: `docs/release-distribution-design`; baseline main `0480c4b`. Current changes are design/state documentation only.
+
+## Prebuilt releases and user host services: proposed
+
+User requested downloadable APK releases, prebuilt host/CLI packages, Linux/macOS background services, DEB/RPM and a cross-distro/macOS installer; Windows approach delegated to the builder. [Reviewable design](docs/superpowers/specs/2026-11-13-release-distribution-design.md) proposes GitHub Releases/GoReleaser, Linux systemd user service, macOS LaunchAgent and Windows SSH CLI plus WSL2 hosting. These are proposals awaiting design review, not implemented features. WSL does not expose Windows-native Codex sessions automatically. Signed APK updates need a privately provisioned stable release key; a new key cannot upgrade the existing debug install in place.
+
+Source inspection: foreground `--supervise` and SIGTERM shutdown already exist. Windows supervisor/private ACLs and native registered launcher remain unsupported. Existing O_EXCL owner marker survives crash/reboot, so service work must add crash-released ownership and safe stale-endpoint handling, with fail-closed legacy migration. Installer/service must preserve credentials, attachments and current phone/emulator supervisors. No new release workflow, service, installer or runtime code yet; no provider, device, build or service lifecycle tests run for this documentation-only milestone. Design reviewed against current source; `git diff --check` is the applicable verification. Next: bradar reviews the proposed design, then implementation planning, separated commits and normal PR integration. No release signing material requested in chat, no push/publication or runtime restart performed.
 
 ## PR integration and branch cleanup
 
