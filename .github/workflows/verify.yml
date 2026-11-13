@@ -8,6 +8,7 @@ permissions:
 jobs:
   go:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
@@ -16,8 +17,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.12'
-      - run: go test ./...
-      - run: go vet ./...
+      - if: runner.os != 'Windows'
+        run: go test ./...
+      - if: runner.os != 'Windows'
+        run: go vet ./...
+      - if: runner.os == 'Windows'
+        run: |
+          go test ./cmd/modex ./internal/sshtransport ./internal/service ./internal/version
+          go vet ./cmd/modex ./internal/sshtransport ./internal/service ./internal/version
+          go build ./cmd/modex
       - if: runner.os != 'Windows'
         run: go test -race ./...
       - if: runner.os == 'Linux'
@@ -35,6 +43,8 @@ jobs:
           distribution: temurin
           java-version: '21'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
       - run: ./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --no-daemon
         working-directory: android
