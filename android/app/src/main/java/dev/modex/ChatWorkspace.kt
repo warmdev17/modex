@@ -123,6 +123,7 @@ internal fun ChatWorkspace(
     LaunchedEffect(newChat) { if (newChat) { model = hostModel; newEffort = defaultEffort(hostModel) } }
     var showModel by rememberSaveable { mutableStateOf(false) }
     var modelInput by rememberSaveable { mutableStateOf("") }
+    val timeline = remember(messages) { thinkingTimeline(messages) }
     val selectedDecisions = decisions.filter { it.optString("thread_id") == selected }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
@@ -207,28 +208,28 @@ internal fun ChatWorkspace(
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
             var openAtLatest by remember(selected) { mutableStateOf(true) }
-            LaunchedEffect(selected, historyLoading, messages.size, messages.lastOrNull(), selectedDecisions.map { it.optString("decision_id") }) {
+            LaunchedEffect(selected, historyLoading, timeline.size, timeline.lastOrNull(), selectedDecisions.map { it.optString("decision_id") }) {
                 if (historyLoading) {
                     openAtLatest = true
                     return@LaunchedEffect
                 }
                 val layout = scroll.layoutInfo
                 val nearBottom = layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 2 } ?: true
-                if (messages.isNotEmpty() && (openAtLatest || nearBottom)) {
-                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == messages.size + selectedDecisions.size + 1 }
+                if (timeline.isNotEmpty() && (openAtLatest || nearBottom)) {
+                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == timeline.size + selectedDecisions.size + 1 }
                     // The final spacer anchors the bottom even when the last message is taller than the viewport.
-                    scroll.scrollToItem(messages.size)
+                    scroll.scrollToItem(timeline.size)
                     openAtLatest = false
                 }
             }
-            if (messages.isEmpty() && selectedDecisions.isEmpty()) {
+            if (timeline.isEmpty() && selectedDecisions.isEmpty()) {
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {
                     Text("Your workspace.\nWithin reach.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Medium)
                     Text(if (selected.isBlank()) "Open a conversation from the sidebar, or start a new chat." else "Ask Codex to explore, build or fix something.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
                     if (selected.isBlank()) Button(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
                 }
             } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                items(messages) { entry ->
+                items(timeline) { entry ->
                     val role = entry.role; val body = entry.text
                     val display = liveMessageText(entry.id, body, entry.status == "inProgress")
                     MessageActions(body, if (role == "You") ({ if (prompt.isNotBlank() && prompt != body) editing = body else applyEdit(body) }) else null) {
@@ -242,7 +243,7 @@ internal fun ChatWorkspace(
                                 WorkTimer(entry)
                             }
                         }
-                    } else if (role == "command") CommandCard(entry) else if (role == "reasoning") ThinkingSummary(display) else MarkdownMessage(display, selectable = false)
+                    } else if (role == "command") CommandCard(entry) else if (role == "reasoning") ThinkingSummary(display, reasoningLabel(entry.summaryParts.lastOrNull().orEmpty().ifBlank { body }), entry.status == "inProgress") else MarkdownMessage(display, selectable = false)
                     }
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->

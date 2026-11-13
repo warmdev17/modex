@@ -1,6 +1,12 @@
 # Modex project state
 
-Updated: 2026-11-13. Active branch: `feat/chat-interactions`; backend milestone `756cccc`. Android implementation and this snapshot accompany the next local commit.
+Updated: 2026-11-13. Active branch: `feat/chat-interactions`; prior milestones `756cccc` and `b9944c0`. This snapshot accompanies the single-row thinking follow-up commit.
+
+## Single reasoning status per prompt
+
+Fixed a UI defect reported on phone: each reasoning item rendered its own literal Thinking button with the useful summary collapsed. The display timeline now groups reasoning items by user prompt (turn ID fallback before any user item), preserving commands, replies and canonical persisted messages. Mixed missing/known turn IDs do not duplicate a prompt row. The collapsed label shows the latest nonempty actual summary/title, with muted styling and activity indicator; expanding retains earlier summaries. Empty summaries produce no placeholder row. Scroll counts use the projected timeline so grouping cannot leave the bottom-anchor effect waiting for nonexistent items.
+
+Verified: Android `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS, JDK 21, 73 tests, zero failures/errors/skips; `git diff --check` PASS. Four new tests cover grouping across tool output, latest actual label/details, prompt boundaries including legacy IDs, and empty-summary suppression. Initial targeted red failed because the new projection functions were not yet implemented. No host source changes, so Go checks were not repeated. Author source review only. No provider call, APK installation, phone/emulator UI execution, production restart, push, PR or merge. ADB inspection found an existing emulator; this task did not start, modify or stop it. Real summary availability still depends on provider events; no invented model activity text.
 
 ## Chat interactions
 

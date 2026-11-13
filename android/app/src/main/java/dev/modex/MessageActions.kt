@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -51,11 +53,18 @@ internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content:
 }
 
 @Composable
-internal fun ThinkingSummary(text: String) {
+internal fun ThinkingSummary(text: String, title: String, active: Boolean) {
     var expanded by remember { mutableStateOf(false) }
     Column {
-        TextButton(onClick = { expanded = !expanded }, colors = ButtonDefaults.textButtonColors(contentColor = Mocha.Subtext)) { Text(if (expanded) "⌄ Thinking" else "› Thinking", style = MaterialTheme.typography.labelMedium) }
-        if (expanded && text.isNotBlank()) Text(text, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp))
+        TextButton(onClick = { expanded = !expanded }, colors = ButtonDefaults.textButtonColors(contentColor = Mocha.Subtext), contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (active) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = Mocha.Subtext)
+                else Text("·", color = Mocha.Subtext)
+                Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(if (expanded) "⌄" else "›", color = Mocha.Subtext)
+            }
+        }
+        if (expanded) Text(text, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp))
     }
 }
 
