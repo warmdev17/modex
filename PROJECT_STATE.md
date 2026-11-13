@@ -1,5 +1,13 @@
 # Modex project state
 
+## Chat feedback and settings corrections
+
+Updated: 2026-11-14. Branch `fix/chat-feedback-settings`, baseline `7fecbfb`. Separate from unmerged `fix/shared-emulator-host` (`a4aa8c9`). Commits `685a585` (turn outcomes) and `0d2703a` (touch feedback); this milestone covers settings continuity/navigation.
+
+Timer displays Interrupted/Cancelled/Failed instead of Worked for those outcomes; unknown outcomes use Ended. User long press retains Edit/Copy/Select text without a full-row ripple. Model button wraps its content inside the remaining composer space. Connection settings show the saved endpoint/binary/state/fingerprint while connected, with Android Back returning to chat. The last create/resume permission report is saved in the encrypted snapshot alongside the selected session, retained across disconnect/reconnect, and cleared when changing selection/forgetting/resetting. UI labels it as last reported, not current policy, and offers explicit Reload settings only while connected and idle. Older snapshots have no report until a session is opened/reloaded.
+
+Verification: JDK 21 Gradle `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS, 74 unit tests with zero failures/errors/skips. Regression added for live interrupted completion and persisted message restore. Pixel_4_XL chat-ui instrumentation PASS including Interrupted timer, user long-press menu, model button bounds and Android Back dismissal; screenshot inspected. Actual app Connection settings -> Android Back -> chat verified via accessibility hierarchy. Updated debug APK ready for `make install-apk`. Emulator launched for this task was stopped afterward; no phone installation, provider turn, host restart, state/profile rename/deletion, push/PR/merge. Encrypted settings continuity reviewed in source; no real-provider reconnect/process-death verification. Impeccable engine unavailable; direct Compose inspection and Pixel checks used instead.
+
 ## Release distribution implementation
 
 Updated: 2026-11-13. Branch `feat/release-distribution`, baseline `39b8d2b` (PR #8 merged with all three chat commits preserved). Original approved design commit `a3a31a8` was imported via merge `9ec06d8`, not squashed. Implementation follows [release plan](docs/superpowers/plans/2026-11-13-release-distribution.md) and [design](docs/superpowers/specs/2026-11-13-release-distribution-design.md).

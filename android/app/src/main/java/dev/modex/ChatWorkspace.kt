@@ -292,8 +292,12 @@ internal fun ChatWorkspace(
     )
     if (showSettings) AlertDialog(
         onDismissRequest = { showSettings = false }, title = { Text("Session settings") },
-        text = { SelectionContainer { Text(sessionSettings.ifBlank { "Effective permissions are unknown. Select this session while connected to read Codex's resume settings." } + "\n\nReported at create/resume. Host policy and tool-specific approvals still apply.") } },
-        confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Close") } }
+        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            SelectionContainer { Text(sessionSettings.ifBlank { "No permission report saved for this session." }) }
+            Text(if (sessionSettings.isBlank()) "Reload while connected and the session is idle to read its settings." else "Last reported when this session was opened. Host policy and individual tool approvals also apply.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+        } },
+        confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Close") } },
+        dismissButton = { TextButton(enabled = connected && !busy && !historyLoading, onClick = { showSettings = false; onSelect(selected) }) { Text("Reload settings") } }
     )
     if (showModel) AlertDialog(
         onDismissRequest = { showModel = false },
