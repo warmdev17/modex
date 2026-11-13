@@ -29,7 +29,7 @@ fun Instrumentation.chatUiSmoke() {
             ModexTheme { Surface { ChatWorkspace(
                 "laptop.local", true, false, current,
                 listOf("fixture-one","fixture-two","standalone"), mapOf("standalone" to "Standalone chat", "fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
-                listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone."), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
+                listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone.", status = "interrupted", durationMs = 1200), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
                 chosenModel, emptyList(), emptySet(),
                 { current = it; selected = it }, {}, {}, { _, _, _ -> }, { text, model, effort -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, registeredProjects = listOf(RemoteProject("p1", "modex", listOf("/work/modex")), RemoteProject("p2", "other", listOf("/work/other"))), projectMembership = mapOf("fixture-one" to "p1", "fixture-two" to "p2"), threadWorkspaces = mapOf("fixture-one" to "/work/modex", "fixture-two" to "/work/other", "standalone" to "/generated/ssh-x20"), attachments = attachmentFiles, onPhoneFiles = { phoneChosen = true }, onRemoteFiles = { remoteChosen = true }, onRemoveAttachment = { path -> attachmentFiles = attachmentFiles.filter { it.path != path } }, sessionEffort = chosenEffort, onModelChoice = { m, e -> chosenModel = m; chosenEffort = e }, models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
             ) } }
@@ -61,6 +61,14 @@ fun Instrumentation.chatUiSmoke() {
             val bmp = uiAutomation.takeScreenshot() ?: error("No screenshot")
             File(targetContext.filesDir,name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; bmp.recycle()
         }
+        check(node("Interrupted · 1s") != null) { "Interrupted turn displayed as completed" }
+        var userMessage = node("Make this easier to use on my phone.")
+        while (userMessage != null && !userMessage.isLongClickable) userMessage = userMessage.parent
+        check(userMessage?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) == true)
+        Thread.sleep(500)
+        check(node("Edit") != null && node("Copy") != null && node("Select text") != null)
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand("input keyevent 4")).use { it.readBytes() }
+        Thread.sleep(500)
         check(node("reference.png") != null) { "Attachment chip missing" }
         click("Attach files")
         check(node("From this phone") != null && node("From connected computer") != null) { "Attachment sources missing" }
@@ -103,6 +111,16 @@ fun Instrumentation.chatUiSmoke() {
         fun shell(command: String) {
             android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand(command)).use { it.readBytes() }
         }
+        runOnMainSync { chosenModel = "m"; chosenEffort = "low" }
+        waitForIdleSync(); Thread.sleep(500)
+        val modelBounds = android.graphics.Rect().also { node("Choose model")!!.getBoundsInScreen(it) }
+        val sendBounds = android.graphics.Rect().also { node("Send message")!!.getBoundsInScreen(it) }
+        check(modelBounds.right < sendBounds.left - 20) { "Model button fills unused composer space" }
+        click("Choose model")
+        shell("input keyevent 4")
+        Thread.sleep(500)
+        check(node("Use model") == null && node("Choose model") != null) { "Back did not dismiss model dialog" }
+        runOnMainSync { chosenModel = "fixture-custom"; chosenEffort = "high" }
         runOnMainSync { attachmentFiles = listOf(Attachment("/fixture/retry.txt", "retry.txt", "file")) }
         click("Message Codex")
         val field = node("Message Codex") ?: error("Composer inaccessible after focus")

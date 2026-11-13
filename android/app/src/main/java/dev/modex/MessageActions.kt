@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
@@ -27,7 +28,7 @@ internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content:
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     fun copy(value: String) { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Message", value)) }
-    Box(Modifier.fillMaxWidth().combinedClickable(onClick = {}, onLongClickLabel = "Message actions", onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); menu = true })) {
+    Box(Modifier.fillMaxWidth().combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = if (onEdit != null) null else LocalIndication.current, onClick = {}, onLongClickLabel = "Message actions", onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); menu = true })) {
         content()
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })

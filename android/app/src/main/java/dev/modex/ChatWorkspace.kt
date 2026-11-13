@@ -341,16 +341,18 @@ private fun PromptComposer(
                         DropdownMenuItem(text = { Text("From connected computer") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, enabled = attachEnabled, onClick = { attachMenu = false; onRemoteFiles() })
                     }
                 }
-                TextButton(
-                    onClick = onModel, enabled = modelEnabled, shape = RoundedCornerShape(6.dp),
-                    colors = ButtonDefaults.textButtonColors(contentColor = modelColor),
-                    contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.weight(1f).heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
-                ) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
-                        ChatGlyph(ChatIcon.Model)
-                        Spacer(Modifier.width(6.dp))
-                        Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
-                        if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
+                Box(Modifier.weight(1f)) {
+                    TextButton(
+                        onClick = onModel, enabled = modelEnabled, shape = RoundedCornerShape(6.dp),
+                        colors = ButtonDefaults.textButtonColors(contentColor = modelColor),
+                        contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
+                            ChatGlyph(ChatIcon.Model)
+                            Spacer(Modifier.width(6.dp))
+                            Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
+                            if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
+                        }
                     }
                 }
                 FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else enabled && (prompt.isNotBlank() || attachments.isNotEmpty()), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
