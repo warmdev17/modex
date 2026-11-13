@@ -1,0 +1,44 @@
+version: 2
+project_name: modex
+builds:
+  - id: modex
+    main: ./cmd/modex
+    binary: modex
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/warmdev/modex/internal/version.Version={{.Version}} -X github.com/warmdev/modex/internal/version.Commit={{.Commit}}
+  - id: modex-host
+    main: ./cmd/modex-host
+    binary: modex-host
+    env: [CGO_ENABLED=0]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/warmdev/modex/internal/version.Version={{.Version}} -X github.com/warmdev/modex/internal/version.Commit={{.Commit}}
+archives:
+  - id: unix
+    ids: [modex, modex-host]
+    formats: [tar.gz]
+    name_template: 'modex_{{ .Version }}_{{ .Os }}_{{ .Arch }}'
+    files: [README.md, docs/install.md, docs/licenses/*]
+    allow_different_binary_count: true
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+nfpms:
+  - id: linux
+    ids: [modex, modex-host]
+    package_name: modex
+    vendor: warmdev17
+    homepage: https://github.com/warmdev17/modex
+    maintainer: warmdev17 <warmdev17@users.noreply.github.com>
+    description: Native mobile access to target-owned Codex sessions. Requires Codex and SSH.
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    file_name_template: 'modex_{{ .Version }}_{{ .Arch }}'
+checksum:
+  name_template: native-checksums.txt
+release:
+  disable: true

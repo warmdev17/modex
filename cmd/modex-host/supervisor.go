@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -166,19 +165,12 @@ func superviseHost(cwd, binary, home, dir string) error {
 }
 
 func startBackground(cwd, binary, home, dir string) error {
-	// Fail before spawning if the state is unsafe or already owned.
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	// Probe ownership with the same crash-safe protocol as the child.
+	release, err := claimSupervisorState(dir)
+	if err != nil {
 		return err
 	}
-	if err := checkPrivatePath(dir, true); err != nil {
-		return err
-	}
-	if _, err := os.Lstat(filepath.Join(dir, "owner.lock")); err == nil {
-		return errors.New("supervisor already owns this state directory")
-	}
-	if _, err := os.Lstat(filepath.Join(dir, "endpoint.json")); !os.IsNotExist(err) {
-		return errors.New("existing supervisor endpoint; recover stale state explicitly")
-	}
+	release()
 	self, err := os.Executable()
 	if err != nil {
 		return err

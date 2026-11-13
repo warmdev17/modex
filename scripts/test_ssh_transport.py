@@ -146,9 +146,10 @@ for line in sys.stdin:
             stopped = subprocess.run(base + ["--stop"], capture_output=True, timeout=10)
             self.assertEqual(stopped.returncode, 0)
             deadline = time.monotonic() + 5
-            while (state / "owner.lock").exists() and time.monotonic() < deadline:
+            while (state / "endpoint.json").exists() and time.monotonic() < deadline:
                 time.sleep(.02)
-            self.assertFalse((state / "owner.lock").exists())
+            self.assertFalse((state / "endpoint.json").exists())
+            self.assertEqual((state / "owner.lock").read_text(), "modex-flock-v1\n")
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/warmdev/modex/internal/diagnostic"
+	"github.com/warmdev/modex/internal/version"
 )
 
 func main() {
@@ -24,6 +25,10 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 2 && os.Args[1] == "--version" {
+		fmt.Println(version.String("modex-host"))
+		return nil
+	}
 	workspace := flag.String("workspace", "", "Existing workspace directory (required)")
 	binary := flag.String("codex", "codex", "Codex executable")
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")

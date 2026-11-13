@@ -84,9 +84,9 @@ def main():
                 stopped = subprocess.run(control + ["--stop"], capture_output=True, timeout=10)
                 report["stop_acknowledged"] = stopped.returncode == 0
                 deadline = time.monotonic() + 5
-                while (state / "owner.lock").exists() and time.monotonic() < deadline:
+                while (state / "endpoint.json").exists() and time.monotonic() < deadline:
                     time.sleep(.05)
-                report["state_cleaned"] = not (state / "owner.lock").exists() and not (state / "endpoint.json").exists()
+                report["state_cleaned"] = (state / "owner.lock").read_text() == "modex-flock-v1\n" and not (state / "endpoint.json").exists()
                 report["passed"] = report["passed"] and report["stop_acknowledged"] and report["state_cleaned"]
     print(json.dumps(report, indent=2))
     if args.report:
