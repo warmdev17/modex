@@ -11,6 +11,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.selectable
@@ -37,6 +38,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
 internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer }
@@ -210,11 +212,24 @@ internal fun ChatWorkspace(
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
             var openAtLatest by remember(selected) { mutableStateOf(true) }
-            var olderAnchor by remember(selected) { mutableStateOf<Triple<Int, Int, Int>?>(null) }
-            LaunchedEffect(olderHistoryLoading, timeline.size) {
-                if (!olderHistoryLoading) olderAnchor?.let { (count, index, offset) ->
-                    scroll.scrollToItem((index + timeline.size - count).coerceAtLeast(0), offset)
-                    olderAnchor = null
+            var requestingOlder by remember(selected) { mutableStateOf(false) }
+            fun loadEarlier() {
+                if (!connected || !hasOlderHistory || historyLoading || olderHistoryLoading || requestingOlder) return
+                requestingOlder = true
+                onOlderHistory()
+            }
+            LaunchedEffect(selected, connected, hasOlderHistory, historyLoading, olderHistoryLoading, error, timeline.size) {
+                if (connected && hasOlderHistory && !historyLoading && !olderHistoryLoading && error.isBlank()) {
+                    snapshotFlow {
+                        scroll.layoutInfo.totalItemsCount > 0 && scroll.firstVisibleItemIndex <= 3 &&
+                            (!openAtLatest || timeline.isEmpty()) && !requestingOlder
+                    }.collect { nearTop -> if (nearTop) loadEarlier() }
+                }
+            }
+            LaunchedEffect(olderHistoryLoading, timeline.size, error, hasOlderHistory) {
+                if (!olderHistoryLoading) {
+                    withFrameNanos { }
+                    requestingOlder = false
                 }
             }
             LaunchedEffect(selected, historyLoading, timeline.size, timeline.lastOrNull(), selectedDecisions.map { it.optString("decision_id") }) {
@@ -222,13 +237,13 @@ internal fun ChatWorkspace(
                     openAtLatest = true
                     return@LaunchedEffect
                 }
-                if (olderHistoryLoading || olderAnchor != null) return@LaunchedEffect
+                if (olderHistoryLoading || requestingOlder) return@LaunchedEffect
                 val layout = scroll.layoutInfo
                 val nearBottom = layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 2 } ?: true
                 if (timeline.isNotEmpty() && (openAtLatest || nearBottom)) {
-                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == timeline.size + selectedDecisions.size + 2 }
+                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == timeline.size + selectedDecisions.size + 1 }
                     // The final spacer anchors the bottom even when the last message is taller than the viewport.
-                    scroll.scrollToItem(timeline.size + selectedDecisions.size + 1)
+                    scroll.scrollToItem(timeline.size + selectedDecisions.size)
                     openAtLatest = false
                 }
             }
@@ -238,14 +253,9 @@ internal fun ChatWorkspace(
                     Text(if (selected.isBlank()) "Open a conversation from the sidebar, or start a new chat." else "Ask Codex to explore, build or fix something.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
                     if (selected.isBlank()) Button(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
                 }
-            } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                item {
-                    if (hasOlderHistory) TextButton(enabled = connected && !historyLoading && !olderHistoryLoading, onClick = {
-                        olderAnchor = Triple(timeline.size, scroll.firstVisibleItemIndex, scroll.firstVisibleItemScrollOffset)
-                        onOlderHistory()
-                    }) { Text(if (olderHistoryLoading) "Loading earlier messages…" else "Load earlier messages") }
-                }
-                items(timeline) { entry ->
+            } else Box(Modifier.weight(1f).fillMaxWidth()) {
+                LazyColumn(state = scroll, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                itemsIndexed(timeline, key = { index, entry -> if (entry.id.isBlank()) "legacy-$index" else "${entry.turnId}/${entry.role}/${entry.id}" }) { _, entry ->
                     val role = entry.role; val body = entry.text
                     val display = liveMessageText(entry.id, body, entry.status == "inProgress")
                     MessageActions(body, if (role == "You") ({ if (prompt.isNotBlank() && prompt != body) editing = body else applyEdit(body) }) else null) {
@@ -265,7 +275,16 @@ internal fun ChatWorkspace(
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
                     InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
                 }
-                item { Spacer(Modifier.height(1.dp)) }
+                item(key = "history-bottom") { Spacer(Modifier.height(1.dp)) }
+                }
+                if (hasOlderHistory && (olderHistoryLoading || error.isNotBlank())) Surface(modifier = Modifier.align(Alignment.TopCenter), color = Mocha.Base, shape = RoundedCornerShape(8.dp)) {
+                    if (olderHistoryLoading) Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = Mocha.Subtext)
+                        Text("Loading earlier messages…", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
+                    } else TextButton(enabled = connected && !historyLoading, onClick = ::loadEarlier) {
+                        Text("Retry loading earlier messages")
+                    }
+                }
             }
             PromptComposer(
                 prompt, { updatePrompt(it) }, busy,

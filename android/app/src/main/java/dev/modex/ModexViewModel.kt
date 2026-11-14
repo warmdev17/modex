@@ -172,7 +172,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (!connected || selected.isBlank() || ownedThread != selected) return
         val cursor = if (older) visibleHistory?.cursor.orEmpty() else ""
         if (older && (cursor.isBlank() || olderHistoryLoading || historyLoading)) return
-        if (older) olderHistoryLoading = true else historyLoading = true
+        if (older) { olderHistoryLoading = true; error = "" } else historyLoading = true
         val params = withWorkspace(JSONObject().put("thread_id", selected).put("include_turns", true).put("limit", 10), selectedWorkspace)
         if (cursor.isNotBlank()) params.put("cursor", cursor)
         request("threads/read", params, selected)?.let { historyRequests[it] = HistoryRequest(selected, cursor, sessions.activityVersion(selected), messages) }

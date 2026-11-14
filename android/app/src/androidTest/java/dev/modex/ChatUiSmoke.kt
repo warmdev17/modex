@@ -157,16 +157,18 @@ fun Instrumentation.historyScrollSmoke() {
         var loading by mutableStateOf(false)
         var messages by mutableStateOf(listOf(ChatEntry(role = "You", text = "Old message")))
         var paged by mutableStateOf(false)
+        var olderLoading by mutableStateOf(false)
+        var olderRequests = 0
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             "fixture", true, false, "history", listOf("history"), emptyMap(),
             messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {},
-            hasOlderHistory = paged, onOlderHistory = { messages = (-10..-1).map { ChatEntry(role = "You", text = "Older page $it") } + messages; paged = false }
+            hasOlderHistory = paged, olderHistoryLoading = olderLoading, onOlderHistory = { olderRequests++; olderLoading = true }
         ) } } } }
         waitForIdleSync(); Thread.sleep(700)
         runOnMainSync { loading = true }
         waitForIdleSync(); Thread.sleep(500)
         runOnMainSync {
-            messages = (0..199).map { ChatEntry(role = "You", text = if (it == 199) "LATEST_HISTORY_MARKER" else "Earlier message $it") }
+            messages = (0..199).map { ChatEntry(id = "history-$it", role = "You", text = if (it == 199) "LATEST_HISTORY_MARKER" else "Earlier message $it") }
             loading = false
         }
         fun visibleMarker(n: AccessibilityNodeInfo?): Boolean {
@@ -212,31 +214,32 @@ fun Instrumentation.historyScrollSmoke() {
         check(visibleMarker(uiAutomation.rootInActiveWindow)) { "Reload did not reach tall final message" }
         runOnMainSync { loading = true }
         waitForIdleSync(); Thread.sleep(500)
-        runOnMainSync { messages = (0..9).map { ChatEntry(role = "You", text = "Earlier message $it") }; paged = true; loading = false }
+        runOnMainSync { messages = (0..29).map { ChatEntry(id = "history-$it", role = "You", text = "Earlier message $it") }; paged = true; loading = false }
         waitForIdleSync(); Thread.sleep(700)
         fun freshRoot(): AccessibilityNodeInfo? {
             uiAutomation.serviceInfo = uiAutomation.serviceInfo
             return uiAutomation.rootInActiveWindow
         }
-        fun earlierButton(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
-            if (n == null) return null
-            if (n.isVisibleToUser && n.text?.toString() == "Load earlier messages") return n
-            for (i in 0 until n.childCount) earlierButton(n.getChild(i))?.let { return it }
-            return null
-        }
-        repeat(12) {
-            if (earlierButton(freshRoot()) == null) {
-                scrollable(uiAutomation.rootInActiveWindow)?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+        runOnMainSync { check(olderRequests == 0) { "History loaded before scrolling near the beginning" } }
+        repeat(14) {
+            var requested = false
+            runOnMainSync { requested = olderRequests > 0 }
+            if (!requested) {
+                scrollable(freshRoot())?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
                 Thread.sleep(700)
             }
         }
-        fun labels(n: AccessibilityNodeInfo?): String = if (n == null) "" else "[${n.text}|${n.isScrollable}]" + (0 until n.childCount).joinToString { labels(n.getChild(it)) }
-        var button = earlierButton(freshRoot()) ?: error("Missing older page button: ${labels(uiAutomation.rootInActiveWindow)}")
-        while (!button.isClickable) button = button.parent ?: error("Older page not clickable")
-        check(button.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        runOnMainSync { check(olderRequests == 1 && olderLoading) { "Expected one automatic request near the top, got $olderRequests" } }
+        Thread.sleep(700)
+        runOnMainSync { check(olderRequests == 1) { "Duplicate automatic history request" } }
+        val anchor = earlierMessage(freshRoot()) ?: error("No reading anchor before prepend")
+        runOnMainSync {
+            messages = (-10..-1).map { ChatEntry(id = "older-$it", role = "You", text = "Older page $it") } + messages
+            olderLoading = false; paged = false
+        }
         waitForIdleSync(); Thread.sleep(700)
-        check(earlierMessage(freshRoot()) == "Earlier message 0") { "Prepending history lost the reading anchor" }
-        output.putString("result", "PASS: async history, append, tall final message and paginated prepend anchor")
+        check(earlierMessage(freshRoot()) == anchor) { "Automatic prepend lost the reading anchor" }
+        output.putString("result", "PASS: async history, append, tall final message, automatic older loading, duplicate guard and prepend anchor")
         finish(-1, output)
     } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
 }
