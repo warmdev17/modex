@@ -151,11 +151,11 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 		}
 		return w.process.Call(ctx, method, params)
 	}
-	if method != "thread/start" && method != "thread/resume" && method != "turn/start" && method != "thread/read" {
+	if method != "thread/start" && method != "thread/resume" && method != "turn/start" && method != "thread/read" && method != "thread/turns/list" {
 		return s.root.Call(ctx, method, params)
 	}
 	w := s.workers[id]
-	if method == "thread/read" {
+	if method == "thread/read" || method == "thread/turns/list" {
 		if w == nil {
 			return s.root.Call(ctx, method, params)
 		}

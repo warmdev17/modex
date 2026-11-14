@@ -77,6 +77,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["thread_id"] = true
 		if cmd.Method == "threads/read" {
 			allowed["include_turns"] = true
+			allowed["limit"] = true
+			allowed["cursor"] = true
 		}
 	case "turn/interrupt":
 		allowed["thread_id"] = true
@@ -368,8 +370,18 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("include_turns must be boolean")
 			}
 		}
+		pageLimit, pageCursor, err := historyPageOptions(p, include)
+		if err != nil {
+			return nil, err
+		}
 		if include {
-			raw, err := fetch("thread/read", map[string]any{"threadId": id, "includeTurns": true})
+			var raw json.RawMessage
+			var nextCursor, revision string
+			if pageLimit > 0 {
+				raw, nextCursor, revision, err = fetchHistoryPage(fetch, cwd, id, pageLimit, pageCursor)
+			} else {
+				raw, err = fetch("thread/read", map[string]any{"threadId": id, "includeTurns": true})
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -483,7 +495,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 					activeID = turn.ID
 				}
 			}
-			return map[string]any{"thread": response.Thread.Thread, "messages": messages, "active_turn": active, "active_turn_id": activeID}, nil
+			result := map[string]any{"thread": response.Thread.Thread, "messages": messages, "active_turn": active, "active_turn_id": activeID}
+			if pageLimit > 0 {
+				result["next_cursor"] = nextCursor
+				result["history_revision"] = revision
+			}
+			return result, nil
 		}
 		read := func(method string, params any) (Thread, error) {
 			raw, err := fetch(method, params)
