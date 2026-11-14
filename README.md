@@ -204,6 +204,15 @@ The first uses a fake Codex process and checks auth, exclusive ownership, discon
 
 ## Shared desktop CLI and phone sessions (Linux/macOS)
 
+For a local development build, run `./scripts/build.sh` from this checkout.
+It builds and installs both commands into `~/.local/bin` and refreshes
+`/tmp/modex-host` for the existing phone/emulator profile. `PREFIX` and
+`HOST_BINARY` override those destinations. If needed it adds the install
+directory to your Bash, Zsh or Fish startup configuration without replacing
+other settings; open a new terminal after that first PATH change. On rebuild,
+use the same script. No Make command is required for day-to-day operation.
+Existing `make host-build`, `make build` and `make install-cli` delegate to it.
+
 The supervisor owns one persistent Codex app-server. Android connects through
 SSH; the real Codex terminal UI connects through a private Unix WebSocket gateway.
 Both clients control the same loaded session. Closing a terminal or disconnecting

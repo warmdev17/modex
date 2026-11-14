@@ -11,7 +11,7 @@ import (
 
 func launchCLI(args []string) error {
 	if runtime.GOOS == "windows" {
-		return errors.New("registered CLI takeover requires Linux or macOS")
+		return errors.New("shared CLI hosting requires Linux or macOS; use WSL2 on Windows")
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -48,7 +48,7 @@ func launchCLI(args []string) error {
 		forward = append(forward, "--thread", *thread)
 	}
 	if err := execCLI(*host, forward); err != nil {
-		return fmt.Errorf("cannot start native CLI launcher: %w (install both binaries with make install-cli)", err)
+		return fmt.Errorf("cannot start native CLI launcher: %w (install modex and modex-host beside each other)", err)
 	}
 	return nil
 }
