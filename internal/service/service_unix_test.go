@@ -70,7 +70,13 @@ func TestInstallRejectsInvalidPaths(t *testing.T) {
 		}
 	}
 	public := filepath.Join(root, "public")
-	os.Mkdir(public, 0755)
+	if err := os.Mkdir(public, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Set exact fixture permissions independently of the invoking shell's umask.
+	if err := os.Chmod(public, 0755); err != nil {
+		t.Fatal(err)
+	}
 	if err := hoststate.Validate(public, true); err == nil {
 		t.Fatal("accepted public state")
 	}

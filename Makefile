@@ -51,11 +51,10 @@ install-android: apk install-apk
 launch-android: install-android
 	$(ADB) shell monkey -p $(PACKAGE) 1
 
-.PHONY: host-build host host-attach host-stop
+.PHONY: build host-build host host-attach host-stop
 
-host-build:
-	go build -o "$(HOST_BINARY).new" ./cmd/modex-host
-	mv -f "$(HOST_BINARY).new" "$(HOST_BINARY)"
+build host-build:
+	PREFIX="$(PREFIX)" HOST_BINARY="$(HOST_BINARY)" ./scripts/build.sh
 
 host: host-build
 	"$(HOST_BINARY)" --background --workspace "$(WORKSPACE)" --state-dir "$(STATE_DIR)" --codex "$(CODEX)"
@@ -73,8 +72,4 @@ cli: host-build
 	"$(HOST_BINARY)" --cli --thread "$(THREAD)" --workspace "$(WORKSPACE)" --codex "$(CODEX)" --state-dir "$(STATE_DIR)"
 
 install-cli:
-	@mkdir -p "$(PREFIX)/bin"
-	go build -o "$(PREFIX)/bin/modex-host.new" ./cmd/modex-host
-	go build -o "$(PREFIX)/bin/modex.new" ./cmd/modex
-	mv -f "$(PREFIX)/bin/modex-host.new" "$(PREFIX)/bin/modex-host"
-	mv -f "$(PREFIX)/bin/modex.new" "$(PREFIX)/bin/modex"
+	PREFIX="$(PREFIX)" HOST_BINARY="$(HOST_BINARY)" ./scripts/build.sh
