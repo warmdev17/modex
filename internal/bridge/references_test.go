@@ -15,6 +15,9 @@ func TestReferenceCatalogueProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := Handle(context.Background(), "/unused", Command{Method: "references/list", Params: json.RawMessage(`{"workspace":"/work","force_reload":true}`)}, func(_ context.Context, method string, params any) (json.RawMessage, error) {
+		if method == "plugin/installed" {
+			return nil, errors.New("method not found")
+		}
 		p := params.(map[string]any)
 		if method != "skills/list" || p["forceReload"] != true {
 			t.Fatalf("%s %v", method, p)
@@ -34,7 +37,7 @@ func TestReferenceCatalogueProjection(t *testing.T) {
 			t.Fatal(string(raw))
 		}
 	}
-	for _, want := range []string{`"kind":"skill"`, `"title":"Review changes"`, `"enabled":false`, `"issues":1`, `"supported_kinds":["skill"]`} {
+	for _, want := range []string{`"kind":"skill"`, `"title":"Review changes"`, `"enabled":false`, `"issues":2`, `"supported_kinds":["skill"]`} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("missing %s: %s", want, raw)
 		}
