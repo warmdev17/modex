@@ -1,5 +1,15 @@
 # Modex project state
 
+## Integration in progress
+
+Updated: 2026-11-14. PR #10 (shared phone/emulator supervisor) merged as `fffc775` with original commit `a4aa8c9` preserved. PR #11 (chat corrections and large-history crash) passed all five hosted jobs on `dd25156`; this merge brings main into its branch without changing the verified Android/Go implementation. The only conflict was this state document; both milestone summaries are retained below. PR #11 merge and branch cleanup remain pending. Earlier statements about unmerged branches are historical.
+
+## Shared phone and emulator host
+
+Updated: 2026-11-14. Branch `fix/shared-emulator-host`, baseline `7fecbfb`. Supersedes the separate emulator supervisor setup below: `make emulator-host` now delegates to `make host` without overriding state; both default to `/tmp/modex-host` and `~/.local/state/modex-phone`. Updated emulator documentation and ignored local profile. Existing on-device encrypted profiles remain preserved and require changing the remote state field once if still using modex-emulator. No state migration/deletion or supervisor restart performed.
+
+Verification: default and overridden `make -n emulator-host` resolve the expected binary/state; six `test_install_emulator.py` tests PASS; `git diff --check` PASS. No emulator/device runtime test or saved on-device profile update performed; last ADB inspection showed no attached devices. One client must disconnect before the other attaches. No push/PR/merge in this change.
+
 ## Large history relay crash
 
 Updated: 2026-11-14. Branch `fix/large-history-relay`, baseline `379c83a` (includes the pending chat UI fixes). Live diagnosis confirmed `threads/read` for the current Modex session returns 4,804,428 bytes, over the supervisor scanner/Android 4 MiB cap. The supervisor scanner exited and normal cleanup removed endpoint.json after takeover loaded history. This explains the repeatable crash; the earlier deleted-lock orphan incident is separate and its origin remains unknown.
