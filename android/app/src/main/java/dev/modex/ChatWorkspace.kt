@@ -387,7 +387,11 @@ private fun PromptComposer(
     val query = referenceQuery(editor.text, editor.selection.start, editor.selection.end)
     val showReferences = referenceEnabled && fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)
     BackHandler(showReferences) { dismissedQuery = editor.text to editor.selection.start }
-    fun changeEditor(value: TextFieldValue) { editor = value; onChange(value.text) }
+    fun changeEditor(value: TextFieldValue) {
+        if (value.text != editor.text || value.selection != editor.selection) dismissedQuery = null
+        editor = value
+        onChange(value.text)
+    }
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
             if (showReferences && query != null) ReferencePicker(referenceCatalog, query.query, referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,

@@ -68,6 +68,16 @@ internal fun Instrumentation.referencePickerSmoke() {
         waitNode("Select skill review")
         check(!waitNode("Select skill disabled").parent.isEnabled) { "Disabled skill is selectable" }
         screenshot("skill-picker.png")
+        click("Close skill suggestions")
+        check(node("Prompt references") == null) { "Close did not hide suggestions" }
+        input("")
+        input("@")
+        waitNode("Select skill review")
+        click("Close skill suggestions")
+        input("@r")
+        waitNode("Select skill review")
+        input("@")
+        waitNode("Select skill review")
         click("Select skill review")
         waitNode("Remove skill review")
         check(field().text.toString().contains("\$review"))
@@ -86,7 +96,7 @@ internal fun Instrumentation.referencePickerSmoke() {
         click("Send message")
         check(sentText.contains("\$review") && sentReferences.single().path == skill.path) { "Structured reference lost at send" }
         check(field().text.toString().isBlank())
-        result.putString("result", "PASS: @ discovery, disabled state, exact reference selection, per-session drafts, chip deletion, email guard and send")
+        result.putString("result", "PASS: @ discovery, reopen after dismissal and retyping, disabled state, exact reference selection, per-session drafts, chip deletion, email guard and send")
         finish(-1, result)
     } catch (failure: Throwable) {
         uiAutomation.takeScreenshot()?.let { bitmap -> File(targetContext.filesDir, "skill-failure.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle() }
