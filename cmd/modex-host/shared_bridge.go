@@ -211,10 +211,19 @@ func validNativeID(id json.RawMessage) bool {
 	return (json.Unmarshal(id, &text) == nil && text != "") || (string(id) != "null" && json.Unmarshal(id, &number) == nil)
 }
 
-func (s *sharedBackend) answerNative(ctx context.Context, upstream json.RawMessage, result json.RawMessage) error {
+func (s *sharedBackend) answerNative(ctx context.Context, upstream json.RawMessage, result json.RawMessage, failed bool) error {
 	var object map[string]json.RawMessage
 	if json.Unmarshal(result, &object) != nil || object == nil {
 		return errors.New("native result must be an object")
+	}
+	respond := s.p.Respond
+	if failed {
+		var code int
+		var message string
+		if json.Unmarshal(object["code"], &code) != nil || json.Unmarshal(object["message"], &message) != nil {
+			return errors.New("invalid native error")
+		}
+		respond = s.p.RespondError
 	}
 	s.mu.Lock()
 	d, ok := s.pending[string(upstream)]
@@ -228,7 +237,7 @@ func (s *sharedBackend) answerNative(ctx context.Context, upstream json.RawMessa
 	}
 	s.mu.Unlock()
 	if d.ID != "" {
-		if err := s.decisions.AnswerNative(ctx, d.ID, result); err != nil {
+		if err := s.decisions.AnswerNativeWith(ctx, d.ID, result, respond); err != nil {
 			return err
 		}
 		s.mu.Lock()
@@ -236,7 +245,7 @@ func (s *sharedBackend) answerNative(ctx context.Context, upstream json.RawMessa
 		delete(s.nativeParams, string(upstream))
 		s.mu.Unlock()
 		s.event("decision/resolved", mustJSON(map[string]string{"decision_id": d.ID}))
-	} else if err := s.p.Respond(ctx, upstream, result); err != nil {
+	} else if err := respond(ctx, upstream, result); err != nil {
 		return errors.New("native decision delivery failed; do not replay")
 	}
 	s.broadcast("serverRequest/resolved", mustJSON(map[string]any{"threadId": d.ThreadID, "requestId": upstream}), nil)
@@ -353,6 +362,7 @@ func (s *sharedBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Method string          `json:"method"`
 			Params json.RawMessage `json:"params"`
 			Result json.RawMessage `json:"result"`
+			Error  json.RawMessage `json:"error"`
 		}
 		if wsjson.Read(ctx, conn, &m) != nil {
 			return
@@ -386,7 +396,13 @@ func (s *sharedBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			delivered := c.delivered[string(m.ID)]
 			c.mu.Unlock()
 			if ok && delivered && c.accepts(mustJSON(map[string]string{"threadId": d.ThreadID})) {
-				_ = s.answerNative(s.ctx, m.ID, m.Result)
+				if len(m.Error) > 0 && string(m.Error) != "null" {
+					if len(m.Result) == 0 {
+						_ = s.answerNative(s.ctx, m.ID, m.Error, true)
+					}
+				} else {
+					_ = s.answerNative(s.ctx, m.ID, m.Result, false)
+				}
 			}
 			continue
 		}

@@ -36,8 +36,16 @@ func TestSharedCodexChild(t *testing.T) {
 			var answer struct {
 				ID     int             `json:"id"`
 				Result json.RawMessage `json:"result"`
+				Error  json.RawMessage `json:"error"`
 			}
-			if d.Decode(&answer) != nil || answer.ID != 77 || string(answer.Result) != `{"decision":"accept"}` {
+			if d.Decode(&answer) != nil || answer.ID != 77 {
+				os.Exit(2)
+			}
+			if os.Getenv("MODEX_SHARED_ERROR") == "1" {
+				if string(answer.Error) != `{"code":-32601,"message":"unsupported"}` {
+					os.Exit(2)
+				}
+			} else if string(answer.Result) != `{"decision":"accept"}` {
 				os.Exit(2)
 			}
 			_ = e.Encode(map[string]any{"method": "item/agentMessage/delta", "params": map[string]string{"threadId": "shared", "delta": "still running"}})
@@ -60,6 +68,15 @@ func TestSharedCodexChild(t *testing.T) {
 }
 
 func TestSharedBackendDisconnectDoesNotInterruptApprovalOrTurn(t *testing.T) {
+	testSharedBackendDisconnect(t, false)
+}
+func TestSharedBackendNativeErrorResolvesPendingApproval(t *testing.T) {
+	testSharedBackendDisconnect(t, true)
+}
+func testSharedBackendDisconnect(t *testing.T, nativeError bool) {
+	if nativeError {
+		t.Setenv("MODEX_SHARED_ERROR", "1")
+	}
 	t.Setenv("MODEX_SHARED_CHILD", "1")
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
@@ -132,7 +149,11 @@ func TestSharedBackendDisconnectDoesNotInterruptApprovalOrTurn(t *testing.T) {
 			t.Fatal(err)
 		}
 		if r.Method == "item/commandExecution/requestApproval" {
-			if err := wsjson.Write(ctx, b, map[string]any{"id": r.ID, "result": map[string]string{"decision": "accept"}}); err != nil {
+			response := map[string]any{"id": r.ID, "result": map[string]string{"decision": "accept"}}
+			if nativeError {
+				response = map[string]any{"id": r.ID, "error": map[string]any{"code": -32601, "message": "unsupported"}}
+			}
+			if err := wsjson.Write(ctx, b, response); err != nil {
 				t.Fatal(err)
 			}
 			break
@@ -142,6 +163,9 @@ func TestSharedBackendDisconnectDoesNotInterruptApprovalOrTurn(t *testing.T) {
 		select {
 		case method := <-events:
 			if method == "turn/completed" {
+				if len(s.decisions.List()) != 0 {
+					t.Fatal("answered decision remains pending")
+				}
 				if _, err := s.call(ctx, "config/read", nil, nil); err != nil {
 					t.Fatalf("backend died: %v", err)
 				}
