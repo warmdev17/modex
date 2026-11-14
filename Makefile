@@ -19,7 +19,7 @@ EMULATOR_PROFILE ?= .modex/emulator.json
 .PHONY: emulator emulator-apk emulator-install emulator-start emulator-stop emulator-host
 
 emulator-host:
-	$(MAKE) host STATE_DIR="$(HOME)/.local/state/modex-emulator"
+	$(MAKE) host
 
 emulator-apk:
 	cd $(ANDROID_DIR) && JAVA_HOME=$(MODEX_JAVA_HOME) GRADLE_USER_HOME=$(if $(GRADLE_USER_HOME),$(GRADLE_USER_HOME),/tmp/modex-gradle) $(GRADLE) assembleDebug assembleDebugAndroidTest

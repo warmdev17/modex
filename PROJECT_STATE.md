@@ -1,5 +1,11 @@
 # Modex project state
 
+## Shared phone and emulator host
+
+Updated: 2026-11-14. Branch `fix/shared-emulator-host`, baseline `7fecbfb`. Supersedes the separate emulator supervisor setup below: `make emulator-host` now delegates to `make host` without overriding state; both default to `/tmp/modex-host` and `~/.local/state/modex-phone`. Updated emulator documentation and ignored local profile. Existing on-device encrypted profiles remain preserved and require changing the remote state field once if still using modex-emulator. No state migration/deletion or supervisor restart performed.
+
+Verification: default and overridden `make -n emulator-host` resolve the expected binary/state; six `test_install_emulator.py` tests PASS; `git diff --check` PASS. No emulator/device runtime test or saved on-device profile update performed; last ADB inspection showed no attached devices. One client must disconnect before the other attaches. No push/PR/merge in this change.
+
 ## Release distribution implementation
 
 Updated: 2026-11-13. Branch `feat/release-distribution`, baseline `39b8d2b` (PR #8 merged with all three chat commits preserved). Original approved design commit `a3a31a8` was imported via merge `9ec06d8`, not squashed. Implementation follows [release plan](docs/superpowers/plans/2026-11-13-release-distribution.md) and [design](docs/superpowers/specs/2026-11-13-release-distribution-design.md).
