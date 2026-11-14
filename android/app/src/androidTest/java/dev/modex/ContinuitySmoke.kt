@@ -42,10 +42,10 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
             runOnMainSync { session.chooseModel("fixture-chosen", "high"); session.disconnect() }
             await { !session.connected && !session.connecting }
             runOnMainSync {
-                check(session.sessionModel == "fixture-chosen" && session.sessionEffort == "high") { "Choice lost on disconnect" }
+                check(session.selected.isEmpty() && session.messages.isEmpty()) { "Disconnect retained visible history" }
                 session.connect(session.savedConnection!!)
             }
-            await { session.connected && !session.historyLoading }
+            await { session.connected && session.selected == "fixture-thread" && !session.historyLoading }
         }
         runOnMainSync { check(session.sessionModel == "fixture-chosen" && session.sessionEffort == "high") { "Choice lost on reconnect/process restore" } }
         Thread.sleep(700)

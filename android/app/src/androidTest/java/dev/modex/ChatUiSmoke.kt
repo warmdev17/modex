@@ -156,9 +156,11 @@ fun Instrumentation.historyScrollSmoke() {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var loading by mutableStateOf(false)
         var messages by mutableStateOf(listOf(ChatEntry(role = "You", text = "Old message")))
+        var paged by mutableStateOf(false)
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             "fixture", true, false, "history", listOf("history"), emptyMap(),
-            messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {}
+            messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {},
+            hasOlderHistory = paged, onOlderHistory = { messages = (-10..-1).map { ChatEntry(role = "You", text = "Older page $it") } + messages; paged = false }
         ) } } } }
         waitForIdleSync(); Thread.sleep(700)
         runOnMainSync { loading = true }
@@ -208,7 +210,33 @@ fun Instrumentation.historyScrollSmoke() {
         val tallDeadline = System.currentTimeMillis() + 5000
         while (!visibleMarker(uiAutomation.rootInActiveWindow) && System.currentTimeMillis() < tallDeadline) Thread.sleep(100)
         check(visibleMarker(uiAutomation.rootInActiveWindow)) { "Reload did not reach tall final message" }
-        output.putString("result", "PASS: 200-message async history, upward reading preserved on append, reload with tall final message")
+        runOnMainSync { loading = true }
+        waitForIdleSync(); Thread.sleep(500)
+        runOnMainSync { messages = (0..9).map { ChatEntry(role = "You", text = "Earlier message $it") }; paged = true; loading = false }
+        waitForIdleSync(); Thread.sleep(700)
+        fun freshRoot(): AccessibilityNodeInfo? {
+            uiAutomation.serviceInfo = uiAutomation.serviceInfo
+            return uiAutomation.rootInActiveWindow
+        }
+        fun earlierButton(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (n == null) return null
+            if (n.isVisibleToUser && n.text?.toString() == "Load earlier messages") return n
+            for (i in 0 until n.childCount) earlierButton(n.getChild(i))?.let { return it }
+            return null
+        }
+        repeat(12) {
+            if (earlierButton(freshRoot()) == null) {
+                scrollable(uiAutomation.rootInActiveWindow)?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                Thread.sleep(700)
+            }
+        }
+        fun labels(n: AccessibilityNodeInfo?): String = if (n == null) "" else "[${n.text}|${n.isScrollable}]" + (0 until n.childCount).joinToString { labels(n.getChild(it)) }
+        var button = earlierButton(freshRoot()) ?: error("Missing older page button: ${labels(uiAutomation.rootInActiveWindow)}")
+        while (!button.isClickable) button = button.parent ?: error("Older page not clickable")
+        check(button.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        waitForIdleSync(); Thread.sleep(700)
+        check(earlierMessage(freshRoot()) == "Earlier message 0") { "Prepending history lost the reading anchor" }
+        output.putString("result", "PASS: async history, append, tall final message and paginated prepend anchor")
         finish(-1, output)
     } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
 }

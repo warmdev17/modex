@@ -92,7 +92,10 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
                 }
             }
             "item/started", "item/completed", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
-                if (id == selected) messages = updateChat(messages, method, params.apply { if (optString("turnId").isBlank()) put("turnId", activeTurns[id].orEmpty()) })
+                if (id == selected) {
+                    messages = updateChat(messages, method, params.apply { if (optString("turnId").isBlank()) put("turnId", activeTurns[id].orEmpty()) })
+                    changed(id)
+                }
         }
     }
 

@@ -83,7 +83,7 @@ for line in sys.stdin:
  if r.get('method')=='initialized':continue
  thread={'id':'fixture-thread','cwd':sys.argv[0].rsplit('/',1)[0],'modelProvider':'fixture','model':'fixture','reasoningEffort':'low','turns':[{'status':'completed','items':[{'id':'u','type':'userMessage','content':[{'type':'text','text':'Previous question'},{'type':'localImage','path':sys.argv[0].rsplit('/',1)[0]+'/image.png'},{'type':'text','text':'Attached files selected by the user (JSON paths):\\n'+json.dumps([{'name':'notes.txt','path':sys.argv[0].rsplit('/',1)[0]+'/notes.txt'}])}]},{'id':'a','type':'agentMessage','text':'Stored assistant reply'}]}]}
  method=r.get('method')
- result={'config':{'model':'fixture','model_provider':'fixture','model_reasoning_effort':'low'}} if method=='config/read' else {'thread':thread} if method in ('thread/read','thread/resume') else {'data':[thread],'nextCursor':None} if method=='thread/list' else {}
+ result={'config':{'model':'fixture','model_provider':'fixture','model_reasoning_effort':'low'}} if method=='config/read' else {'thread':thread} if method in ('thread/read','thread/resume') else {'data':[thread],'nextCursor':None} if method=='thread/list' else {'data':list(reversed(thread['turns'])),'nextCursor':None} if method=='thread/turns/list' else {}
  if method=='turn/start':
   inputs=r['params']['input']
   assert any(p.get('type')=='localImage' and p['path'].endswith('image.png') for p in inputs)
