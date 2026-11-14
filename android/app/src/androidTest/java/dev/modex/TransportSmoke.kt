@@ -10,6 +10,7 @@ class TransportSmoke : Instrumentation() {
     private lateinit var args: Bundle
     override fun onCreate(arguments: Bundle) { super.onCreate(arguments); args = arguments; start() }
     override fun onStart() {
+        if (args.getString("preview") == "large-history") { largeHistorySmoke(args); return }
         if (args.getString("preview") == "emulator-profile") { importEmulatorProfile(); return }
         if (args.getString("preview") == "attachment-preview") { attachmentPreviewSmoke(); return }
         if (args.getString("preview") == "remote-picker") { remoteFilePickerSmoke(); return }

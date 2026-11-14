@@ -22,6 +22,7 @@ internal fun takeoverTarget(method: String, detail: String, target: String): Str
 
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
+        detail.contains("response_too_large") -> "This session exceeds the history transfer limit. Open it on your computer; the host is still available."
         detail.contains("takeover_unmanaged") -> "This CLI was not started with the Modex launcher. Close it on your computer, or use make cli THREAD=<session-id> next time."
         detail.contains("takeover_mismatch") -> "The registered CLI has changed sessions or loaded multiple sessions. Nothing was taken over. Close it on your computer."
         detail.contains("takeover_unavailable") -> "The registered CLI is no longer available. Refresh the session before retrying."
@@ -106,6 +107,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 modelChoices = readModelChoices(data.optJSONObject("model_choices"))
                 hostChoice = readModelChoice(data.optJSONObject("host_choice")) ?: ModelChoice()
                 sessions.open(data.optString("selected"))
+                sessionSettings = if (selected.isNotBlank()) data.optString("session_settings") else ""
                 sessions.restoreActivity(data.optJSONObject("active_turns"))
                 selectedWorkspace = data.optString("selected_workspace")
                 attachments.restoreDirectories(data.optJSONObject("attachment_directories"))
@@ -125,7 +127,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         val snapshot = JSONObject().put("connection", JSONObject().put("host", c.host).put("port", c.port).put("user", c.user).put("pin", c.pin).put("binary", c.binary).put("state", c.state))
             .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
             .put("model_choices", modelChoicesJson(modelChoices)).put("host_choice", hostChoice.toJson()).put("selected_workspace", selectedWorkspace).put("attachment_directories", attachments.directoriesJson())
-            .put("active_turns", sessions.activityJson())
+            .put("active_turns", sessions.activityJson()).put("session_settings", sessionSettings)
             .put("messages", JSONArray().apply { messages.forEach { put(it.toJson()) } })
             .put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
         val revision = saved.revision()
@@ -173,7 +175,6 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun connect(value: Connection) {
         if (connected || connecting) return
-        sessionSettings = ""
         if (key == null) { error = "Import an unencrypted SSH private key first."; return }
         if (config != null && config != value) { error = "Forget saved host before changing the target."; return }
         config = value; savedConnection = value; reconnectAllowed = true; error = ""; connecting = true
@@ -208,7 +209,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun disconnect() { takeoverThread = ""; sessionSettings = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
+    fun disconnect() { takeoverThread = ""; reconnectAllowed = false; transport?.close(); getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java)) }
     fun create(model: String, mode: String, effort: String = "") {
         if (!connected || historyLoading || switching()) return
         val workspace = selectedWorkspace

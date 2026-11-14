@@ -355,3 +355,34 @@ func TestCommandHistoryOutputBudget(t *testing.T) {
 		t.Fatalf("output budget not applied: %d bytes", len(encoded))
 	}
 }
+
+func TestOversizedResponseDoesNotPreventNextRequest(t *testing.T) {
+	calls := 0
+	caller := func(_ context.Context, method string, params any) (json.RawMessage, error) {
+		calls++
+		model := "small"
+		if calls == 1 {
+			model = strings.Repeat("x", MaxResponseFrame)
+		}
+		return json.Marshal(map[string]any{"config": map[string]string{"model": model}})
+	}
+	var output bytes.Buffer
+	input := strings.NewReader("{\"id\":1,\"method\":\"status\"}\n{\"id\":2,\"method\":\"status\"}\n")
+	if err := Serve(context.Background(), input, &output, "/work", caller); err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(&output)
+	var first, second map[string]json.RawMessage
+	if err := decoder.Decode(&first); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(first["error"], []byte("response_too_large")) {
+		t.Fatal("missing bounded rejection")
+	}
+	if err := decoder.Decode(&second); err != nil {
+		t.Fatal(err)
+	}
+	if string(second["id"]) != "2" || len(second["result"]) == 0 {
+		t.Fatal("next request was lost")
+	}
+}

@@ -5,6 +5,21 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtocolTest {
+    @Test fun readsLargeHistoryAndFollowingFrameWithoutLosingBoundaries() {
+        val body = "x".repeat(5 * 1024 * 1024)
+        val input = ("{\"text\":\"" + body + "\"}\n{\"ready\":true}\n").byteInputStream().buffered()
+        assertEquals(body, readFrame(input)!!.getString("text"))
+        assertTrue(readFrame(input)!!.getBoolean("ready"))
+        assertNull(readFrame(input))
+    }
+
+    @Test fun rejectsOversizedAndTruncatedFrames() {
+        val huge = ("x".repeat(32 * 1024 * 1024 + 1)).byteInputStream().buffered()
+        assertThrows(IllegalArgumentException::class.java) { readFrame(huge) }
+        assertThrows(IllegalArgumentException::class.java) { readFrame("{\"text\":\"partial".byteInputStream()) }
+        assertTrue(explainHostRejection("threads/read", "response_too_large").contains("host is still available"))
+    }
+
     @Test fun takeoverOnlyTargetsRejectedResumes() {
         assertEquals("target", takeoverTarget("threads/resume", "Codex request failed: active_writer", "target"))
         assertEquals("", takeoverTarget("turn/start", "active_writer", "target"))

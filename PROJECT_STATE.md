@@ -1,10 +1,32 @@
 # Modex project state
 
+## Integration in progress
+
+Updated: 2026-11-14. PR #10 (shared phone/emulator supervisor) merged as `fffc775` with original commit `a4aa8c9` preserved. PR #11 (chat corrections and large-history crash) passed all five hosted jobs on `dd25156`; this merge brings main into its branch without changing the verified Android/Go implementation. The only conflict was this state document; both milestone summaries are retained below. PR #11 merge and branch cleanup remain pending. Earlier statements about unmerged branches are historical.
+
 ## Shared phone and emulator host
 
 Updated: 2026-11-14. Branch `fix/shared-emulator-host`, baseline `7fecbfb`. Supersedes the separate emulator supervisor setup below: `make emulator-host` now delegates to `make host` without overriding state; both default to `/tmp/modex-host` and `~/.local/state/modex-phone`. Updated emulator documentation and ignored local profile. Existing on-device encrypted profiles remain preserved and require changing the remote state field once if still using modex-emulator. No state migration/deletion or supervisor restart performed.
 
 Verification: default and overridden `make -n emulator-host` resolve the expected binary/state; six `test_install_emulator.py` tests PASS; `git diff --check` PASS. No emulator/device runtime test or saved on-device profile update performed; last ADB inspection showed no attached devices. One client must disconnect before the other attaches. No push/PR/merge in this change.
+
+## Large history relay crash
+
+Updated: 2026-11-14. Branch `fix/large-history-relay`, baseline `379c83a` (includes the pending chat UI fixes). Live diagnosis confirmed `threads/read` for the current Modex session returns 4,804,428 bytes, over the supervisor scanner/Android 4 MiB cap. The supervisor scanner exited and normal cleanup removed endpoint.json after takeover loaded history. This explains the repeatable crash; the earlier deleted-lock orphan incident is separate and its origin remains unknown.
+
+Response budget is now 32 MiB on host and Android; inbound commands remain 4 MiB. EncodeResult reserves 1 KiB for the journal envelope and rejects oversized results as response_too_large instead of killing the supervisor. Replay journal is bounded to 1024 entries/64 MiB. Android buffers SSH input and explains oversize failures. Whole history remains bounded and unpaginated; upstream Codex frames retain their existing 16 MiB cap.
+
+Verified: old binary fails new large-history lifecycle regression (connection EOF, supervisor unavailable). Old Android reader fails 5 MiB test with Frame limit exceeded. Updated Go full race/vet PASS; Python suite 27 pass/1 SSH skip initially, then the skipped SSH test run separately with built client. Android unit tests 76 PASS, debug/test APK builds and lint PASS; added bounded/truncated-frame and next-frame tests. Oversized-result regression verifies next request still succeeds.
+
+Live: updated `/tmp/modex-host` atomically and started it using the exact binary/state in ignored `.modex/emulator.json`, preserving `/home/warmdev/.local/state/modex-phone`, attachments, CLI and all credential settings. Installed APKs with adb install -r on the already-running user emulator; encrypted profile hash unchanged. Read-only large-history instrumentation compared all connection fields against emulator.json, fetched 5,131 messages / 4,865,792 bytes via real SSH, then received successful status. No prompt/provider turn or takeover of this active CLI was performed. User emulator was already running and remains open; this task started no emulator. App reopened afterward; persisted old-instance cursor may need one Reset session cursor. No phone install, PR/push/merge. Files/settings were not renamed or deleted.
+
+## Chat feedback and settings corrections
+
+Updated: 2026-11-14. Branch `fix/chat-feedback-settings`, baseline `7fecbfb`. Separate from unmerged `fix/shared-emulator-host` (`a4aa8c9`). Commits `685a585` (turn outcomes) and `0d2703a` (touch feedback); this milestone covers settings continuity/navigation.
+
+Timer displays Interrupted/Cancelled/Failed instead of Worked for those outcomes; unknown outcomes use Ended. User long press retains Edit/Copy/Select text without a full-row ripple. Model button wraps its content inside the remaining composer space. Connection settings show the saved endpoint/binary/state/fingerprint while connected, with Android Back returning to chat. The last create/resume permission report is saved in the encrypted snapshot alongside the selected session, retained across disconnect/reconnect, and cleared when changing selection/forgetting/resetting. UI labels it as last reported, not current policy, and offers explicit Reload settings only while connected and idle. Older snapshots have no report until a session is opened/reloaded.
+
+Verification: JDK 21 Gradle `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS, 74 unit tests with zero failures/errors/skips. Regression added for live interrupted completion and persisted message restore. Pixel_4_XL chat-ui instrumentation PASS including Interrupted timer, user long-press menu, model button bounds and Android Back dismissal; screenshot inspected. Actual app Connection settings -> Android Back -> chat verified via accessibility hierarchy. Updated debug APK ready for `make install-apk`. Emulator launched for this task was stopped afterward; no phone installation, provider turn, host restart, state/profile rename/deletion, push/PR/merge. Encrypted settings continuity reviewed in source; no real-provider reconnect/process-death verification. Impeccable engine unavailable; direct Compose inspection and Pixel checks used instead.
 
 ## Release distribution implementation
 

@@ -1,6 +1,7 @@
 package dev.modex
 
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.activity.ComponentActivity
@@ -75,6 +76,7 @@ private fun ModexApp() {
             importError = "The file provider could not open this file. Copy it to Downloads and select it again."
         }
     }
+    BackHandler(connectionSettings && vm.savedConnection != null) { connectionSettings = false }
     var phoneThread by rememberSaveable { mutableStateOf("") }
     var phoneGeneration by rememberSaveable { mutableStateOf(0) }
     var phoneTarget by rememberSaveable { mutableStateOf("") }
@@ -144,7 +146,19 @@ private fun ModexApp() {
                 }
             }
         } else {
-            Text(if (vm.connecting) "Connecting…" else "Connected to $host", color = Mocha.Blue)
+            Text(if (vm.connecting) "Connecting…" else "Connected", color = Mocha.Blue)
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                vm.savedConnection?.let { connection ->
+                    Text("${connection.user}@${connection.host}:${connection.port}", style = MaterialTheme.typography.titleMedium)
+                    Text("Host binary", color = Mocha.Subtext)
+                    Text(connection.binary)
+                    Text("Supervisor state directory", color = Mocha.Subtext)
+                    Text(connection.state)
+                    Text("SSH host fingerprint", color = Mocha.Subtext)
+                    Text(connection.pin, style = MaterialTheme.typography.bodySmall)
+                }
+                Text("Disconnect to edit connection settings.", color = Mocha.Subtext)
+            }
             TextButton(onClick = vm::disconnect) { Text("Disconnect") }
             TextButton(onClick = { connectionSettings = false }) { Text("Back to chat") }
         }

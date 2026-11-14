@@ -5,6 +5,12 @@ import (
 	"errors"
 )
 
+// MaxResponseFrame includes the supervisor journal envelope and line delimiter.
+const MaxResponseFrame = 32 * 1024 * 1024
+
+// Reserve room for the sequence envelope; commands retain their separate 4 MiB limit.
+const maxResultBytes = MaxResponseFrame - 1024
+
 type Command struct {
 	ID     int             `json:"id"`
 	Method string          `json:"method"`
@@ -35,10 +41,15 @@ func EncodeEvent(method string, params json.RawMessage) ([]byte, error) {
 }
 
 func EncodeResult(id int, result any) ([]byte, error) {
-	return json.Marshal(struct {
+	raw, err := json.Marshal(struct {
 		ID     int `json:"id"`
 		Result any `json:"result"`
 	}{id, result})
+	// shortcut: whole-history responses remain bounded; paginate when sessions exceed this budget.
+	if err == nil && len(raw) > maxResultBytes {
+		return nil, errors.New("response_too_large: history exceeds relay budget; open this session on the computer")
+	}
+	return raw, err
 }
 
 func EncodeError(id int, message string) ([]byte, error) {
