@@ -1,8 +1,10 @@
 # Modex project state
 
-## Integration in progress
+## Integration complete
 
-Updated: 2026-11-14. PR #10 (shared phone/emulator supervisor) merged as `fffc775` with original commit `a4aa8c9` preserved. PR #11 (chat corrections and large-history crash) passed all five hosted jobs on `dd25156`; this merge brings main into its branch without changing the verified Android/Go implementation. The only conflict was this state document; both milestone summaries are retained below. PR #11 merge and branch cleanup remain pending. Earlier statements about unmerged branches are historical.
+Updated: 2026-11-14. PR [#10](https://github.com/warmdev17/modex/pull/10) merged as `fffc775`; PR [#11](https://github.com/warmdev17/modex/pull/11) merged as `d5d3a4d`, preserving all original commits (no squash/rebase). All five hosted jobs passed on integrated head `1144b10`: Linux, macOS, Windows supported-client checks, packaging and Android. The merged main tree matched that tested head exactly. The only integration conflict was this state file; both milestone summaries were retained. Original commits `a4aa8c9`, `685a585`, `0d2703a`, `379c83a`, `dd25156` and integration merge `1144b10` were verified reachable from main. Three local feature branches and both published feature branches were removed after verification.
+
+This documentation-only snapshot follows integration; no runtime host/emulator changes or release tag were made during the merge task. Earlier unmerged/pending statements below describe their historical milestones. Remaining verification: full takeover of the live CLI and real-provider permission-report persistence across reconnect; large-history SSH loading and subsequent host health were verified as recorded below.
 
 ## Shared phone and emulator host
 
