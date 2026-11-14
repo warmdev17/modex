@@ -77,6 +77,7 @@ internal fun ChatWorkspace(
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
     onCreate: (String, String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
+    hasOlderHistory: Boolean = false, olderHistoryLoading: Boolean = false, onOlderHistory: () -> Unit = {},
     stopping: Boolean = false, onStop: () -> Unit = {},
     runningThreads: Set<String> = emptySet(),
     takeoverSession: String = "", onTakeover: () -> Unit = {},
@@ -124,7 +125,8 @@ internal fun ChatWorkspace(
     var showModel by rememberSaveable { mutableStateOf(false) }
     var modelInput by rememberSaveable { mutableStateOf("") }
     val timeline = remember(messages) { thinkingTimeline(messages) }
-    val selectedDecisions = decisions.filter { it.optString("thread_id") == selected }
+    val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
+    LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
     val status = when { connecting -> "Connecting…"; !connected -> "Disconnected"; historyLoading -> "Loading history…"; busy -> "Working…"; else -> "Connected · SSH" }
@@ -208,27 +210,41 @@ internal fun ChatWorkspace(
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
             var openAtLatest by remember(selected) { mutableStateOf(true) }
+            var olderAnchor by remember(selected) { mutableStateOf<Triple<Int, Int, Int>?>(null) }
+            LaunchedEffect(olderHistoryLoading, timeline.size) {
+                if (!olderHistoryLoading) olderAnchor?.let { (count, index, offset) ->
+                    scroll.scrollToItem((index + timeline.size - count).coerceAtLeast(0), offset)
+                    olderAnchor = null
+                }
+            }
             LaunchedEffect(selected, historyLoading, timeline.size, timeline.lastOrNull(), selectedDecisions.map { it.optString("decision_id") }) {
                 if (historyLoading) {
                     openAtLatest = true
                     return@LaunchedEffect
                 }
+                if (olderHistoryLoading || olderAnchor != null) return@LaunchedEffect
                 val layout = scroll.layoutInfo
                 val nearBottom = layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 2 } ?: true
                 if (timeline.isNotEmpty() && (openAtLatest || nearBottom)) {
-                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == timeline.size + selectedDecisions.size + 1 }
+                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == timeline.size + selectedDecisions.size + 2 }
                     // The final spacer anchors the bottom even when the last message is taller than the viewport.
-                    scroll.scrollToItem(timeline.size)
+                    scroll.scrollToItem(timeline.size + selectedDecisions.size + 1)
                     openAtLatest = false
                 }
             }
-            if (timeline.isEmpty() && selectedDecisions.isEmpty()) {
+            if (timeline.isEmpty() && selectedDecisions.isEmpty() && !hasOlderHistory) {
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {
                     Text("Your workspace.\nWithin reach.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Medium)
                     Text(if (selected.isBlank()) "Open a conversation from the sidebar, or start a new chat." else "Ask Codex to explore, build or fix something.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
                     if (selected.isBlank()) Button(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
                 }
             } else LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                item {
+                    if (hasOlderHistory) TextButton(enabled = connected && !historyLoading && !olderHistoryLoading, onClick = {
+                        olderAnchor = Triple(timeline.size, scroll.firstVisibleItemIndex, scroll.firstVisibleItemScrollOffset)
+                        onOlderHistory()
+                    }) { Text(if (olderHistoryLoading) "Loading earlier messages…" else "Load earlier messages") }
+                }
                 items(timeline) { entry ->
                     val role = entry.role; val body = entry.text
                     val display = liveMessageText(entry.id, body, entry.status == "inProgress")

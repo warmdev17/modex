@@ -95,6 +95,7 @@ private fun ModexApp() {
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
             runningThreads = vm.runningThreads, busy = vm.busy, stopping = vm.stopping, onStop = vm::stop, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
+            hasOlderHistory = vm.hasOlderHistory, olderHistoryLoading = vm.olderHistoryLoading, onOlderHistory = vm::loadOlderHistory,
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
             onCreate = vm::create, onSend = vm::send, onAnswer = vm::answer,
             onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect,

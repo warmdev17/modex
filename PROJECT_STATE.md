@@ -1,5 +1,19 @@
 # Modex project state
 
+## Paged history cache and reconnect ownership
+
+Updated: 2026-11-14. Branch `feat/paged-history-cache`, baseline `3d4625f`; host committed as `3ead74a`, Android changes verified in the accompanying commit. Primary owns implementation and integration. Plan: [paged history](docs/superpowers/plans/2026-11-14-paged-history-cache.md); contract: [history](docs/history-contract.md). Supersedes earlier unpaginated history and visible-history-on-disconnect descriptions below.
+
+Host uses native `thread/turns/list`, validates ID/cwd before paging, supports limits 1..50 and preserves legacy unpaged reads. Android loads 10 turns, prepends older pages without moving the reading anchor, and caches at most 10 sessions/4 MiB in the existing encrypted host snapshot. A changed newest-page fingerprint invalidates older cached pages; oversized snapshots skip caching without evicting unrelated sessions. Cache encoding is debounced with persistence.
+
+Disconnect/transport failure/process restoration clears selected chat, messages and local ownership while retaining activity bookkeeping and last-thread target. Reconnect validates resume before showing cache and refreshing history; CLI active_writer leaves an empty landing and explicit Take over. Connection-local request guards ignore late resume/history replies. Captured transports prevent queued commands from moving onto a later connection. Streaming changes win over older snapshots; pagination cannot overwrite active-turn state. Model/effort choices remain persisted per thread.
+
+Verification on host commit + final Android working tree: Go `go test -race ./...` and `go vet ./...` PASS; Python discovery with built host/client binaries 28 PASS; JDK 21 Gradle `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS, 80 unit tests, zero failures/errors/skips. Emulator new-chat reducer regression PASS for cached resume, fresh thread, disconnect clearing, late replies and explicit takeover. History-scroll instrumentation PASS for newest positioning, append stability, tall final message and older-page prepend anchor. Initial pagination UI test failures were stale API-33 accessibility cache; refreshing service info fixed the fixture, with no hidden cache-clear API dependency.
+
+Read-only real Codex validation using temporary /tmp/modex-paged-host --serve: newest page 317 messages/822848 JSON bytes; next page 373 messages/1291076 bytes, advancing native cursor. No resume, takeover, provider prompt or interruption of the live CLI. Debug APK and test APK installed with -r on the already-running emulator-5554; no profile/state rename, wipe, or new emulator. Existing supervisor binary/state and running service were not restarted or replaced.
+
+Limitations/next: update both host and Android before phone testing; a single oversized turn can still exceed the upstream frame budget. Physical-phone reconnect, real SSH ownership handoff/process-death lifecycle and the updated continuity SSH fixture were not run (the fixture clears saved profiles). Self-review; no independent reviewer tool available. No push/PR/merge/release. User-started emulator remains running.
+
 ## Integration complete
 
 Updated: 2026-11-14. PR [#10](https://github.com/warmdev17/modex/pull/10) merged as `fffc775`; PR [#11](https://github.com/warmdev17/modex/pull/11) merged as `d5d3a4d`, preserving all original commits (no squash/rebase). All five hosted jobs passed on integrated head `1144b10`: Linux, macOS, Windows supported-client checks, packaging and Android. The merged main tree matched that tested head exactly. The only integration conflict was this state file; both milestone summaries were retained. Original commits `a4aa8c9`, `685a585`, `0d2703a`, `379c83a`, `dd25156` and integration merge `1144b10` were verified reachable from main. Three local feature branches and both published feature branches were removed after verification.
