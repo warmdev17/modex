@@ -27,19 +27,19 @@ internal fun ReferencePicker(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("Add to prompt", style = MaterialTheme.typography.labelLarge, color = Mocha.Subtext, modifier = Modifier.weight(1f))
             TextButton(onClick = onRefresh, enabled = !loading) { Text("Refresh") }
-            IconButton(onClick = onDismiss) { ChatGlyph(ChatIcon.Close, "Close skill suggestions") }
+            IconButton(onClick = onDismiss) { ChatGlyph(ChatIcon.Close, "Close reference suggestions") }
         }
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
         if (status.isNotEmpty()) Text(status, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
-        if (matches.isEmpty() && !loading && status.isEmpty()) Text(if (catalog.entries.isEmpty()) "No skills found for this project." else "No matching skills.", Modifier.padding(vertical = 12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
+        if (matches.isEmpty() && !loading && status.isEmpty()) Text(if (catalog.entries.isEmpty()) "No skills or plugins found for this project." else "No matching skills or plugins.", Modifier.padding(vertical = 12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 160.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             matches.groupBy { it.kind }.forEach { (kind, entries) ->
-                item(key = "kind:$kind") { Text(if (kind == "skill") "Skills" else kind.replaceFirstChar { it.titlecase() }, Modifier.padding(vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) }
+                item(key = "kind:$kind") { Text(if (kind == "skill") "Skills" else if (kind == "plugin") "Plugins" else kind.replaceFirstChar { it.titlecase() }, Modifier.padding(vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) }
                 items(entries, key = { it.kind + ":" + it.path }) { entry ->
                     val enabled = entry.enabled && (selected.size < 8 || selected.any { it.kind == entry.kind && it.name == entry.name })
                     Surface(onClick = { onSelect(entry) }, enabled = enabled, color = Mocha.Mantle, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Select ${entry.kind} ${entry.name}" }) {
                         Row(Modifier.padding(horizontal = 4.dp, vertical = 8.dp).heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            CompositionLocalProvider(LocalContentColor provides if (enabled) Mocha.Blue else Mocha.Subtext) { ChatGlyph(ChatIcon.Skill) }
+                            CompositionLocalProvider(LocalContentColor provides if (enabled) Mocha.Blue else Mocha.Subtext) { ChatGlyph(if (entry.kind == "plugin") ChatIcon.Plugin else ChatIcon.Skill) }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 Text(entry.title, style = MaterialTheme.typography.bodyMedium, color = if (enabled) Mocha.Text else Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (entry.description.isNotBlank()) Text(entry.description, style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -50,8 +50,8 @@ internal fun ReferencePicker(
                 }
             }
         }
-        if (selected.size >= 8) Text("Up to 8 skills per prompt. Remove one to add another.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
-        if (catalog.issues > 0) Text("${catalog.issues} skill discovery issues on host. Refresh after fixing them.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+        if (selected.size >= 8) Text("Up to 8 references per prompt. Remove one to add another.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+        if (catalog.issues > 0) Text("${catalog.issues} reference discovery issues on host. Refresh after fixing them.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
         HorizontalDivider(Modifier.padding(top = 6.dp), color = Mocha.Surface)
     }
 }

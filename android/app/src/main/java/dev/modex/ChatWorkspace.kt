@@ -44,7 +44,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
@@ -63,6 +63,7 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
             ChatIcon.Close -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
             ChatIcon.More -> for (y in listOf(5f,12f,19f)) drawCircle(color,1.4f*u,Offset(12*u,y*u))
             ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }
+            ChatIcon.Plugin -> { line(8f,3f,8f,8f); line(16f,3f,16f,8f); line(5f,8f,19f,8f); line(5f,8f,5f,13f); line(19f,8f,19f,13f); line(5f,13f,9f,17f); line(19f,13f,15f,17f); line(9f,17f,15f,17f); line(12f,17f,12f,22f) }
             ChatIcon.Skill -> { line(4f,4f,10f,4f); line(10f,4f,12f,6f); line(12f,6f,14f,4f); line(14f,4f,20f,4f); line(20f,4f,20f,19f); line(20f,19f,14f,19f); line(14f,19f,12f,21f); line(12f,21f,10f,19f); line(10f,19f,4f,19f); line(4f,19f,4f,4f); line(12f,6f,12f,21f) }
             ChatIcon.Model -> Unit
             ChatIcon.Attach -> { line(5f,12f,19f,12f); line(12f,5f,12f,19f) }
@@ -405,8 +406,8 @@ private fun PromptComposer(
             if (chosenReferences.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 chosenReferences.forEach { reference ->
                     InputChip(selected = true, colors = InputChipDefaults.inputChipColors(selectedContainerColor = Mocha.Surface, selectedLabelColor = Mocha.Blue, selectedLeadingIconColor = Mocha.Blue, selectedTrailingIconColor = Mocha.Subtext), shape = RoundedCornerShape(6.dp), onClick = { onRemoveReference(reference) }, label = { Text(reference.marker, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        leadingIcon = { ChatGlyph(ChatIcon.Skill) }, trailingIcon = { ChatGlyph(ChatIcon.Close) },
-                        modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp).semantics { contentDescription = "Remove skill ${reference.name}" })
+                        leadingIcon = { ChatGlyph(if (reference.kind == "plugin") ChatIcon.Plugin else ChatIcon.Skill) }, trailingIcon = { ChatGlyph(ChatIcon.Close) },
+                        modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp).semantics { contentDescription = "Remove ${reference.kind} ${reference.name}" })
                 }
             }
             if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -419,14 +420,14 @@ private fun PromptComposer(
             if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
             BasicTextField(editor, { changeEditor(it) }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
-                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex… (@ for skills)", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
+                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex… (@ for skills & plugins)", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { attachMenu = true }, enabled = attachEnabled) { ChatGlyph(ChatIcon.Attach, "Attach files") }
                     DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                         DropdownMenuItem(text = { Text("From this phone") }, leadingIcon = { ChatGlyph(ChatIcon.Phone) }, enabled = attachEnabled, onClick = { attachMenu = false; onPhoneFiles() })
                         DropdownMenuItem(text = { Text("From connected computer") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, enabled = attachEnabled, onClick = { attachMenu = false; onRemoteFiles() })
-                        DropdownMenuItem(text = { Text("Skills") }, leadingIcon = { ChatGlyph(ChatIcon.Skill) }, enabled = referenceEnabled, onClick = {
+                        DropdownMenuItem(text = { Text("Skills & plugins") }, leadingIcon = { ChatGlyph(ChatIcon.Skill) }, enabled = referenceEnabled, onClick = {
                             attachMenu = false
                             val start = editor.selection.min; val end = editor.selection.max
                             val marker = (if (start > 0 && !editor.text[start - 1].isWhitespace()) " " else "") + "@"

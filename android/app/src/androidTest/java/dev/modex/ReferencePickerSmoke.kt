@@ -14,6 +14,8 @@ internal fun Instrumentation.referencePickerSmoke() {
     try {
         val skill = PromptReference("skill", "review", "/home/demo/.agents/skills/review/SKILL.md", "Review changes", "Review code and explain issues", "user", true, "\$review")
         val disabled = skill.copy(name = "disabled", title = "Disabled skill", path = "/disabled/SKILL.md", marker = "\$disabled", enabled = false)
+        val plugin = PromptReference("plugin", "review", "plugin://review@curated", "Review plugin", "Review using an installed plugin", "curated", true, "@review", "review@curated")
+        val disabledPlugin = plugin.copy(name = "blocked", title = "Blocked plugin", path = "plugin://blocked@curated", marker = "@blocked", enabled = false)
         var sentText = ""
         var sentReferences = emptyList<PromptReference>()
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
@@ -25,7 +27,7 @@ internal fun Instrumentation.referencePickerSmoke() {
                     busy = false, historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture", decisions = emptyList(), answeringDecisionIds = emptySet(),
                     onSelect = { current = it }, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> },
                     onSend = { text, _, _, refs -> sentText = text; sentReferences = refs; true }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {},
-                    referenceCatalog = ReferenceCatalog(listOf(skill, disabled), listOf("skill")))
+                    referenceCatalog = ReferenceCatalog(listOf(skill, disabled, plugin, disabledPlugin), listOf("skill", "plugin")))
             } }
         } }
         fun node(label: String): AccessibilityNodeInfo? {
@@ -68,12 +70,12 @@ internal fun Instrumentation.referencePickerSmoke() {
         waitNode("Select skill review")
         check(!waitNode("Select skill disabled").parent.isEnabled) { "Disabled skill is selectable" }
         screenshot("skill-picker.png")
-        click("Close skill suggestions")
+        click("Close reference suggestions")
         check(node("Prompt references") == null) { "Close did not hide suggestions" }
         input("")
         input("@")
         waitNode("Select skill review")
-        click("Close skill suggestions")
+        click("Close reference suggestions")
         input("@r")
         waitNode("Select skill review")
         input("@")
@@ -96,7 +98,25 @@ internal fun Instrumentation.referencePickerSmoke() {
         click("Send message")
         check(sentText.contains("\$review") && sentReferences.single().path == skill.path) { "Structured reference lost at send" }
         check(field().text.toString().isBlank())
-        result.putString("result", "PASS: @ discovery, reopen after dismissal and retyping, disabled state, exact reference selection, per-session drafts, chip deletion, email guard and send")
+        input("@blocked")
+        check(!waitNode("Select plugin blocked").parent.isEnabled) { "Disabled plugin is selectable" }
+        input("@curated")
+        click("Select plugin review")
+        waitNode("Remove plugin review")
+        check(field().text.toString().contains("@review"))
+        check(node("Prompt references") == null) { "Selected plugin reopened suggestions" }
+        screenshot("plugin-selected.png")
+        click("Open sessions"); click("Second session")
+        check(node("Remove plugin review") == null)
+        click("Open sessions"); click("First session")
+        waitNode("Remove plugin review")
+        click("Remove plugin review")
+        check(!field().text.toString().contains("@review"))
+        input("@curated")
+        click("Select plugin review")
+        click("Send message")
+        check(sentText.contains("@review") && sentReferences.single() == plugin) { "Plugin identity lost at send" }
+        result.putString("result", "PASS: installed plugin selection, disabled state, draft restoration, deletion and send; @ discovery, reopen after dismissal and retyping, disabled state, exact reference selection, per-session drafts, chip deletion, email guard and send")
         finish(-1, result)
     } catch (failure: Throwable) {
         uiAutomation.takeScreenshot()?.let { bitmap -> File(targetContext.filesDir, "skill-failure.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle() }

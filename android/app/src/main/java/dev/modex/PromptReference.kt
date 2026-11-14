@@ -19,7 +19,7 @@ internal data class ReferenceCatalog(val entries: List<PromptReference> = emptyL
 
 private fun readReference(value: JSONObject): PromptReference? {
     val kind = value.optString("kind"); val name = value.optString("name"); val path = value.optString("path")
-    val marker = value.optString("marker").ifBlank { "\$$name" }
+    val marker = value.optString("marker").ifBlank { if (kind == "plugin") "@$name" else "\$$name" }
     if (kind.isBlank() || name.isBlank() || path.isBlank() || name.any { it.isWhitespace() || it.isISOControl() } || marker.any { it.isWhitespace() || it.isISOControl() }) return null
     return PromptReference(kind, name, path, value.optString("title").ifBlank { name }, value.optString("description"),
         value.optString("scope"), value.optBoolean("enabled"), marker, value.optString("plugin_id"))
@@ -48,11 +48,11 @@ internal class ReferenceCatalogState {
         if (active != (id to workspace) || workspace != currentWorkspace) return false
         loading = false
         return try { catalog = readReferenceCatalog(result); status = ""; true }
-        catch (_: Exception) { status = "Skills could not be loaded. Refresh to try again."; false }
+        catch (_: Exception) { status = "Skills and plugins could not be loaded. Refresh to try again."; false }
     }
     fun fail(id: Long, workspace: String, currentWorkspace: String) {
         if (active != (id to workspace) || workspace != currentWorkspace) return
-        loading = false; status = "Skills unavailable. Check the host version and refresh."
+        loading = false; status = "Skills and plugins unavailable. Check the host version and refresh."
     }
     fun clear() { active = null; catalog = ReferenceCatalog(); loading = false; status = "" }
 }
