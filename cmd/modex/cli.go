@@ -27,6 +27,7 @@ func launchCLI(args []string) error {
 	codex := flags.String("codex", "codex", "Codex executable")
 	home := flags.String("codex-home", "", "Override CODEX_HOME")
 	thread := flags.String("thread", "", "Optional existing session UUID; omit for the picker")
+	state := flags.String("state-dir", "", "Supervisor state directory (defaults to ~/.local/state/modex-phone)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -37,6 +38,9 @@ func launchCLI(args []string) error {
 		return fmt.Errorf("unexpected positional arguments; use modex cli --help")
 	}
 	forward := []string{"--cli", "--workspace", *workspace, "--codex", *codex}
+	if *state != "" {
+		forward = append(forward, "--state-dir", *state)
+	}
 	if *home != "" {
 		forward = append(forward, "--codex-home", *home)
 	}

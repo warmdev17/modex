@@ -12,10 +12,11 @@ import (
 )
 
 type supervisorEndpoint struct {
-	Address   string `json:"address"`
-	Token     string `json:"token"`
-	Instance  string `json:"instance"`
-	Workspace string `json:"workspace"`
+	Address      string `json:"address"`
+	Token        string `json:"token"`
+	Instance     string `json:"instance"`
+	Workspace    string `json:"workspace"`
+	NativeSocket string `json:"native_socket,omitempty"`
 }
 
 func claimSupervisorState(dir string) (func(), error) {

@@ -189,6 +189,34 @@ func (d *Decisions) List() []Decision {
 	return result
 }
 
+// Native TUI and app-server share a versioned schema. Let Codex validate native
+// result variants while retaining the same first-answer-wins delivery guard.
+func (d *Decisions) AnswerNative(ctx context.Context, id string, result json.RawMessage) error {
+	return d.AnswerNativeWith(ctx, id, result, d.respond)
+}
+
+// Error envelopes share the same atomic delivery guard as successful native answers.
+func (d *Decisions) AnswerNativeWith(ctx context.Context, id string, result json.RawMessage, respond func(context.Context, json.RawMessage, json.RawMessage) error) error {
+	var object map[string]json.RawMessage
+	if json.Unmarshal(result, &object) != nil || object == nil {
+		return errors.New("native decision result must be an object")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	request, ok := d.pending[id]
+	if !ok {
+		return errors.New("decision is missing or already resolved")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	delete(d.pending, id)
+	if err := respond(ctx, request.upstream, result); err != nil {
+		return errors.New("decision delivery failed; do not replay")
+	}
+	return nil
+}
+
 func (d *Decisions) Resolve(method string, params json.RawMessage) {
 	var event struct {
 		ThreadID  string          `json:"threadId"`

@@ -111,7 +111,7 @@ class SessionHandoffTests(unittest.TestCase):
                     raise
                 time.sleep(.02)
 
-    def test_supervisor_socket_detach_releases_only_after_running_turn_finishes(self):
+    def test_shared_supervisor_keeps_writer_across_client_disconnects(self):
         from live_supervisor_smoke import AttachedRPC
         state = self.root / 'supervisor'
         control = [str(Path(BINARY).resolve()), '--state-dir', str(state)]
@@ -127,15 +127,17 @@ class SessionHandoffTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 self.peer.call('thread/resume', {'threadId': thread})
             (self.root / (thread + '.finish')).touch()
-            self.acquire(thread)
-            self.peer.close()
+            time.sleep(.1)
+            with self.assertRaises(RuntimeError):
+                self.peer.call('thread/resume', {'threadId': thread})
             client = AttachedRPC(str(Path(BINARY).resolve()), state, self.root, cursor, instance)
             client.call('threads/resume', {'thread_id': thread})
             client.close()
             self.peer = RPC([str(self.fake)], self.root)
             self.peer.call('initialize', {'clientInfo': {'name': 'fixture', 'version': '1'}})
             self.peer.send({'method': 'initialized'})
-            self.acquire(thread)
+            with self.assertRaises(RuntimeError):
+                self.peer.call('thread/resume', {'threadId': thread})
         finally:
             if client is not None:
                 client.close()
@@ -145,6 +147,7 @@ class SessionHandoffTests(unittest.TestCase):
                 time.sleep(.02)
             self.assertFalse((state / 'endpoint.json').exists())
             self.assertEqual((state / 'owner.lock').read_text(), "modex-flock-v1\n")
+        self.acquire(thread)
 
     def test_idle_handoff_preserves_other_running_and_empty_threads(self):
         first, second, empty = self.create(), self.create(), self.create()

@@ -16,6 +16,10 @@ import (
 )
 
 func serveHost(cwd, binary, home string) error {
+	return serveHostWithSocket(cwd, binary, home, "")
+}
+
+func serveHostWithSocket(cwd, binary, home, socket string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	env := os.Environ()
@@ -31,6 +35,22 @@ func serveHost(cwd, binary, home string) error {
 		return err
 	}
 	defer p.Close()
+	if socket != "" {
+		if err := checkPrivatePath(filepath.Dir(socket), true); err != nil {
+			return err
+		}
+		backend, err := newSharedBackend(ctx, p, nil)
+		if err != nil {
+			return err
+		}
+		backend.home = home
+		closeGateway, err := backend.listen(socket)
+		if err != nil {
+			return err
+		}
+		defer closeGateway()
+		return bridge.ServeEvents(ctx, os.Stdin, os.Stdout, cwd, backend.call)
+	}
 	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd, home)
 }
 

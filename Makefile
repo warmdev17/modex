@@ -70,7 +70,7 @@ host-stop:
 
 # Choose by title or create new; THREAD remains an optional shortcut.
 cli: host-build
-	"$(HOST_BINARY)" --cli --thread "$(THREAD)" --workspace "$(WORKSPACE)" --codex "$(CODEX)"
+	"$(HOST_BINARY)" --cli --thread "$(THREAD)" --workspace "$(WORKSPACE)" --codex "$(CODEX)" --state-dir "$(STATE_DIR)"
 
 install-cli:
 	@mkdir -p "$(PREFIX)/bin"

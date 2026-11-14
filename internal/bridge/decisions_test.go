@@ -42,6 +42,33 @@ func TestDecisionValidationAndSingleResponse(t *testing.T) {
 	}
 }
 
+func TestNativeDecisionPreservesCodexVariantsAndCannotAnswerTwice(t *testing.T) {
+	calls := 0
+	d := NewDecisions(func(_ context.Context, _ json.RawMessage, result json.RawMessage) error {
+		calls++
+		if string(result) != `{"decision":"acceptForSession"}` {
+			t.Fatalf("result=%s", result)
+		}
+		return nil
+	})
+	decision, err := d.Add(json.RawMessage(`77`), "item/commandExecution/requestApproval", json.RawMessage(`{"threadId":"thread","turnId":"turn","itemId":"item","command":"echo safe"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = d.AnswerNative(context.Background(), decision.ID, json.RawMessage(`[]`)); err == nil {
+		t.Fatal("array result accepted")
+	}
+	if err = d.AnswerNative(context.Background(), decision.ID, json.RawMessage(`{"decision":"acceptForSession"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.Answer(context.Background(), decision.ID, json.RawMessage(`{"decision":"accept"}`)); err == nil {
+		t.Fatal("duplicate mobile answer accepted")
+	}
+	if calls != 1 {
+		t.Fatalf("delivered %d times", calls)
+	}
+}
+
 func TestQuestionsAndResolution(t *testing.T) {
 	d := NewDecisions(func(context.Context, json.RawMessage, json.RawMessage) error { return nil })
 	event, err := d.Add(json.RawMessage(`9`), "item/tool/requestUserInput", json.RawMessage(`{"threadId":"one","turnId":"t","itemId":"i","isBlocking":true,"questions":[{"id":"q1","header":"Choice","question":"Which?","options":[{"label":"A","description":"First"}]}]}`))

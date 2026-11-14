@@ -124,7 +124,7 @@ func install(args []string, home, path string, out io.Writer) error {
 	f := flag.NewFlagSet("modex service install", flag.ContinueOnError)
 	workspace := f.String("workspace", "", "Existing absolute workspace directory (required)")
 	codex := f.String("codex", "codex", "Codex executable")
-	state := f.String("state-dir", filepath.Join(home, ".local", "state", "modex"), "New private state directory")
+	state := f.String("state-dir", filepath.Join(home, ".local", "state", "modex-phone"), "New private state directory")
 	codexHome := f.String("codex-home", os.Getenv("CODEX_HOME"), "Explicit Codex home")
 	self, err := os.Executable()
 	if err != nil {

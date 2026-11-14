@@ -15,6 +15,10 @@ import (
 
 // Codex --listen unix:// uses WebSocket framing, unlike the daemon's stdio proxy.
 func loadedThreads(ctx context.Context, socket string) (json.RawMessage, error) {
+	return callNativeSocket(ctx, socket, "thread/loaded/list", map[string]any{"limit": 100})
+}
+
+func callNativeSocket(ctx context.Context, socket, method string, params any) (json.RawMessage, error) {
 	transport := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", socket)
 	}}
@@ -61,7 +65,7 @@ func loadedThreads(ctx context.Context, socket string) (json.RawMessage, error) 
 	if err = wsjson.Write(ctx, conn, map[string]any{"method": "initialized"}); err != nil {
 		return nil, err
 	}
-	if err = wsjson.Write(ctx, conn, map[string]any{"id": 2, "method": "thread/loaded/list", "params": map[string]any{"limit": 100}}); err != nil {
+	if err = wsjson.Write(ctx, conn, map[string]any{"id": 2, "method": method, "params": params}); err != nil {
 		return nil, err
 	}
 	return readReply(2)

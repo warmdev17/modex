@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -37,6 +38,13 @@ func superviseHost(cwd, binary, home, dir string) error {
 		return err
 	}
 	defer release()
+	// Keep the native socket short enough for Unix sun_path, beneath a private directory.
+	nativeDir, err := os.MkdirTemp("", "modex-native-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(nativeDir)
+	nativeSocket := filepath.Join(nativeDir, "codex.sock")
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return errors.New("cannot listen on loopback")
@@ -47,6 +55,7 @@ func superviseHost(cwd, binary, home, dir string) error {
 		return err
 	}
 	args := []string{"--serve", "--workspace", cwd, "--codex", binary}
+	args = append(args, "--native-socket", nativeSocket)
 	if home != "" {
 		args = append(args, "--codex-home", home)
 	}
@@ -80,7 +89,7 @@ func superviseHost(cwd, binary, home, dir string) error {
 			<-done
 		}
 	}()
-	endpoint := supervisorEndpoint{Address: listener.Addr().String(), Token: randomID(), Instance: randomID(), Workspace: cwd}
+	endpoint := supervisorEndpoint{Address: listener.Addr().String(), Token: randomID(), Instance: randomID(), Workspace: cwd, NativeSocket: nativeSocket}
 	server := supervisor.NewServer(ctx, endpoint.Token, endpoint.Instance, input, stop)
 	server.OnAttachment = func(attached bool) error {
 		return json.NewEncoder(input).Encode(map[string]any{"id": 2147483646, "method": "client/attached", "params": map[string]bool{"attached": attached}})

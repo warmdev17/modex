@@ -42,7 +42,10 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
     val item = params.optJSONObject("item")
     val id = item?.optString("id") ?: params.optString("itemId")
     if (id.isBlank()) return entries
-    val index = entries.indexOfFirst { it.id == id }
+    val nativeTurn = params.optString("turnId")
+    val found = entries.indexOfFirst { it.id == id }
+    val index = if (found >= 0 || item?.optString("type") != "userMessage" || nativeTurn.isBlank()) found
+        else entries.indexOfLast { it.role == "You" && it.turnId == nativeTurn && it.id.startsWith("local-") }
     val previous = entries.getOrNull(index)
     val turnId = params.optString("turnId").ifBlank { previous?.turnId.orEmpty() }
     val entry = when (event) {
@@ -63,6 +66,13 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
             previous.copy(text = if (previous.text.endsWith(TRUNCATED)) previous.text else boundedOutput(previous.text + params.optString("delta")))
         }
         "item/started", "item/completed" -> when (item?.optString("type")) {
+            "userMessage" -> {
+                val content = item.optJSONArray("content")
+                val body = content?.let { a -> (0 until a.length()).mapNotNull { n -> a.optJSONObject(n)?.takeIf { it.optString("type") == "text" }?.optString("text") }.joinToString("\n") }.orEmpty()
+                val recovered = legacyFileAttachments(body)
+                (previous ?: ChatEntry(id, "You", recovered.first, attachments = recovered.second, status = "inProgress"))
+                    .copy(id = id, turnId = turnId)
+            }
             "agentMessage" -> ChatEntry(id, "Codex", item.optString("text").ifEmpty { previous?.text.orEmpty() }, status = if (event == "item/started") "inProgress" else "completed", turnId = turnId)
             "reasoning" -> {
                 val parts = item.optJSONArray("summary")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().ifEmpty { previous?.summaryParts.orEmpty() }
