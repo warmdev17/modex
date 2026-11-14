@@ -46,7 +46,10 @@ for line in sys.stdin:
  if m=='initialized':continue
  if m=='initialize':result={}
  elif m=='config/read':result={'config':{'model':'fixture','model_provider':'fixture'}}
- elif m in ('thread/read','thread/resume'):result={'thread':{'id':'one','cwd':__import__('os').getcwd()}}
+ elif m in ('thread/read','thread/resume'):
+  result={'thread':{'id':'one','cwd':__import__('os').getcwd()}}
+  if r.get('params',{}).get('includeTurns'):
+   result['thread']['turns']=[{'id':'large','status':'completed','items':[{'id':'answer','type':'agentMessage','text':'x'*(3*1024*1024)}]}]
  elif m=='turn/start':
   result={'turn':{'id':'turn'}}
   threading.Thread(target=delayed,daemon=True).start()
@@ -79,6 +82,22 @@ for line in sys.stdin:
                 bad.close()
                 first, reader, ack = connect()
                 self.assertTrue(ack["ready"])
+                # History projection duplicates text/display_text: this response exceeds 4 MiB.
+                first.sendall(json.dumps({"id": 90, "method": "threads/read", "params": {
+                    "thread_id": "one", "include_turns": True}}).encode() + b"\n")
+                while True:
+                    line = reader.readline()
+                    self.assertTrue(line, "large history killed the supervisor")
+                    history = json.loads(line)["message"]
+                    if history.get("id") == 90:
+                        self.assertEqual(len(history["result"]["messages"][0]["text"]), 3 * 1024 * 1024)
+                        break
+                first.sendall(b'{"id":91,"method":"status"}\n')
+                while True:
+                    status = json.loads(reader.readline())["message"]
+                    if status.get("id") == 91:
+                        self.assertIn("result", status)
+                        break
                 second, other_reader, rejected = connect()
                 self.assertIn("error", rejected)
                 other_reader.close()

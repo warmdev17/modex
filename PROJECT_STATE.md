@@ -1,5 +1,15 @@
 # Modex project state
 
+## Large history relay crash
+
+Updated: 2026-11-14. Branch `fix/large-history-relay`, baseline `379c83a` (includes the pending chat UI fixes). Live diagnosis confirmed `threads/read` for the current Modex session returns 4,804,428 bytes, over the supervisor scanner/Android 4 MiB cap. The supervisor scanner exited and normal cleanup removed endpoint.json after takeover loaded history. This explains the repeatable crash; the earlier deleted-lock orphan incident is separate and its origin remains unknown.
+
+Response budget is now 32 MiB on host and Android; inbound commands remain 4 MiB. EncodeResult reserves 1 KiB for the journal envelope and rejects oversized results as response_too_large instead of killing the supervisor. Replay journal is bounded to 1024 entries/64 MiB. Android buffers SSH input and explains oversize failures. Whole history remains bounded and unpaginated; upstream Codex frames retain their existing 16 MiB cap.
+
+Verified: old binary fails new large-history lifecycle regression (connection EOF, supervisor unavailable). Old Android reader fails 5 MiB test with Frame limit exceeded. Updated Go full race/vet PASS; Python suite 27 pass/1 SSH skip initially, then the skipped SSH test run separately with built client. Android unit tests 76 PASS, debug/test APK builds and lint PASS; added bounded/truncated-frame and next-frame tests. Oversized-result regression verifies next request still succeeds.
+
+Live: updated `/tmp/modex-host` atomically and started it using the exact binary/state in ignored `.modex/emulator.json`, preserving `/home/warmdev/.local/state/modex-phone`, attachments, CLI and all credential settings. Installed APKs with adb install -r on the already-running user emulator; encrypted profile hash unchanged. Read-only large-history instrumentation compared all connection fields against emulator.json, fetched 5,131 messages / 4,865,792 bytes via real SSH, then received successful status. No prompt/provider turn or takeover of this active CLI was performed. User emulator was already running and remains open; this task started no emulator. App reopened afterward; persisted old-instance cursor may need one Reset session cursor. No phone install, PR/push/merge. Files/settings were not renamed or deleted.
+
 ## Chat feedback and settings corrections
 
 Updated: 2026-11-14. Branch `fix/chat-feedback-settings`, baseline `7fecbfb`. Separate from unmerged `fix/shared-emulator-host` (`a4aa8c9`). Commits `685a585` (turn outcomes) and `0d2703a` (touch feedback); this milestone covers settings continuity/navigation.

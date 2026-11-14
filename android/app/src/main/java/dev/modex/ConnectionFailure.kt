@@ -6,6 +6,7 @@ internal class ConnectionFailure(message: String) : Exception(message)
 internal fun connectionFailure(stage: String, error: Exception, stderr: String = ""): ConnectionFailure {
     val detail = (stderr + "\n" + error.message.orEmpty()).lowercase()
     val message = when {
+        "frame limit exceeded" in detail -> "Host sent more history than this app supports. Update Modex and modex-host, then reconnect."
         stage == "fingerprint" -> "SSH host fingerprint does not match. Verify the negotiated host key on the target."
         stage == "key" -> "SSH key could not be loaded. Import a supported unencrypted private key."
         stage == "config" -> "Invalid connection settings. Check hostname, port, SHA256 fingerprint and absolute host/state paths."

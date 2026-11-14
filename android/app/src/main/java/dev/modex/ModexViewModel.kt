@@ -22,6 +22,7 @@ internal fun takeoverTarget(method: String, detail: String, target: String): Str
 
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
+        detail.contains("response_too_large") -> "This session exceeds the history transfer limit. Open it on your computer; the host is still available."
         detail.contains("takeover_unmanaged") -> "This CLI was not started with the Modex launcher. Close it on your computer, or use make cli THREAD=<session-id> next time."
         detail.contains("takeover_mismatch") -> "The registered CLI has changed sessions or loaded multiple sessions. Nothing was taken over. Close it on your computer."
         detail.contains("takeover_unavailable") -> "The registered CLI is no longer available. Refresh the session before retrying."

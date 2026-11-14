@@ -35,7 +35,7 @@ type Server struct {
 }
 
 func NewServer(ctx context.Context, token, instance string, child io.Writer, stop context.CancelFunc) *Server {
-	return &Server{Journal: NewJournal(1024, 16*1024*1024), ctx: ctx, token: token, instance: instance, child: child, stop: stop}
+	return &Server{Journal: NewJournal(1024, 2*bridge.MaxResponseFrame), ctx: ctx, token: token, instance: instance, child: child, stop: stop}
 }
 
 func (s *Server) Attached() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.attached }

@@ -71,7 +71,7 @@ class SshTransport {
                 exec.setPty(false)
                 exec.setCommand(command)
                 exec.setErrStream(remoteError)
-                val input = exec.inputStream
+                val input = exec.inputStream.buffered()
                 check(!closed)
                 exec.connect(15000)
                 check(!closed)
@@ -125,13 +125,13 @@ class SshTransport {
 
 private fun MessageDigestEqual(expected: String, actual: String) = java.security.MessageDigest.isEqual(expected.toByteArray(), actual.toByteArray())
 
-private fun readFrame(input: InputStream): JSONObject? {
+internal fun readFrame(input: InputStream): JSONObject? {
     val bytes = ByteArrayOutputStream()
     while (true) {
         val next = input.read()
         if (next < 0) { require(bytes.size() == 0) { "Truncated frame" }; return null }
         if (next == 10) return JSONObject(bytes.toString("UTF-8"))
-        require(bytes.size() < 4 * 1024 * 1024) { "Frame limit exceeded" }
+        require(bytes.size() < 32 * 1024 * 1024) { "Frame limit exceeded" }
         bytes.write(next)
     }
 }

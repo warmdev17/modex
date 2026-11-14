@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/warmdev/modex/internal/bridge"
 	"github.com/warmdev/modex/internal/supervisor"
 )
 
@@ -86,7 +87,7 @@ func superviseHost(cwd, binary, home, dir string) error {
 	}
 	go func() {
 		scanner := bufio.NewScanner(output)
-		scanner.Buffer(make([]byte, 4096), supervisor.MaxFrame)
+		scanner.Buffer(make([]byte, 4096), bridge.MaxResponseFrame)
 		for scanner.Scan() {
 			var lifecycle struct {
 				ID    int             `json:"id"`

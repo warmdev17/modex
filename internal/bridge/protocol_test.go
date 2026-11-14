@@ -32,3 +32,13 @@ func TestDecodeThreadStart(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestResultTooLargeReturnsErrorBeforeRelayWrite(t *testing.T) {
+	if _, err := EncodeResult(7, strings.Repeat("x", 32*1024*1024)); err == nil {
+		t.Fatal("oversized result must not reach the supervisor scanner")
+	}
+	raw, err := EncodeResult(8, strings.Repeat("x", 5*1024*1024))
+	if err != nil || len(raw) < 5*1024*1024 {
+		t.Fatal("valid large result was rejected")
+	}
+}
