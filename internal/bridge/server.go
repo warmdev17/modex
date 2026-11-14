@@ -56,6 +56,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "references/list":
+		allowed["workspace"] = true
+		allowed["force_reload"] = true
 	case "client/attached":
 		allowed["attached"] = true
 	case "status":
@@ -85,6 +88,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["turn_id"] = true
 		allowed["workspace"] = true
 	case "turn/start":
+		allowed["references"] = true
 		allowed["attachments"] = true
 		allowed["thread_id"] = true
 		allowed["text"] = true
@@ -127,6 +131,14 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 	}
 	switch cmd.Method {
+	case "references/list":
+		force := false
+		if raw, ok := p["force_reload"]; ok {
+			if string(raw) == "null" || json.Unmarshal(raw, &force) != nil {
+				return nil, errors.New("force_reload must be boolean")
+			}
+		}
+		return listReferences(fetch, cwd, force)
 	case "client/attached":
 		var attached bool
 		if raw, ok := p["attached"]; !ok || string(raw) == "null" || json.Unmarshal(raw, &attached) != nil {
@@ -340,6 +352,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 		if metadata.Thread.Cwd != cwd {
 			return nil, errors.New("thread outside workspace")
+		}
+		input, err = appendReferences(fetch, cwd, input, p["references"])
+		if err != nil {
+			return nil, err
 		}
 		params := map[string]any{"threadId": id, "input": input}
 		if model != "" {
