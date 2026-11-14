@@ -101,6 +101,7 @@ private fun ModexApp() {
             onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect,
             takeoverSession = vm.takeoverThread, onTakeover = vm::takeOver,
             models = vm.models, modelCatalogStatus = vm.modelCatalogStatus,
+            referenceCatalog = vm.references.catalog, referencesLoading = vm.references.loading, referenceStatus = vm.references.status, onRefreshReferences = { vm.refreshReferences() },
             threadWorkspaces = vm.threadWorkspaces, threadListLoading = vm.threadListLoading,
             registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus,
             attachments = vm.attachments.drafts[vm.selected].orEmpty(), attachmentWorking = vm.attachments.working,

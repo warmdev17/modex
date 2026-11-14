@@ -399,3 +399,27 @@ python3 scripts/test_android_transport.py --host /path/to/modex-host --adb /path
 ```
 
 This does not restart a production supervisor or install on a physical phone.
+
+## Skills on Android
+
+In an open session, type **@** to search the remote project's skills, or use
+**+ → Skills**. Choose a result to insert Codex's `$name` marker and bind its
+exact remote skill path. Remove its chip or delete the marker to remove the
+binding. Selections stay with each session draft through rotation; they are
+not an offline skill installation or a process-death persistence guarantee.
+
+Update both host and APK. Discovery uses native `skills/list`, including
+installed plugin skills. Disabled skills cannot be selected. **Refresh** reloads
+the catalogue; Codex's `skills/changed` notification also refreshes it.
+The host revalidates up to eight selections against fresh discovery before
+sending native skill inputs. Regular text chat still works when discovery fails.
+
+The typed reference catalogue separates discovery from composer selection,
+leaving room for MCP/subagent/plugin adapters. Those additional execution and
+installation flows are not implemented. See the [reference contract](docs/references-contract.md).
+
+Picker regression (install both debug APKs on an emulator first):
+
+```sh
+adb -s emulator-5554 shell am instrument -w -e preview skill-picker dev.modex.test/dev.modex.TransportSmoke
+```

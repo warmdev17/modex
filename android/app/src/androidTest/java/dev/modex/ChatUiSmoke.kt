@@ -31,7 +31,7 @@ fun Instrumentation.chatUiSmoke() {
                 listOf("fixture-one","fixture-two","standalone"), mapOf("standalone" to "Standalone chat", "fixture-one" to "Modex mobile redesign", "fixture-two" to "SSH approval flow"),
                 listOf(ChatEntry(role = "You", text = "Make this easier to use on my phone.", status = "interrupted", durationMs = 1200), ChatEntry(role = "Codex", text = markdown)), false, false, false, "", "",
                 chosenModel, emptyList(), emptySet(),
-                { current = it; selected = it }, {}, {}, { _, _, _ -> }, { text, model, effort -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, registeredProjects = listOf(RemoteProject("p1", "modex", listOf("/work/modex")), RemoteProject("p2", "other", listOf("/work/other"))), projectMembership = mapOf("fixture-one" to "p1", "fixture-two" to "p2"), threadWorkspaces = mapOf("fixture-one" to "/work/modex", "fixture-two" to "/work/other", "standalone" to "/generated/ssh-x20"), attachments = attachmentFiles, onPhoneFiles = { phoneChosen = true }, onRemoteFiles = { remoteChosen = true }, onRemoveAttachment = { path -> attachmentFiles = attachmentFiles.filter { it.path != path } }, sessionEffort = chosenEffort, onModelChoice = { m, e -> chosenModel = m; chosenEffort = e }, models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
+                { current = it; selected = it }, {}, {}, { _, _, _ -> }, { text, model, effort, _ -> attempted = text; attemptedModel = model; attemptedEffort = effort; false }, { _, _ -> }, {}, {}, registeredProjects = listOf(RemoteProject("p1", "modex", listOf("/work/modex")), RemoteProject("p2", "other", listOf("/work/other"))), projectMembership = mapOf("fixture-one" to "p1", "fixture-two" to "p2"), threadWorkspaces = mapOf("fixture-one" to "/work/modex", "fixture-two" to "/work/other", "standalone" to "/generated/ssh-x20"), attachments = attachmentFiles, onPhoneFiles = { phoneChosen = true }, onRemoteFiles = { remoteChosen = true }, onRemoveAttachment = { path -> attachmentFiles = attachmentFiles.filter { it.path != path } }, sessionEffort = chosenEffort, onModelChoice = { m, e -> chosenModel = m; chosenEffort = e }, models = listOf(ModelOption("fixture-custom", "Fixture custom", "medium", listOf("low" to "Fast", "medium" to "Balanced", "high" to "Deep")))
             ) } }
         } }
         fun node(label: String): AccessibilityNodeInfo? {
@@ -161,7 +161,7 @@ fun Instrumentation.historyScrollSmoke() {
         var olderRequests = 0
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             "fixture", true, false, "history", listOf("history"), emptyMap(),
-            messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {},
+            messages, false, loading, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _, _ -> false }, { _, _ -> }, {}, {},
             hasOlderHistory = paged, olderHistoryLoading = olderLoading, onOlderHistory = { olderRequests++; olderLoading = true }
         ) } } } }
         waitForIdleSync(); Thread.sleep(700)
@@ -255,7 +255,7 @@ fun Instrumentation.commandTimelineSmoke() {
             messages = updateChat(messages, "item/commandExecution/outputDelta", org.json.JSONObject("""{"itemId":"c","delta":"TOOL_OUTPUT_MARKER"}"""))
             activity.setContent { ModexTheme { Surface { ChatWorkspace(
                 "fixture", true, false, "tools", listOf("tools"), emptyMap(), messages,
-                false, false, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _ -> false }, { _, _ -> }, {}, {}
+                false, false, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _, _ -> false }, { _, _ -> }, {}, {}
             ) } } }
         }
         fun node(label: String, n: AccessibilityNodeInfo? = uiAutomation.rootInActiveWindow): AccessibilityNodeInfo? {

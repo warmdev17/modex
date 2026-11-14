@@ -25,7 +25,7 @@ internal fun Instrumentation.attachmentPreviewSmoke() {
         runOnMainSync { activity.setContent { ModexTheme { Surface {
             ChatWorkspace(host = "preview", connected = true, connecting = false, error = "", sessionModel = "fixture", selected = "t", threads = listOf("t"), titles = emptyMap(),
                 messages = listOf(ChatEntry("u", "You", "Attached earlier", attachments = files)), decisions = emptyList(), busy = false, historyLoading = false,
-                hasMore = false, sessionSettings = "", answeringDecisionIds = emptySet(), onMore = {}, onSelect = {}, onCreate = { _, _, _ -> }, onSend = { _, _, _ -> false }, onAnswer = { _, _ -> }, onRefresh = {}, onConnection = {}, onDisconnect = {},
+                hasMore = false, sessionSettings = "", answeringDecisionIds = emptySet(), onMore = {}, onSelect = {}, onCreate = { _, _, _ -> }, onSend = { _, _, _, _ -> false }, onAnswer = { _, _ -> }, onRefresh = {}, onConnection = {}, onDisconnect = {},
                 attachments = files, loadAttachment = { File(it.path) })
         } } } }
         fun node(label: String): AccessibilityNodeInfo? {
