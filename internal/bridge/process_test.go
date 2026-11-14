@@ -39,6 +39,11 @@ func TestChildProtocol(t *testing.T) {
 		if request.Method == "initialized" {
 			continue
 		}
+		if request.Method == "oversized" {
+			_ = encoder.Encode(map[string]any{"id": request.ID, "result": strings.Repeat("x", maxUpstreamFrame+1)})
+			_ = encoder.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"turnId": "unrelated"}})
+			continue
+		}
 		if request.Method == "hang" {
 			time.Sleep(time.Minute)
 			continue
@@ -210,5 +215,42 @@ func TestProcessCloseIdleAllowsEOFShutdown(t *testing.T) {
 	p.CloseIdle()
 	if raw, err := os.ReadFile(marker); err != nil || string(raw) != "closed" {
 		t.Fatalf("child did not finish EOF cleanup: %v", err)
+	}
+}
+
+func TestPersistentOversizedReplyKeepsOtherTurnsAndBackend(t *testing.T) {
+	t.Setenv("MODEX_FAKE_CHILD", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	p, err := StartProcess(ctx, os.Args[0], []string{"-test.run=^TestChildProtocol$"}, t.TempDir(), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	events := make(chan string, 1)
+	p.SetNotificationHandler(func(method string, _ json.RawMessage) { events <- method })
+	if _, err = p.CallPersistent(ctx, "oversized", nil); err == nil {
+		t.Fatal("oversized reply accepted")
+	}
+	select {
+	case method := <-events:
+		if method != "turn/completed" {
+			t.Fatal(method)
+		}
+	case <-ctx.Done():
+		t.Fatal("oversized history stopped another turn")
+	}
+	if _, err = p.CallPersistent(ctx, "test", nil); err != nil {
+		t.Fatalf("backend died: %v", err)
+	}
+}
+
+func TestOversizedFrameDrainsBeforeNextFrame(t *testing.T) {
+	r := bufio.NewReader(strings.NewReader(strings.Repeat("x", maxUpstreamFrame+1) + "\n{}\n"))
+	if _, err := readFrame(r); err == nil {
+		t.Fatalf("oversize: %v", err)
+	}
+	if raw, err := readFrame(r); err != nil || string(raw) != "{}" {
+		t.Fatalf("next frame: %s %v", raw, err)
 	}
 }

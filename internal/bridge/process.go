@@ -15,6 +15,8 @@ import (
 
 const maxUpstreamFrame = 16 * 1024 * 1024
 
+var errUpstreamFrameTooLarge = errors.New("app-server frame exceeds 16 MiB limit; refresh state, do not replay uncertain commands")
+
 // Process owns one app-server. A failed/timed-out exchange closes it rather than
 // retrying an operation whose outcome may be unknown.
 type Process struct {
@@ -55,6 +57,15 @@ func (p *Process) Respond(ctx context.Context, id, result json.RawMessage) error
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 	return json.NewEncoder(p.stdin).Encode(map[string]any{"id": id, "result": result})
+}
+
+func (p *Process) RespondError(ctx context.Context, id, rpcError json.RawMessage) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	return json.NewEncoder(p.stdin).Encode(map[string]any{"id": id, "error": rpcError})
 }
 
 func (p *Process) Reject(id json.RawMessage) error {
@@ -196,6 +207,16 @@ func (p *Process) readLoop() {
 	defer p.Close()
 	for {
 		line, err := readFrame(p.reader)
+		if errors.Is(err, errUpstreamFrameTooLarge) {
+			// The frame was drained. Fail uncertain calls without killing other turns.
+			p.mu.Lock()
+			for id, ch := range p.pending {
+				delete(p.pending, id)
+				ch <- processResponse{err: err}
+			}
+			p.mu.Unlock()
+			continue
+		}
 		if err != nil {
 			p.mu.Lock()
 			if !p.closed {
@@ -275,16 +296,22 @@ func (p *Process) failPending(err error) {
 
 func readFrame(reader *bufio.Reader) ([]byte, error) {
 	var line []byte
+	oversized := false
 	for {
 		chunk, prefix, err := reader.ReadLine()
 		if err != nil {
 			return nil, err
 		}
-		if len(line)+len(chunk) > maxUpstreamFrame {
-			return nil, errors.New("app-server frame exceeds 16 MiB limit")
+		if oversized || len(line)+len(chunk) > maxUpstreamFrame {
+			oversized = true
+			line = nil
+		} else {
+			line = append(line, chunk...)
 		}
-		line = append(line, chunk...)
 		if !prefix {
+			if oversized {
+				return nil, errUpstreamFrameTooLarge
+			}
 			return line, nil
 		}
 	}
