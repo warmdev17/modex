@@ -1,5 +1,15 @@
 # Modex project state
 
+## Automatic older-history loading
+
+Updated: 2026-11-14. Branch `feat/lazy-history-loading`, baseline `1c3925e`. Primary implemented the follow-up to paged history: approaching the first three visible items automatically requests older turns after initial positioning at the latest message. Existing host pagination, cache budget, connection ownership guards and saved host profile remain in use. A single in-flight request is enforced; errors pause automatic retries and expose a retry action. Retry clears the previous error. Timeline loading uses a small overlay rather than inserting a header item.
+
+Stable turn/role/item keys preserve the currently visible message while older data arrives, including continued scrolling during the request. Entries without native IDs retain legacy index keys. The earlier request-time numeric anchor was removed after the delayed-page emulator regression demonstrated a jump when scrolling continued in flight.
+
+Verification on the accompanying implementation working tree: JDK 21 Gradle `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --offline --no-daemon` PASS, 80 unit tests, zero failures/errors/skips. Emulator history-scroll regression PASS: async latest positioning, append/tall-message behavior, no early request, automatic request near the beginning, one in-flight request and stable prepend position after continued scrolling. RED on the prior implementation reported zero automatic requests; the first automatic-loading attempt failed the prepend-anchor assertion before stable keys fixed it. No Go changes or repeated Go suites.
+
+Updated APK/test APK installed on existing emulator-5554 using install -r; no emulator started/stopped, profile wiped or host restarted for this Android-only change. The shared supervisor had already been updated on bradar's explicit deployment request, and reconnect after resetting only the old instance cursor was verified as Connected SSH with Greet user history. Physical-phone testing and explicit network-failure retry instrumentation remain unverified. No push/PR/merge/release. Next: bradar can test automatic history loading in the existing emulator.
+
 ## Paged history cache and reconnect ownership
 
 Updated: 2026-11-14. Branch `feat/paged-history-cache`, baseline `3d4625f`; host committed as `3ead74a`, Android changes verified in the accompanying commit. Primary owns implementation and integration. Plan: [paged history](docs/superpowers/plans/2026-11-14-paged-history-cache.md); contract: [history](docs/history-contract.md). Supersedes earlier unpaginated history and visible-history-on-disconnect descriptions below.
