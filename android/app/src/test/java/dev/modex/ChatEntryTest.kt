@@ -6,6 +6,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChatEntryTest {
+    @Test fun showsNativeCliPromptAndAdoptsOptimisticPhonePromptWithoutDuplication() {
+        val params=JSONObject("""{"turnId":"turn","item":{"id":"native-user","type":"userMessage","content":[{"type":"text","text":"From CLI"}]}}""")
+        val remote=updateChat(emptyList(),"item/completed",params).single()
+        assertEquals("You",remote.role)
+        assertEquals("From CLI",remote.text)
+        assertEquals("turn",remote.turnId)
+        val optimistic=ChatEntry("local-1","You","From CLI",status="inProgress",turnId="turn",startedAtMs=123)
+        val adopted=updateChat(listOf(optimistic),"item/completed",params)
+        assertEquals(1,adopted.size)
+        assertEquals("native-user",adopted.single().id)
+        assertEquals(123L,adopted.single().startedAtMs)
+        assertEquals(adopted,updateChat(adopted,"item/completed",params))
+    }
     private fun event(raw: String) = JSONObject(raw)
     @Test fun separatesAgentMessagesAndCompletesWithoutDuplicating() {
         var items = emptyList<ChatEntry>()

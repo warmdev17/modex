@@ -33,7 +33,8 @@ func run() error {
 	binary := flag.String("codex", "codex", "Codex executable")
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")
 	profile := flag.String("profile", "", "Named profile (not yet supported; fails explicitly)")
-	cli := flag.Bool("cli", false, "Launch a native Codex CLI registered for phone takeover (Linux/macOS)")
+	cli := flag.Bool("cli", false, "Open a native Codex TUI on the shared supervisor backend (Linux/macOS)")
+	nativeSocket := flag.String("native-socket", "", "Private native TUI gateway socket (internal --serve option)")
 	thread := flag.String("thread", "", "Existing session UUID for --cli; omit to choose by title or create new")
 	serve := flag.Bool("serve", false, "Serve Modex commands over stdin/stdout for the lifetime of this connection")
 	background := flag.Bool("background", false, "Start a detached supervisor (Linux/macOS)")
@@ -53,7 +54,17 @@ func run() error {
 	if modes > 1 {
 		return fmt.Errorf("choose only one host mode")
 	}
-	if *background || *supervise || *attach || *stop {
+	if *nativeSocket != "" && (!*serve || !filepath.IsAbs(*nativeSocket)) {
+		return fmt.Errorf("--native-socket requires --serve and an absolute private path")
+	}
+	if *cli && *stateDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		*stateDir = filepath.Join(home, ".local", "state", "modex-phone")
+	}
+	if *background || *supervise || *attach || *stop || *cli {
 		if *stateDir == "" {
 			return fmt.Errorf("--state-dir is required for supervisor modes")
 		}
@@ -102,16 +113,11 @@ func run() error {
 		*home = absolute
 	}
 	if *cli {
-		if *thread == "" {
-			*thread, err = chooseCLIThread(cwd, *binary, *home)
-			if errors.Is(err, errCLICancelled) {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
+		err := runSharedCLI(cwd, *binary, *home, *thread, *stateDir)
+		if errors.Is(err, errCLICancelled) {
+			return nil
 		}
-		return runCLI(cwd, *binary, *home, *thread)
+		return err
 	}
 	if *background {
 		return startBackground(cwd, *binary, *home, *stateDir)
@@ -120,7 +126,7 @@ func run() error {
 		return superviseHost(cwd, *binary, *home, *stateDir)
 	}
 	if *serve {
-		return serveHost(cwd, *binary, *home)
+		return serveHostWithSocket(cwd, *binary, *home, *nativeSocket)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

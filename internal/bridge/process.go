@@ -128,6 +128,16 @@ func (p *Process) Call(ctx context.Context, method string, params any) (json.Raw
 }
 
 func (p *Process) CallEvents(ctx context.Context, method string, params any, onNotification func(string, json.RawMessage)) (json.RawMessage, error) {
+	return p.callEvents(ctx, method, params, onNotification, false)
+}
+
+// CallPersistent leaves the supervisor-owned backend alive after an uncertain reply.
+// Callers must refresh state, never automatically replay the request.
+func (p *Process) CallPersistent(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	return p.callEvents(ctx, method, params, nil, true)
+}
+
+func (p *Process) callEvents(ctx context.Context, method string, params any, onNotification func(string, json.RawMessage), persistent bool) (json.RawMessage, error) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -158,9 +168,22 @@ func (p *Process) CallEvents(ctx context.Context, method string, params any, onN
 		return result.raw, result.err
 	case <-ctx.Done():
 		p.removePending(id)
+		if persistent {
+			return nil, errors.New("Codex reply timed out or canceled; backend retained; refresh state before retrying")
+		}
 		p.Close()
 		return nil, errors.New("Codex request timed out or canceled; connection closed")
 	}
+}
+
+func (p *Process) Notify(method string, params any) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	message := map[string]any{"method": method}
+	if params != nil {
+		message["params"] = params
+	}
+	return json.NewEncoder(p.stdin).Encode(message)
 }
 
 func (p *Process) removePending(id int) {

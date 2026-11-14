@@ -43,6 +43,9 @@ func TestChildProtocol(t *testing.T) {
 			time.Sleep(time.Minute)
 			continue
 		}
+		if request.Method == "pause" {
+			time.Sleep(50 * time.Millisecond)
+		}
 		if request.Method == "crash" {
 			os.Exit(2)
 		}
@@ -73,6 +76,25 @@ func TestChildProtocol(t *testing.T) {
 		_ = os.WriteFile(marker, []byte("closed"), 0600)
 	}
 	os.Exit(0)
+}
+
+func TestPersistentCallTimeoutKeepsBackend(t *testing.T) {
+	t.Setenv("MODEX_FAKE_CHILD", "1")
+	p, err := StartProcess(context.Background(), os.Args[0], []string{"-test.run=^TestChildProtocol$"}, t.TempDir(), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	if _, err = p.CallPersistent(ctx, "pause", nil); err == nil {
+		t.Fatal("missing uncertainty error")
+	}
+	ctx2, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if _, err = p.Call(ctx2, "test", nil); err != nil {
+		t.Fatalf("timed out client killed backend: %v", err)
+	}
 }
 
 func TestProcessPreservesAndAnswersServerRequest(t *testing.T) {

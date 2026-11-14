@@ -94,6 +94,7 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
             "item/started", "item/completed", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
                 if (id == selected) {
                     messages = updateChat(messages, method, params.apply { if (optString("turnId").isBlank()) put("turnId", activeTurns[id].orEmpty()) })
+                        .map { if (it.role == "You" && it.status == "inProgress" && it.startedAtMs == null) it.copy(startedAtMs = now()) else it }
                     changed(id)
                 }
         }

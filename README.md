@@ -202,34 +202,52 @@ python3 scripts/live_supervisor_smoke.py --host /tmp/modex-host --model gpt-6.1-
 
 The first uses a fake Codex process and checks auth, exclusive ownership, disconnect/replay, CLI attach, orphan cleanup and stop. The second makes a paid real-provider turn, detaches after acknowledgement, reconnects by instance/cursor, verifies exact streamed output, then stops the fixture supervisor.
 
-## Explicit desktop CLI takeover (Linux/macOS)
+## Shared desktop CLI and phone sessions (Linux/macOS)
 
-Install the local commands once (Go 1.23+ required), then run from your project:
+The supervisor owns one persistent Codex app-server. Android connects through
+SSH; the real Codex terminal UI connects through a private Unix WebSocket gateway.
+Both clients control the same loaded session. Closing a terminal or disconnecting
+the phone does not stop a dispatched turn. Stop is an explicit user action.
 
-```sh
-make install-cli
-modex cli
-```
-
-The default install directory is `~/.local/bin`; add it to your PATH if needed, or invoke `~/.local/bin/modex cli`. `PREFIX=/your/prefix` overrides the install location. Keep `modex` and `modex-host` beside each other, or pass `modex cli --host-binary /absolute/modex-host`.
-
-Choose a session by its title and number, or `0` for a new conversation. `n`/`p` page through sessions; `q` cancels. Sessions are listed for the current working directory, most recently updated first; a missing title falls back to a preview. Pass `--workspace /absolute/project` to choose another directory. New conversations use the native TUI; Modex discovers their Codex-generated ID and registers takeover automatically. No ID copying or seed prompt is needed. A conversation appears on the phone once Codex has persisted it.
-
-From this repository, `make cli` also opens the picker. Exact-ID shortcuts remain available. To resume a session, first close any normal CLI/Desktop writer of it:
+After installing the two sibling binaries, set up the user service once:
 
 ```sh
-make cli
-# Optional shortcut:
-modex cli --thread <exact-session-uuid>
-# Or, for a different CODEX_HOME:
-/tmp/modex-host --cli --thread <exact-session-uuid> --workspace /absolute/project --codex-home /absolute/codex-home
+modex service install --workspace /absolute/project
+modex service start
+cd /absolute/project
+modex
+# Equivalent entry point, with an optional exact-session shortcut:
+modex cli --thread <session-uuid>
 ```
 
-Use the same Codex home as the supervisor. This opens the real Codex TUI against its own private Unix app-server and registers a private control socket under `$CODEX_HOME/modex-cli/<thread-id>/` (default `~/.codex`). The installed Codex must support `--remote unix://...`, `app-server --listen unix://...` and `thread/loaded/list`.
+`modex` opens the existing title-based session picker; `0` creates a new native
+conversation, `n`/`p` change pages, and `q` exits. The default state is
+`~/.local/state/modex-phone`, shared by the CLI, service, phone and emulator.
+Use `modex cli --state-dir /private/custom-state` for another supervisor.
+`--workspace`, `--codex`, `--codex-home` and `--host-binary` remain available.
 
-On Android, selecting a session held by another writer shows **Take over on phone**. Confirmation closes only the registered launcher's children, waits for both backend and TUI exit, then resumes the same ID and reloads history. The launcher pauses its TUI while checking that its dedicated server has exactly that session loaded. Changed/multiple loaded sessions are refused and the TUI continues. No PID lookup, global process killing, session forking or prompt resending is used. Normal CLI/Desktop instances must still be closed manually.
+The supervisor endpoint publishes its native socket only in its private state
+file. The socket is mode 0600 under a private directory, never a public TCP
+listener. Native request IDs are multiplexed through the same backend and
+approvals can be answered from either view; the first answer wins. Slow native
+clients disconnect independently. Client unsubscribe never unloads another
+client's session. Do not replay uncertain prompts after a transport failure.
 
-Takeover can interrupt active turns, approvals or file writes; background shell processes may survive. It transfers persisted history, not an in-flight computation. If the result is uncertain, refresh/read state before any manual retry. There is no forced SIGKILL escalation in the takeover operation. Ordinary launcher shutdown handles TERM/HUP and reaps its own children; a killed/crashed launcher can leave a stale registration, which requires manual inspection rather than guessing a process to stop. The host uses [coder/websocket](https://github.com/coder/websocket) v1.8.14 under its [ISC license](docs/licenses/coder-websocket-ISC.txt). This launcher is unavailable on Windows. Rebuild/restart the supervisor while idle and install the updated APK before phone testing.
+Managed sessions remain owned by the service until it stops. An independent
+Codex CLI/Desktop process outside Modex still owns a separate backend: close
+that writer manually or explicitly use the legacy registered takeover. Modex
+does not silently signal it. A new managed conversation becomes discoverable
+once Codex persists it. Legacy JSONL sessions use bounded whole-history reads
+with local page slicing when Codex explicitly rejects native history pagination;
+native paginated sessions keep their native cursors.
+
+An older running supervisor cannot gain the native gateway from a binary
+replacement alone. Stop it **when idle**, then restart the updated host/service
+using the same state directory. No profile wipe or session migration is needed.
+The native TUI requires a Codex version supporting `--remote unix://PATH`.
+Native-only tool requests require a connected native TUI; Android retains its
+existing supported approval/input forms. Native Windows hosting still requires
+WSL2. The gateway reuses coder/websocket under its [ISC license](docs/licenses/coder-websocket-ISC.txt).
 
 ## OpenSSH client transport
 

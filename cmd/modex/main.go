@@ -23,6 +23,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 1 {
+		return launchCLI(nil)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "service" {
 		return service.Run(os.Args[2:], os.Stdout)
 	}
