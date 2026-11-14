@@ -144,7 +144,7 @@ make host-attach   # attach JSON stdin/stdout; EOF detaches
 make host-stop     # stop the supervisor
 ```
 
-Defaults: binary `/tmp/modex-host`, workspace = current repository, state directory
+Defaults: binary `$HOME/.local/bin/modex-host`, workspace = current repository, state directory
 `$HOME/.local/state/modex-phone`, Codex executable `codex`. Match the binary and
 state paths in the phone's connection settings. Override them when needed:
 
@@ -157,7 +157,7 @@ make host-stop STATE_DIR=/private/path/modex-state
 output path (its parent directory must exist). Builds replace the binary atomically;
 an already running supervisor keeps its old executable until explicitly stopped
 and started again. Starting while one is running fails without restarting it.
-The default `/tmp` binary may be removed at reboot; run `make host` to rebuild.
+The default binary is installed in the persistent user bin directory.
 These targets inherit your Codex configuration and do not enable approval prompts
 or select an approval-testing wrapper automatically.
 
@@ -205,9 +205,9 @@ The first uses a fake Codex process and checks auth, exclusive ownership, discon
 ## Shared desktop CLI and phone sessions (Linux/macOS)
 
 For a local development build, run `./scripts/build.sh` from this checkout.
-It builds and installs both commands into `~/.local/bin` and refreshes
-`/tmp/modex-host` for the existing phone/emulator profile. `PREFIX` and
-`HOST_BINARY` override those destinations. If needed it adds the install
+It builds and installs both commands into `~/.local/bin`; phone and emulator
+profiles use the same installed `modex-host` path. `PREFIX` changes the install
+directory; `HOST_BINARY` optionally adds a separate host destination. If needed it adds the install
 directory to your Bash, Zsh or Fish startup configuration without replacing
 other settings; open a new terminal after that first PATH change. On rebuild,
 use the same script. No Make command is required for day-to-day operation.

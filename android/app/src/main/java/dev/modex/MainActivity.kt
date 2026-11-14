@@ -44,7 +44,7 @@ private fun ModexApp() {
     val saved = vm.savedConnection
     var host by rememberSaveable { mutableStateOf(saved?.host.orEmpty()) }; var port by rememberSaveable { mutableStateOf(saved?.port?.toString() ?: "22") }
     var user by rememberSaveable { mutableStateOf(saved?.user.orEmpty()) }; var pin by rememberSaveable { mutableStateOf(saved?.pin.orEmpty()) }
-    var binary by rememberSaveable { mutableStateOf(saved?.binary ?: "/tmp/modex-host") }; var state by rememberSaveable { mutableStateOf(saved?.state.orEmpty()) }
+    var binary by rememberSaveable { mutableStateOf(saved?.binary.orEmpty()) }; var state by rememberSaveable { mutableStateOf(saved?.state.orEmpty()) }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_START) vm.foreground() }
@@ -131,7 +131,7 @@ private fun ModexApp() {
                     OutlinedTextField(port, { port = it }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
                 }
                 OutlinedTextField(pin, { pin = it }, label = { Text("Verified SHA256 host fingerprint") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(binary, { binary = it }, label = { Text("Remote modex-host path") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(binary, { binary = it }, label = { Text("Remote modex-host path") }, placeholder = { Text("Absolute path shown by modex service install") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(state, { state = it }, label = { Text("Remote supervisor state directory") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedButton(onClick = {
                     // Returning from the picker must not auto-reconnect with the old key.
@@ -141,7 +141,7 @@ private fun ModexApp() {
                 }, modifier = Modifier.fillMaxWidth()) { Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH private key") }
                 Text("Your key and connection are encrypted on this device. Use Forget saved host to remove them. Passphrase keys are not supported yet.", style = MaterialTheme.typography.bodySmall)
                 if (importError.isNotEmpty()) Text(importError, color = MaterialTheme.colorScheme.error)
-                Button(onClick = { vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary, state)); connectionSettings = false }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
+                Button(onClick = { vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary, state)); connectionSettings = false }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && binary.startsWith("/") && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
                 Row {
                     TextButton(onClick = vm::reset) { Text("Reset session cursor") }
                     TextButton(onClick = { vm.forget(); host = ""; user = ""; pin = ""; state = "" }) { Text("Forget saved host") }
