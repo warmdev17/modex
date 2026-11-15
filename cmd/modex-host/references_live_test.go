@@ -93,3 +93,107 @@ func TestLiveMobileSkillReference(t *testing.T) {
 	}
 	t.Log("PASS: remote catalogue, typed skill input and real-provider skill instructions")
 }
+
+// This exercises an installed plugin without invoking its external tools.
+func TestLiveMobilePluginReference(t *testing.T) {
+	binary := os.Getenv("MODEX_LIVE_PLUGINS_CODEX")
+	if binary == "" {
+		t.Skip("set MODEX_LIVE_PLUGINS_CODEX for a read-only installed-plugin provider test")
+	}
+	workspace := t.TempDir()
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	defer cancel()
+	p, err := bridge.StartProcess(ctx, binary, []string{"app-server", "--listen", "stdio://"}, workspace, os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	completed := make(chan json.RawMessage, 1)
+	backend, err := newSharedBackend(ctx, p, func(method string, params json.RawMessage) {
+		if method == "turn/completed" {
+			select {
+			case completed <- params:
+			default:
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method string, params any) (any, error) {
+		raw, _ := json.Marshal(params)
+		return bridge.HandleEvents(ctx, workspace, bridge.Command{Method: method, Params: raw}, backend.call, nil)
+	}
+	catalog, err := call("references/list", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(catalog)
+	var entries struct {
+		Entries []struct {
+			Kind, Name, Path string
+			Enabled          bool
+		}
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		t.Fatal(err)
+	}
+	name, path := "", ""
+	for _, entry := range entries.Entries {
+		if entry.Kind == "plugin" && entry.Name == "frontend-design" && entry.Enabled {
+			name, path = entry.Name, entry.Path
+			break
+		}
+	}
+	if path == "" {
+		t.Fatal("install and enable frontend-design before running this opt-in test")
+	}
+	created, err := call("threads/start", map[string]any{"permission_mode": "read-only"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = json.Marshal(created)
+	var thread struct{ Thread struct{ ID string } }
+	if json.Unmarshal(raw, &thread) != nil || thread.Thread.ID == "" {
+		t.Fatal("missing thread id")
+	}
+	_, err = call("turn/start", map[string]any{"thread_id": thread.Thread.ID, "text": "@frontend-design This is a transport verification only. Do not run tools or change files. Reply exactly MODEX_PLUGIN_OK.", "references": []map[string]string{{"kind": "plugin", "name": name, "path": path}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-completed:
+		var event struct{ Turn struct{ Status string } }
+		if json.Unmarshal(result, &event) != nil || event.Turn.Status != "completed" {
+			t.Fatal("plugin turn failed")
+		}
+	case <-ctx.Done():
+		t.Fatal("plugin turn did not complete")
+	}
+	history, err := backend.call(ctx, "thread/read", map[string]any{"threadId": thread.Thread.ID, "includeTurns": true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var transcript struct {
+		Thread struct {
+			Turns []struct {
+				Items []struct{ Type, Role, Text string }
+			}
+		}
+	}
+	if json.Unmarshal(history, &transcript) != nil {
+		t.Fatal("invalid history")
+	}
+	found := false
+	for _, turn := range transcript.Thread.Turns {
+		for _, item := range turn.Items {
+			if item.Type == "agentMessage" && strings.TrimSpace(item.Text) == "MODEX_PLUGIN_OK" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing completed assistant response")
+	}
+	t.Log("PASS: installed catalogue, freshly validated typed plugin mention, real-provider completed assistant response; no external plugin tool invocation asserted")
+}

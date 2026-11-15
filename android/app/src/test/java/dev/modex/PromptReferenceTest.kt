@@ -63,4 +63,21 @@ class PromptReferenceTest {
         assertTrue(state.catalog.entries.isEmpty())
         assertFalse(state.loading)
     }
+
+    @Test fun pluginsRetainIdentityAndUseSeparateMarkersFromSkills() {
+        val plugin = PromptReference("plugin", "review", "plugin://review@curated", "Review plugin", "Review", "curated", true, "@review", "review@curated")
+        val selected = listOf(skill, plugin)
+        assertEquals(selected, readReferenceDraft(referenceDraftJson(selected)))
+        assertEquals(selected, referencesInText("\$review @review", selected))
+        assertEquals(listOf(skill), referencesInText("\$review @review-other", selected))
+        assertEquals("\$review ", removeReferenceMarkers("\$review @review", plugin))
+        val inserted = insertReference("@rev", referenceQuery("@rev", 4)!!, plugin)
+        assertEquals("@review ", inserted.first)
+        assertNull(referenceQuery(inserted.first, inserted.second))
+        val params = turnStartParams("one", "@review", "", references = listOf(plugin))
+        assertEquals("plugin://review@curated", params.getJSONArray("references").getJSONObject(0).getString("path"))
+        val catalog = readReferenceCatalog(JSONObject().put("supported_kinds", JSONArray().put("skill").put("plugin"))
+            .put("entries", JSONArray().put(skill.toJson()).put(plugin.toJson())))
+        assertEquals(selected, catalog.entries)
+    }
 }
