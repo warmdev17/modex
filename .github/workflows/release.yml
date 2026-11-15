@@ -1,7 +1,7 @@
 name: Prepare release
 on:
   push:
-    tags: ['v*']
+    tags: ['v*', '!v*-dev.*']
 permissions:
   contents: read
 concurrency:
