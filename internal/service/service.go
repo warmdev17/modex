@@ -34,7 +34,7 @@ func registration(home string) (string, error) {
 
 func Run(args []string, out io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: modex service install|start|stop|status|uninstall")
+		return errors.New("usage: modex service install|start|restart|stop|status|uninstall")
 	}
 	action := args[0]
 	home, err := os.UserHomeDir()
@@ -51,7 +51,7 @@ func Run(args []string, out io.Writer) error {
 	if len(args) != 1 {
 		return errors.New("unexpected service arguments")
 	}
-	if action != "start" && action != "stop" && action != "status" && action != "uninstall" {
+	if action != "start" && action != "restart" && action != "stop" && action != "status" && action != "uninstall" {
 		return errors.New("unknown service action")
 	}
 	info, err := os.Lstat(path)
@@ -67,6 +67,9 @@ func Run(args []string, out io.Writer) error {
 		cmd.Stderr = out
 		return cmd.Run()
 	}
+	if action == "restart" {
+		fmt.Fprintln(out, "Restarting can interrupt active turns; uncertain prompts are never replayed.")
+	}
 	unit := Name + ".service"
 	if runtime.GOOS == "linux" {
 		switch action {
@@ -75,6 +78,11 @@ func Run(args []string, out io.Writer) error {
 				return err
 			}
 			return run("systemctl", "--user", "enable", "--now", unit)
+		case "restart":
+			if err := run("systemctl", "--user", "daemon-reload"); err != nil {
+				return err
+			}
+			return run("systemctl", "--user", "restart", unit)
 		case "stop":
 			fmt.Fprintln(out, "Stopping can interrupt active turns; uncertain prompts are never replayed.")
 			return run("systemctl", "--user", "disable", "--now", unit)
@@ -103,6 +111,8 @@ func Run(args []string, out io.Writer) error {
 	switch action {
 	case "start":
 		return run("launchctl", "bootstrap", domain, path)
+	case "restart":
+		return run("launchctl", "kickstart", "-k", target)
 	case "status":
 		return run("launchctl", "print", target)
 	case "stop":

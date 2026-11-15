@@ -212,6 +212,8 @@ directory to your Bash, Zsh or Fish startup configuration without replacing
 other settings; open a new terminal after that first PATH change. On rebuild,
 use the same script. No Make command is required for day-to-day operation.
 Existing `make host-build`, `make build` and `make install-cli` delegate to it.
+After rebuilding, run `modex service restart` when idle to load the new host.
+Restart can interrupt active turns; it preserves the installed configuration and state.
 
 The supervisor owns one persistent Codex app-server. Android connects through
 SSH; the real Codex terminal UI connects through a private Unix WebSocket gateway.
