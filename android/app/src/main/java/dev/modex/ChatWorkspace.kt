@@ -173,8 +173,8 @@ internal fun ChatWorkspace(
                 FilledTonalButton(onClick = { openNewChat() }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentPadding = PaddingValues(14.dp)) {
                     ChatGlyph(ChatIcon.New); Spacer(Modifier.width(12.dp)); Text("New chat"); Spacer(Modifier.weight(1f))
                 }
-                TextButton(onClick = { scope.launch { drawer.close(); onNewProject() } }, enabled = canSwitch && !attachmentWorking, modifier = Modifier.padding(horizontal = 16.dp)) {
-                    ChatGlyph(ChatIcon.Folder); Spacer(Modifier.width(10.dp)); Text("New project")
+                TextButton(onClick = { scope.launch { drawer.close(); onNewProject() } }, enabled = canSwitch && !attachmentWorking, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentPadding = PaddingValues(14.dp)) {
+                    ChatGlyph(ChatIcon.Folder); Spacer(Modifier.width(12.dp)); Text("New project"); Spacer(Modifier.weight(1f))
                 }
                 OutlinedTextField(search, { search = it }, placeholder = { Text("Search sessions or projects") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
