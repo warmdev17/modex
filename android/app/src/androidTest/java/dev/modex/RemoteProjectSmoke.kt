@@ -55,9 +55,17 @@ internal fun Instrumentation.remoteProjectSmoke() {
             waitForIdleSync(); Thread.sleep(400)
         }
         click("Open sessions")
-        val newChatBounds = android.graphics.Rect().also { await("New chat").getBoundsInScreen(it) }
-        val projectBounds = android.graphics.Rect().also { await("New project").getBoundsInScreen(it) }
-        check(kotlin.math.abs(newChatBounds.centerX() - projectBounds.centerX()) <= 2) { "Sidebar labels are not centered on the same axis" }
+        fun controlBounds(label: String, editable: Boolean = false): android.graphics.Rect {
+            var n = await(label)
+            while (!(if (editable) n.isEditable else n.isClickable)) n = n.parent ?: error("Missing control for $label")
+            return android.graphics.Rect().also { n.getBoundsInScreen(it) }
+        }
+        val newChatBounds = controlBounds("New chat")
+        val projectBounds = controlBounds("New project")
+        val searchBounds = controlBounds("Search sessions or projects", editable = true)
+        val upperGap = projectBounds.centerY() - newChatBounds.bottom
+        val lowerGap = searchBounds.top - projectBounds.centerY()
+        check(kotlin.math.abs(upperGap - lowerGap) <= 2) { "New project is not vertically centered: above=$upperGap below=$lowerGap" }
         uiAutomation.takeScreenshot()?.let { bmp -> File(targetContext.filesDir, "sidebar-actions.png").outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; bmp.recycle() }
         click("New chat"); await("Outside projects"); click("Create chat")
         runOnMainSync { check(started[3].isBlank() && started[4].isBlank()) { "Standalone chat inherited the selected project" } }
