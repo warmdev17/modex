@@ -29,6 +29,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -36,19 +38,18 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop }
 
 @Composable
-internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
-    val color = LocalContentColor.current
+internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color = LocalContentColor.current) {
     if (icon == ChatIcon.Model) {
         Icon(painterResource(R.drawable.ic_openai), description, Modifier.size(22.dp), tint = color)
         return
@@ -60,6 +61,10 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
             ChatIcon.Menu -> { line(4f,6f,20f,6f); line(4f,12f,16f,12f); line(4f,18f,20f,18f) }
             ChatIcon.New -> { line(5f,19f,9f,18f); line(9f,18f,20f,7f); line(20f,7f,17f,4f); line(17f,4f,6f,15f); line(6f,15f,5f,19f); line(14f,7f,17f,10f) }
             ChatIcon.Send -> { line(12f,19f,12f,5f); line(6f,11f,12f,5f); line(12f,5f,18f,11f) }
+            ChatIcon.ChevronRight -> { line(9f,6f,15f,12f); line(15f,12f,9f,18f) }
+            ChatIcon.ChevronDown -> { line(6f,9f,12f,15f); line(12f,15f,18f,9f) }
+            ChatIcon.Down -> { line(12f,5f,12f,19f); line(6f,13f,12f,19f); line(12f,19f,18f,13f) }
+            ChatIcon.Stop -> drawRoundRect(color, Offset(6*u,6*u), Size(12*u,12*u), CornerRadius(u,u))
             ChatIcon.Close -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
             ChatIcon.More -> for (y in listOf(5f,12f,19f)) drawCircle(color,1.4f*u,Offset(12*u,y*u))
             ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }
@@ -142,7 +147,8 @@ internal fun ChatWorkspace(
     LaunchedEffect(newChat) { if (newChat) { model = hostModel; newEffort = defaultEffort(hostModel) } }
     var showModel by rememberSaveable { mutableStateOf(false) }
     var modelInput by rememberSaveable { mutableStateOf("") }
-    val timeline = remember(messages) { thinkingTimeline(messages) }
+    val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
+    val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" } }
     val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
     LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
@@ -173,15 +179,19 @@ internal fun ChatWorkspace(
                     registeredProjects.filter { search.isBlank() || projects[it.id].orEmpty().isNotEmpty() || it.name.contains(search, true) || it.roots.any { root -> root.contains(search,true) } }.forEach { project ->
                         val path = project.id
                         val ids = projects[path].orEmpty()
+                        val expanded = path !in collapsedProjects || search.isNotEmpty()
                         item(key = "folder:$path") {
-                            Surface(onClick = { collapsedProjects = ArrayList(collapsedProjects).apply { if (path in this) remove(path) else add(path) } }, color = Mocha.Mantle, shape = RoundedCornerShape(6.dp)) {
-                                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(onClick = { collapsedProjects = ArrayList(collapsedProjects).apply { if (path in this) remove(path) else add(path) } }, color = Mocha.Mantle, shape = RoundedCornerShape(6.dp), modifier = Modifier.semantics {
+                                contentDescription = "${if (expanded) "Collapse" else "Expand"} project ${project.name}"
+                                stateDescription = if (expanded) "expanded" else "collapsed"
+                            }) {
+                                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                                     ChatGlyph(ChatIcon.Folder)
                                     Column(Modifier.weight(1f).padding(start = 8.dp)) {
                                         Text(project.name.ifBlank { projectName(project.roots.firstOrNull().orEmpty()) }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (project.roots.isNotEmpty()) Text(project.roots.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
-                                    Text(if (path in collapsedProjects) "›" else "⌄", color = Mocha.Subtext)
+                                    ChatGlyph(if (expanded) ChatIcon.ChevronDown else ChatIcon.ChevronRight, color = Mocha.Subtext)
                                 }
                             }
                         }
@@ -228,6 +238,8 @@ internal fun ChatWorkspace(
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
             var openAtLatest by remember(selected) { mutableStateOf(true) }
+            var followLatest by remember(selected) { mutableStateOf(true) }
+            var autoScrolling by remember(selected) { mutableStateOf(false) }
             var requestingOlder by remember(selected) { mutableStateOf(false) }
             fun loadEarlier() {
                 if (!connected || !hasOlderHistory || historyLoading || olderHistoryLoading || requestingOlder) return
@@ -248,20 +260,34 @@ internal fun ChatWorkspace(
                     requestingOlder = false
                 }
             }
-            LaunchedEffect(selected, historyLoading, timeline.size, timeline.lastOrNull(), selectedDecisions.map { it.optString("decision_id") }) {
+            LaunchedEffect(selected) {
+                snapshotFlow {
+                    if (autoScrolling) null else scroll.isScrollInProgress to scroll.canScrollForward
+                }.collect { gesture ->
+                    if (gesture?.first == true) followLatest = !gesture.second
+                }
+            }
+            LaunchedEffect(selected, historyLoading, olderHistoryLoading, requestingOlder) {
                 if (historyLoading) {
                     openAtLatest = true
+                    followLatest = true
                     return@LaunchedEffect
                 }
                 if (olderHistoryLoading || requestingOlder) return@LaunchedEffect
-                val layout = scroll.layoutInfo
-                val nearBottom = layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 2 } ?: true
-                if (timeline.isNotEmpty() && (openAtLatest || nearBottom)) {
-                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == timeline.size + selectedDecisions.size + 1 }
-                    // The final spacer anchors the bottom even when the last message is taller than the viewport.
-                    scroll.scrollToItem(timeline.size + selectedDecisions.size)
-                    openAtLatest = false
-                }
+                // Observe rendered growth too: streaming text keeps expanding after its data arrives.
+                snapshotFlow { Triple(scroll.layoutInfo, followLatest, scroll.isScrollInProgress) }
+                    .collect { (layout, following, scrolling) ->
+                        if ((openAtLatest || following) && !scrolling && layout.totalItemsCount > 0 &&
+                            (openAtLatest || scroll.canScrollForward)) {
+                            autoScrolling = true
+                            try {
+                                scroll.scrollToItem(layout.totalItemsCount - 1)
+                                openAtLatest = false
+                            } finally {
+                                autoScrolling = false
+                            }
+                        }
+                    }
             }
             if (timeline.isEmpty() && selectedDecisions.isEmpty() && !hasOlderHistory) {
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {
@@ -282,10 +308,10 @@ internal fun ChatWorkspace(
                                     entry.attachments.forEach { file -> AttachmentTile(file, loadAttachment, { preview = file }) }
                                 }
                                 if (body.isNotBlank()) Text(body, style = MaterialTheme.typography.bodyLarge)
-                                WorkTimer(entry)
+                                if (entry.status != "inProgress") WorkTimer(entry)
                             }
                         }
-                    } else if (role == "command") CommandCard(entry) else if (role == "reasoning") ThinkingSummary(display, reasoningLabel(entry.summaryParts.lastOrNull().orEmpty().ifBlank { body }), entry.status == "inProgress") else MarkdownMessage(display, selectable = false)
+                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(display, selectable = false)
                     }
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
@@ -293,6 +319,18 @@ internal fun ChatWorkspace(
                 }
                 item(key = "history-bottom") { Spacer(Modifier.height(1.dp)) }
                 }
+                if (!historyLoading && !openAtLatest && scroll.canScrollForward) OutlinedIconButton(
+                    onClick = { scope.launch {
+                        autoScrolling = true
+                        try {
+                            scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                            followLatest = true
+                        } finally { autoScrolling = false }
+                    } },
+                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp).size(48.dp),
+                    shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Mocha.Overlay),
+                    colors = IconButtonDefaults.outlinedIconButtonColors(containerColor = Mocha.Mantle, contentColor = Mocha.Text)
+                ) { ChatGlyph(ChatIcon.Down, "Scroll to latest") }
                 if (hasOlderHistory && (olderHistoryLoading || error.isNotBlank())) Surface(modifier = Modifier.align(Alignment.TopCenter), color = Mocha.Base, shape = RoundedCornerShape(8.dp)) {
                     if (olderHistoryLoading) Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = Mocha.Subtext)
@@ -301,6 +339,14 @@ internal fun ChatWorkspace(
                         Text("Retry loading earlier messages")
                     }
                 }
+            }
+            if (busy && !historyLoading && selected.isNotBlank()) {
+                val promptIndex = reasoningTimeline.indexOfLast { it.role == "You" }
+                val turn = reasoningTimeline.getOrNull(promptIndex)?.takeIf { it.status == "inProgress" }
+                val reasoning = if (turn == null) null else reasoningTimeline.drop(promptIndex + 1).lastOrNull { it.role == "reasoning" }
+                val action = reasoning?.let { reasoningLabel(it.summaryParts.lastOrNull { part -> part.isNotBlank() }.orEmpty().ifBlank { it.text }) }.orEmpty().ifBlank { "Working" }
+                WorkTimer(turn ?: ChatEntry(role = "You", status = "inProgress"), if (stopping) "Stopping" else action,
+                    Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 8.dp))
             }
             PromptComposer(
                 prompt, { updatePrompt(it) }, busy,
@@ -420,7 +466,7 @@ private fun PromptComposer(
             if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
             BasicTextField(editor, { changeEditor(it) }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
-                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex… (@ for skills & plugins)", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
+                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { attachMenu = true }, enabled = attachEnabled) { ChatGlyph(ChatIcon.Attach, "Attach files") }
@@ -446,12 +492,13 @@ private fun PromptComposer(
                             ChatGlyph(ChatIcon.Model)
                             Spacer(Modifier.width(6.dp))
                             Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
-                            if (busy) { Spacer(Modifier.width(6.dp)); Text("working", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
                         }
                     }
                 }
-                FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else enabled && (prompt.isNotBlank() || attachments.isNotEmpty()), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp)) {
-                    if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp) else if (busy) Text("■", modifier = Modifier.semantics { contentDescription = "Stop response" }) else ChatGlyph(ChatIcon.Send,"Send message")
+                FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else enabled && (prompt.isNotBlank() || attachments.isNotEmpty()), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (busy) Mocha.Red else Mocha.Blue, contentColor = Mocha.Base,
+                        disabledContainerColor = if (busy) Mocha.Red else Mocha.Surface, disabledContentColor = Mocha.Base)) {
+                    if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp, color = Mocha.Base) else if (busy) ChatGlyph(ChatIcon.Stop, "Stop response") else ChatGlyph(ChatIcon.Send,"Send message")
                 }
             }
         }

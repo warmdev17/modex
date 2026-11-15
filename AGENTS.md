@@ -13,3 +13,12 @@
 - For both pull requests and direct branch merges, use a merge commit that preserves every original commit. Do not squash or rebase-merge.
 - Report the branch, commits, checks and any remaining uncommitted changes when handing off implementation work.
 - Local branches and commits are part of the implementation workflow. These rules do not authorize pushing, merging, publishing or rewriting shared history without the user's instruction.
+
+# Phone-only development delivery
+
+- During an owner-authorized mobile development session, finishing a verified milestone includes a versioned Android APK, a source tag, and a downloadable GitHub pre-release link; a local build or Actions artifact alone is not delivery. Keep the existing PR/merge rules.
+- Verify package identity, the established signing certificate and an increasing versionCode before publishing. Never rotate the signing identity, uninstall the app or clear its data to work around an update failure. Keep signing keys private; never put them in Git or release assets.
+- Test an in-place APK upgrade with encrypted synthetic state, plus the affected unit, lint and UI checks. Report physical-device gaps separately. Publish checksums and identify the exact source revision.
+- Android-only updates must not restart modex-host. Installing an APK may restart the Android process; keep server-side turns alive and restore the saved connection afterward.
+- Test host changes in an isolated supervisor before deployment. A successful test does not make an ordinary service restart non-disruptive: the current service owns the Codex backend. Do not restart it from its own active turn or discard pending decisions.
+- Until a tested drain/reconnect or persistent-engine handover exists, stage host upgrades and explain the remaining activation step instead of promising uninterrupted restarts. See docs/mobile-development.md.

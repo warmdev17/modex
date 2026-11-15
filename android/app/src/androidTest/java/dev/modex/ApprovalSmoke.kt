@@ -62,12 +62,12 @@ fun Instrumentation.approvalPreview() {
         render(true, listOf(question, hidden))
         check(awaitLabel("Agent input request") != null) { "Question request is not inline" }
         repeat(4) {
-            if (findLabel("Your answer") == null) {
+            if (findLabel("Other") == null) {
                 check(scrollable()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) == true) { "Question input is not reachable" }
                 Thread.sleep(300)
             }
         }
-        check(awaitLabel("Your answer") != null) { "Question input is not inline" }
+        check(awaitLabel("Other") != null) { "Question input is not inline" }
         check(findLabel("HIDDEN_OTHER_THREAD") == null) { "Question from another thread leaked into transcript" }
         screenshot("question-inline.png")
 

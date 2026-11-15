@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,25 +56,14 @@ internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content:
 }
 
 @Composable
-internal fun ThinkingSummary(text: String, title: String, active: Boolean) {
-    var expanded by remember { mutableStateOf(false) }
-    Column {
-        TextButton(onClick = { expanded = !expanded }, colors = ButtonDefaults.textButtonColors(contentColor = Mocha.Subtext), contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp), modifier = Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (active) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = Mocha.Subtext)
-                else Text("·", color = Mocha.Subtext)
-                Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                Text(if (expanded) "⌄" else "›", color = Mocha.Subtext)
-            }
-        }
-        if (expanded) Text(text, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp))
-    }
-}
-
-@Composable
-internal fun WorkTimer(entry: ChatEntry) {
+internal fun WorkTimer(entry: ChatEntry, action: String? = null, modifier: Modifier = Modifier) {
     var now by remember(entry.id) { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(entry.id, entry.status) { while (entry.status == "inProgress") { now = System.currentTimeMillis(); delay(1000) } }
     val duration = if (entry.status == "inProgress") entry.startedAtMs?.let { now - it } else entry.durationMs
-    if (duration != null) Text("${workStatusLabel(entry.status)} · ${formatWorkDuration(duration)}", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+    if (action != null) Row(modifier.semantics(mergeDescendants = true) {
+        contentDescription = "Turn activity: $action" + (duration?.let { " (${formatWorkDuration(it)})" } ?: "")
+    }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("• $action", modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+        if (duration != null) Text("(${formatWorkDuration(duration)})", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+    } else if (duration != null) Text("${workStatusLabel(entry.status)} · ${formatWorkDuration(duration)}", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
 }
