@@ -3,6 +3,9 @@ package dev.modex
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -41,7 +44,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
@@ -60,6 +63,7 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null) {
             ChatIcon.Close -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
             ChatIcon.More -> for (y in listOf(5f,12f,19f)) drawCircle(color,1.4f*u,Offset(12*u,y*u))
             ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }
+            ChatIcon.Skill -> { line(4f,4f,10f,4f); line(10f,4f,12f,6f); line(12f,6f,14f,4f); line(14f,4f,20f,4f); line(20f,4f,20f,19f); line(20f,19f,14f,19f); line(14f,19f,12f,21f); line(12f,21f,10f,19f); line(10f,19f,4f,19f); line(4f,19f,4f,4f); line(12f,6f,12f,21f) }
             ChatIcon.Model -> Unit
             ChatIcon.Attach -> { line(5f,12f,19f,12f); line(12f,5f,12f,19f) }
             ChatIcon.File -> { line(5f,3f,14f,3f); line(14f,3f,19f,8f); line(19f,8f,19f,21f); line(19f,21f,5f,21f); line(5f,21f,5f,3f); line(14f,3f,14f,8f); line(14f,8f,19f,8f) }
@@ -77,13 +81,15 @@ internal fun ChatWorkspace(
     busy: Boolean, historyLoading: Boolean, hasMore: Boolean, error: String, sessionSettings: String,
     sessionModel: String, decisions: List<JSONObject>, answeringDecisionIds: Set<String>,
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
-    onCreate: (String, String, String) -> Unit, onSend: (String, String, String) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
+    onCreate: (String, String, String) -> Unit, onSend: (String, String, String, List<PromptReference>) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit,
     hasOlderHistory: Boolean = false, olderHistoryLoading: Boolean = false, onOlderHistory: () -> Unit = {},
     stopping: Boolean = false, onStop: () -> Unit = {},
     runningThreads: Set<String> = emptySet(),
     takeoverSession: String = "", onTakeover: () -> Unit = {},
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
+    referenceCatalog: ReferenceCatalog = ReferenceCatalog(), referencesLoading: Boolean = false,
+    referenceStatus: String = "", onRefreshReferences: () -> Unit = {},
     sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
     threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
     registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = "",
@@ -112,7 +118,16 @@ internal fun ChatWorkspace(
     val keyboard = LocalSoftwareKeyboardController.current
     var editing by remember(selected) { mutableStateOf<String?>(null) }
     val prompt = drafts[selected].orEmpty()
-    fun updatePrompt(value: String) { drafts = HashMap(drafts).apply { put(selected, value) } }
+    var referenceDrafts by rememberSaveable(host) { mutableStateOf(hashMapOf<String, String>()) }
+    val chosenReferences = referencesInText(prompt, readReferenceDraft(referenceDrafts[selected].orEmpty()))
+    fun updatePrompt(value: String) {
+        drafts = HashMap(drafts).apply { put(selected, value) }
+        referenceDrafts = HashMap(referenceDrafts).apply { put(selected, referenceDraftJson(referencesInText(value, readReferenceDraft(get(selected).orEmpty())))) }
+    }
+    fun addReference(reference: PromptReference) {
+        val values = readReferenceDraft(referenceDrafts[selected].orEmpty()).filterNot { it.kind == reference.kind && it.name == reference.name } + reference
+        referenceDrafts = HashMap(referenceDrafts).apply { put(selected, referenceDraftJson(values.take(8))) }
+    }
     fun applyEdit(text: String) { updatePrompt(text); scope.launch { focus.requestFocus(); keyboard?.show() } }
     editing?.let { text -> AlertDialog(onDismissRequest = { editing = null }, title = { Text("Replace draft?") }, text = { Text("Your current draft will be replaced. The message will be sent as a new turn only when you press Send.") }, confirmButton = { TextButton(onClick = { applyEdit(text); editing = null }) { Text("Replace") } }, dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } }) }
     var newChat by rememberSaveable { mutableStateOf(false) }
@@ -295,9 +310,12 @@ internal fun ChatWorkspace(
                 connected && selected.isNotBlank() && !busy && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
                 modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) }),
-                focus = focus, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop
+                focus = focus, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
+                draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
+                referenceEnabled = connected && selected.isNotBlank() && !historyLoading, chosenReferences = chosenReferences,
+                onAddReference = ::addReference, onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences
             ) {
-                if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) })) updatePrompt("")
+                if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) }, chosenReferences)) updatePrompt("")
             }
         }
     }
@@ -356,11 +374,37 @@ private fun PromptComposer(
     prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
     attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
-    modelColor: Color, focus: FocusRequester, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit, onSend: () -> Unit
+    modelColor: Color, focus: FocusRequester, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
+    draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
+    referenceEnabled: Boolean, chosenReferences: List<PromptReference>, onAddReference: (PromptReference) -> Unit,
+    onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
+    var editor by remember(draftKey) { mutableStateOf(TextFieldValue(prompt, TextRange(prompt.length))) }
+    var fieldFocused by remember { mutableStateOf(false) }
+    var dismissedQuery by remember(draftKey) { mutableStateOf<Pair<String, Int>?>(null) }
+    LaunchedEffect(prompt, draftKey) { if (editor.text != prompt) editor = TextFieldValue(prompt, TextRange(prompt.length)) }
+    val query = referenceQuery(editor.text, editor.selection.start, editor.selection.end)
+    val showReferences = referenceEnabled && fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)
+    BackHandler(showReferences) { dismissedQuery = editor.text to editor.selection.start }
+    fun changeEditor(value: TextFieldValue) { editor = value; onChange(value.text) }
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
+            if (showReferences && query != null) ReferencePicker(referenceCatalog, query.query, referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
+                onDismiss = { dismissedQuery = editor.text to editor.selection.start },
+                onSelect = { reference ->
+                    val (text, cursor) = insertReference(editor.text, query, reference)
+                    onAddReference(reference)
+                    changeEditor(TextFieldValue(text, TextRange(cursor)))
+                    focus.requestFocus()
+                })
+            if (chosenReferences.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                chosenReferences.forEach { reference ->
+                    InputChip(selected = true, colors = InputChipDefaults.inputChipColors(selectedContainerColor = Mocha.Surface, selectedLabelColor = Mocha.Blue, selectedLeadingIconColor = Mocha.Blue, selectedTrailingIconColor = Mocha.Subtext), shape = RoundedCornerShape(6.dp), onClick = { onRemoveReference(reference) }, label = { Text(reference.marker, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = { ChatGlyph(ChatIcon.Skill) }, trailingIcon = { ChatGlyph(ChatIcon.Close) },
+                        modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp).semantics { contentDescription = "Remove skill ${reference.name}" })
+                }
+            }
             if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 attachments.forEach { file -> AttachmentTile(file, loadAttachment, { onPreview(file) }, if (!busy && !attachmentWorking) ({ onRemove(file.path) }) else null) }
             }
@@ -369,15 +413,22 @@ private fun PromptComposer(
                 Text(attachmentProgress, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
-            BasicTextField(prompt, onChange, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
-                modifier = Modifier.fillMaxWidth().focusRequester(focus).heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
-                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex…", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
+            BasicTextField(editor, { changeEditor(it) }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
+                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex… (@ for skills)", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { attachMenu = true }, enabled = attachEnabled) { ChatGlyph(ChatIcon.Attach, "Attach files") }
                     DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                         DropdownMenuItem(text = { Text("From this phone") }, leadingIcon = { ChatGlyph(ChatIcon.Phone) }, enabled = attachEnabled, onClick = { attachMenu = false; onPhoneFiles() })
                         DropdownMenuItem(text = { Text("From connected computer") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, enabled = attachEnabled, onClick = { attachMenu = false; onRemoteFiles() })
+                        DropdownMenuItem(text = { Text("Skills") }, leadingIcon = { ChatGlyph(ChatIcon.Skill) }, enabled = referenceEnabled, onClick = {
+                            attachMenu = false
+                            val start = editor.selection.min; val end = editor.selection.max
+                            val marker = (if (start > 0 && !editor.text[start - 1].isWhitespace()) " " else "") + "@"
+                            changeEditor(TextFieldValue(editor.text.replaceRange(start, end, marker), TextRange(start + marker.length)))
+                            focus.requestFocus()
+                        })
                     }
                 }
                 Box(Modifier.weight(1f)) {

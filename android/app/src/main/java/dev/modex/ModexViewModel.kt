@@ -27,6 +27,7 @@ internal fun explainHostRejection(method: String, detail: String): String {
         detail.contains("takeover_mismatch") -> "The registered CLI has changed sessions or loaded multiple sessions. Nothing was taken over. Close it on your computer."
         detail.contains("takeover_unavailable") -> "The registered CLI is no longer available. Refresh the session before retrying."
         detail.contains("takeover_uncertain") -> "Takeover result is uncertain. Do not retry takeover; refresh and inspect the session first."
+        method == "turn/start" && detail.contains("reference", true) -> "A selected skill is unavailable. Refresh skills and review the prompt before sending a new turn."
         method == "turn/start" && (detail.contains("attachment", true) || detail.contains("select PNG")) -> "An attachment could not be read. Check the file still exists, is at most 20 MiB, and images are PNG, JPEG, GIF or WebP."
         detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
         detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
@@ -88,6 +89,13 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private fun rememberChoice(id: String, reported: ModelChoice? = null) {
         val choice = resolveModelChoice(modelChoices[id], reported, hostChoice, models)
         if (choice.model.isNotBlank()) modelChoices = modelChoices + (id to choice)
+    }
+    internal val references = ReferenceCatalogState()
+    fun refreshReferences(force: Boolean = true) {
+        if (!connected || selected.isBlank() || selectedWorkspace.isBlank()) return
+        if (references.loading && !force) return
+        val workspace = selectedWorkspace
+        request("references/list", JSONObject().put("workspace", workspace).put("force_reload", force), workspace)?.let { references.begin(it, workspace) }
     }
     internal var models by mutableStateOf(emptyList<ModelOption>()); private set
     var modelCatalogStatus by mutableStateOf(""); private set
@@ -179,6 +187,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun loadOlderHistory() = loadHistory(true)
     private fun leaveSession() {
+        references.clear()
         if (selected.isNotBlank()) lastThread = selected
         ownedThread = ""
         sessions.clearSelection()
@@ -283,12 +292,14 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (!connected || threadListLoading) return
         nextCursor?.let { threadListLoading = true; request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("cursor", it), "more") }
     }
-    fun send(text: String, model: String, effort: String = ""): Boolean {
+    internal fun send(text: String, model: String, effort: String = "", references: List<PromptReference> = emptyList()): Boolean {
+        val selectedReferences = referencesInText(text, references)
+        if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
         if (!connected || busy || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
-        val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files), selectedWorkspace), selected)
+        val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace), selected)
         if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         return true
     }
@@ -322,6 +333,12 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             val id = frame.getLong("id")
             val sentAttachments = sentAttachmentPaths.remove(id)
             val operation = pending.remove(id) ?: return
+            if (operation.first == "references/list") {
+                val result = frame.optJSONObject("result")
+                if (result == null) references.fail(id, operation.second, selectedWorkspace)
+                else references.accept(id, operation.second, selectedWorkspace, result)
+                return
+            }
             val historyRequest = historyRequests.remove(id)
             if (operation.first in listOf("threads/start", "threads/resume", "threads/takeover") && (!selectionRequests.remove(id) || !connected)) return
             if (operation.first == "threads/read" && (historyRequest == null || !connected || historyRequest.thread != selected || ownedThread != selected)) return
@@ -395,6 +412,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     rememberChoice(selected, reported)
                     selectedWorkspace = result.getJSONObject("thread").optString("cwd")
+                    refreshReferences(false)
                     threadWorkspaces = threadWorkspaces + (selected to selectedWorkspace)
                     threads = (listOf(selected) + threads).distinct()
                     if (operation.first == "threads/start") {
@@ -436,6 +454,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
+        if (frame.optString("event") == "skills/changed") { refreshReferences(); return }
         val params = frame.optJSONObject("params") ?: return
         sessions.event(frame.optString("event"), params)
         when (frame.optString("event")) {
