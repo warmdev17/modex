@@ -147,7 +147,8 @@ internal fun ChatWorkspace(
     LaunchedEffect(newChat) { if (newChat) { model = hostModel; newEffort = defaultEffort(hostModel) } }
     var showModel by rememberSaveable { mutableStateOf(false) }
     var modelInput by rememberSaveable { mutableStateOf("") }
-    val timeline = remember(messages) { thinkingTimeline(messages) }
+    val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
+    val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" } }
     val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
     LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
@@ -310,7 +311,7 @@ internal fun ChatWorkspace(
                                 if (entry.status != "inProgress") WorkTimer(entry)
                             }
                         }
-                    } else if (role == "command") CommandCard(entry) else if (role == "reasoning") ThinkingSummary(display, reasoningLabel(entry.summaryParts.lastOrNull().orEmpty().ifBlank { body }), entry.status == "inProgress") else MarkdownMessage(display, selectable = false)
+                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(display, selectable = false)
                     }
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
@@ -340,9 +341,9 @@ internal fun ChatWorkspace(
                 }
             }
             if (busy && !historyLoading && selected.isNotBlank()) {
-                val promptIndex = timeline.indexOfLast { it.role == "You" }
-                val turn = timeline.getOrNull(promptIndex)?.takeIf { it.status == "inProgress" }
-                val reasoning = if (turn == null) null else timeline.drop(promptIndex + 1).lastOrNull { it.role == "reasoning" }
+                val promptIndex = reasoningTimeline.indexOfLast { it.role == "You" }
+                val turn = reasoningTimeline.getOrNull(promptIndex)?.takeIf { it.status == "inProgress" }
+                val reasoning = if (turn == null) null else reasoningTimeline.drop(promptIndex + 1).lastOrNull { it.role == "reasoning" }
                 val action = reasoning?.let { reasoningLabel(it.summaryParts.lastOrNull { part -> part.isNotBlank() }.orEmpty().ifBlank { it.text }) }.orEmpty().ifBlank { "Working" }
                 WorkTimer(turn ?: ChatEntry(role = "You", status = "inProgress"), if (stopping) "Stopping" else action,
                     Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 8.dp))

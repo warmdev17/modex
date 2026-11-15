@@ -56,22 +56,6 @@ internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content:
 }
 
 @Composable
-internal fun ThinkingSummary(text: String, title: String, active: Boolean) {
-    var expanded by remember { mutableStateOf(false) }
-    Column {
-        TextButton(onClick = { expanded = !expanded }, colors = ButtonDefaults.textButtonColors(contentColor = Mocha.Subtext), contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp), modifier = Modifier.fillMaxWidth()) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (active) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = Mocha.Subtext)
-                else Text("·", color = Mocha.Subtext)
-                Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                ChatGlyph(if (expanded) ChatIcon.ChevronDown else ChatIcon.ChevronRight)
-            }
-        }
-        if (expanded) Text(text, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp))
-    }
-}
-
-@Composable
 internal fun WorkTimer(entry: ChatEntry, action: String? = null, modifier: Modifier = Modifier) {
     var now by remember(entry.id) { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(entry.id, entry.status) { while (entry.status == "inProgress") { now = System.currentTimeMillis(); delay(1000) } }

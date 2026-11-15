@@ -110,6 +110,7 @@ internal fun Instrumentation.autoFollowSmoke() {
         val activityBounds = Rect().also { activityNode.getBoundsInScreen(it) }
         val inputBounds = Rect().also { find(root()) { it.contentDescription == "Message Codex" }!!.getBoundsInScreen(it) }
         check(activityBounds.bottom <= inputBounds.top) { "Activity is not above prompt input" }
+        check(find(list()) { it.text?.toString()?.contains("Continuing profile work") == true } == null) { "Thinking is duplicated inside the transcript" }
         check(find(root()) { it.text == "working" } == null) { "Duplicate working beside model" }
         check(find(root()) { it.text?.contains("@ for skills") == true } == null) { "Composer has verbose placeholder" }
         var stop = find(root()) { it.contentDescription == "Stop response" } ?: error("No stop button")
@@ -125,11 +126,12 @@ internal fun Instrumentation.autoFollowSmoke() {
         check(find(root()) { it.contentDescription == "Stopping" } != null)
         runOnMainSync {
             busy = false; stopping = false
-            messages = messages.map { if (it.id == "active-user") it.copy(status = "interrupted", durationMs = 12000) else it }
+            messages = messages.map { if (it.id in setOf("active-user", "active-reasoning")) it.copy(status = "interrupted", durationMs = 12000) else it }
         }
         waitForIdleSync(); Thread.sleep(500)
         check(find(root()) { it.contentDescription?.toString()?.startsWith("Turn activity: ") == true } == null) { "Live activity remained after interrupt" }
         check(visible("Interrupted · 12s")) { "Completed history lost interruption timer" }
+        check(find(list()) { it.text?.toString()?.contains("Continuing profile work") == true } == null) { "Historical thinking remained inside the transcript" }
         runOnMainSync {
             busy = true
             messages = messages + ChatEntry(id = "next-user", role = "You", text = "Next task", status = "inProgress", turnId = "next")
