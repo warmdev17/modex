@@ -83,7 +83,13 @@ modex service uninstall
 # Uninstall removes registration, not state, attachments, Codex history or keys.
 ```
 
-For upgrade: stop when safe, install the new binaries, then start again. For
+For a source build upgrade, build/install both binaries with `make build`, then
+run `modex service restart` when idle. Restart preserves the installed configuration
+and state directory; it does not build or install binaries. On Linux it uses
+`systemctl --user restart` without changing enablement; on macOS it uses
+`launchctl kickstart -k` and requires the LaunchAgent to be loaded (use
+`modex service start` first if it was stopped). For packaged upgrades, stop when
+safe, replace the binaries, then start again. For
 configuration changes, stop/uninstall first, then install using the same new-format
 state path. Installation checks exclusive ownership and preserves attachments; it
 refuses a live owner or legacy state. Normal start/restart reuses configured state.
