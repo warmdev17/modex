@@ -17,10 +17,13 @@ internal fun Instrumentation.autoFollowSmoke() {
     try {
         if (Build.VERSION.SDK_INT >= 33) uiAutomation.grantRuntimePermission(targetContext.packageName, android.Manifest.permission.POST_NOTIFICATIONS)
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        var busy by mutableStateOf(false)
+        var stopping by mutableStateOf(false)
+        var stopRequested = false
         var messages by mutableStateOf((0..29).map { ChatEntry(id = "past-$it", role = "You", text = "Past message $it") } + ChatEntry(id = "stream", role = "Codex", text = "Stream start", status = "inProgress"))
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             "fixture", true, false, "follow", listOf("follow"), emptyMap(), messages,
-            false, false, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _, _ -> false }, { _, _ -> }, {}, {}
+            busy, false, false, "", "", "fixture-model", emptyList(), emptySet(), {}, {}, {}, { _, _, _ -> }, { _, _, _, _ -> false }, { _, _ -> }, {}, {}, stopping = stopping, onStop = { stopRequested = true; stopping = true }
         ) } } } }
         fun root(): AccessibilityNodeInfo? {
             uiAutomation.serviceInfo = uiAutomation.serviceInfo
@@ -58,6 +61,7 @@ internal fun Instrumentation.autoFollowSmoke() {
                 bitmap.recycle()
             }
         }
+        check(find(root()) { it.contentDescription == "Scroll to latest" } == null) { "Jump button visible at bottom" }
         await("Stream start")
         val longText = "Stream start\n\n" + (0..39).joinToString("\n\n") { "Stream paragraph $it" } + "\n\nSTREAM_END_FIRST"
         runOnMainSync { messages = messages.dropLast(1) + messages.last().copy(text = longText) }
@@ -80,7 +84,10 @@ internal fun Instrumentation.autoFollowSmoke() {
         check(before.sameAs(after)) { "Streaming moved the reading viewport" }
         before.recycle(); after.recycle()
         check(!atBottom("STREAM_END_SECOND")) { "Streaming pulled reader to bottom" }
-        repeat(12) { if (!atBottom("STREAM_END_SECOND")) scroll(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }
+        var jump = find(root()) { it.contentDescription == "Scroll to latest" } ?: error("No jump button while reading history")
+        while (!jump.isClickable) jump = jump.parent ?: error("Jump button is not clickable")
+        check(jump.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        waitForIdleSync()
         await("STREAM_END_SECOND")
         runOnMainSync { messages = messages + (0..5).map { ChatEntry(id = "batch-$it", role = "You", text = if (it == 5) "BATCH_END" else "Batch message $it") } }
         await("BATCH_END")
@@ -89,7 +96,48 @@ internal fun Instrumentation.autoFollowSmoke() {
         runOnMainSync { messages = messages.dropLast(1) + messages.last().copy(text = "Next stream\n\n" + (0..39).joinToString("\n\n") { "Another paragraph $it" } + "\n\nFINAL_STREAM_END") }
         await("FINAL_STREAM_END")
         screenshot("auto-follow-resumed.png")
-        output.putString("result", "PASS: animated text growth, tall-message reading anchor, resume following at bottom and batched messages")
+        check(find(root()) { it.contentDescription == "Scroll to latest" } == null) { "Jump button remained at bottom" }
+        runOnMainSync {
+            busy = true
+            messages = messages + ChatEntry(id = "active-user", role = "You", text = "Continue profile work", status = "inProgress", turnId = "active", startedAtMs = System.currentTimeMillis() - 9000) +
+                ChatEntry(id = "active-reasoning", role = "reasoning", text = "**Continuing profile work**", status = "inProgress", turnId = "active")
+        }
+        waitForIdleSync(); Thread.sleep(700)
+        screenshot("composer-active.png")
+        val activityNode = find(root()) { it.contentDescription?.toString()?.startsWith("Turn activity: ") == true } ?: error("No activity above composer")
+        val activityText = activityNode.contentDescription.toString()
+        check(activityText.contains("Continuing profile work") && Regex("[0-9]+s").containsMatchIn(activityText)) { "Missing thinking action or elapsed time: $activityText" }
+        val activityBounds = Rect().also { activityNode.getBoundsInScreen(it) }
+        val inputBounds = Rect().also { find(root()) { it.contentDescription == "Message Codex" }!!.getBoundsInScreen(it) }
+        check(activityBounds.bottom <= inputBounds.top) { "Activity is not above prompt input" }
+        check(find(root()) { it.text == "working" } == null) { "Duplicate working beside model" }
+        check(find(root()) { it.text?.contains("@ for skills") == true } == null) { "Composer has verbose placeholder" }
+        var stop = find(root()) { it.contentDescription == "Stop response" } ?: error("No stop button")
+        while (!stop.isClickable) stop = stop.parent ?: error("Stop button is not clickable")
+        val stopBounds = Rect().also { stop.getBoundsInScreen(it) }
+        val screen = uiAutomation.takeScreenshot() ?: error("No screenshot")
+        val color = screen.getPixel(stopBounds.left + stopBounds.width() / 6, stopBounds.centerY()) and 0xffffff
+        screen.recycle()
+        check(color == 0xf38ba8) { "Stop control is not Catppuccin red: ${color.toString(16)}" }
+        check(stop.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        waitForIdleSync(); Thread.sleep(500)
+        runOnMainSync { check(stopRequested) { "Stop did not reach callback" } }
+        check(find(root()) { it.contentDescription == "Stopping" } != null)
+        runOnMainSync {
+            busy = false; stopping = false
+            messages = messages.map { if (it.id == "active-user") it.copy(status = "interrupted", durationMs = 12000) else it }
+        }
+        waitForIdleSync(); Thread.sleep(500)
+        check(find(root()) { it.contentDescription?.toString()?.startsWith("Turn activity: ") == true } == null) { "Live activity remained after interrupt" }
+        check(visible("Interrupted · 12s")) { "Completed history lost interruption timer" }
+        runOnMainSync {
+            busy = true
+            messages = messages + ChatEntry(id = "next-user", role = "You", text = "Next task", status = "inProgress", turnId = "next")
+        }
+        waitForIdleSync(); Thread.sleep(500)
+        val fallback = find(root()) { it.contentDescription?.toString()?.startsWith("Turn activity: ") == true } ?: error("No fallback activity before reasoning arrives")
+        check(fallback.contentDescription.toString().contains("Working") && !fallback.contentDescription.toString().contains("Continuing profile work")) { "Previous turn thinking leaked into new activity" }
+        output.putString("result", "PASS: animated text growth, tall-message reading anchor, jump to latest, resumed following, activity placement, red stop, interruption and new-turn fallback")
         finish(-1, output)
     } catch (e: Throwable) {
         output.putString("result", "FAIL: ${e.stackTraceToString()}")

@@ -45,12 +45,7 @@ internal fun CommandCard(entry: ChatEntry) {
                     Text(entry.command.lineSequence().firstOrNull().orEmpty().ifBlank { "Shell command" }, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
                     Text(status + (entry.exitCode?.let { " · exit $it" } ?: ""), color = color, style = MaterialTheme.typography.labelSmall)
                 }
-                Canvas(Modifier.size(14.dp)) {
-                    val mid = size.height / 2
-                    val dy = if (expanded) -2.dp.toPx() else 2.dp.toPx()
-                    drawLine(Mocha.Subtext, Offset(2.dp.toPx(), mid-dy/2), Offset(size.width/2, mid+dy/2), 1.5.dp.toPx(), StrokeCap.Round)
-                    drawLine(Mocha.Subtext, Offset(size.width/2, mid+dy/2), Offset(size.width-2.dp.toPx(), mid-dy/2), 1.5.dp.toPx(), StrokeCap.Round)
-                }
+                ChatGlyph(if (expanded) ChatIcon.ChevronDown else ChatIcon.ChevronRight, color = Mocha.Subtext)
             }
         }
         if (expanded) Surface(color = Mocha.Mantle, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().padding(start = 26.dp, top = 4.dp)) {
