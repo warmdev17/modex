@@ -5,6 +5,46 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtocolTest {
+    @Test fun decisionResetAndReplayReconcilePendingWithoutReanswering() {
+        val stale = JSONObject("""{"decision_id":"stale"}""")
+        var decisions = updatePendingDecisions(listOf(stale), "decision/reset", JSONObject())
+        assertTrue(decisions.isEmpty())
+        val approval = JSONObject("""{"decision_id":"approval","context":{"command":"echo fixture","availableDecisions":["accept","decline"]}}""")
+        val question = JSONObject("""{"decision_id":"question","context":{"questions":[{"id":"choice","question":"Choose","options":[{"label":"Yes"}]}]}}""")
+        decisions = updatePendingDecisions(decisions, "decision/required", approval)
+        decisions = updatePendingDecisions(decisions, "decision/required", question)
+        decisions = updatePendingDecisions(decisions, "decision/required", approval)
+        assertEquals(listOf(approval, question), decisions)
+        decisions = updatePendingDecisions(decisions, "decision/resolved", JSONObject("""{"decision_id":"approval"}"""))
+        assertEquals(listOf(question), decisions)
+        assertSame(decisions, updatePendingDecisions(decisions, "unrelated/event", JSONObject()))
+        assertTrue(updatePendingDecisions(decisions, "decision/reset", JSONObject()).isEmpty())
+        assertEquals("echo fixture", approval.getJSONObject("context").getString("command"))
+    }
+    @Test fun freshJournalAcceptsAnExplicitCheckpointAndThenRequiresContiguousFrames() {
+        val journal = JournalState()
+        journal.hello(JSONObject("""{"ready":true,"instance":"same","resynced":true,"cursor":85}"""))
+        assertEquals(85L, journal.cursor)
+        assertEquals("same", journal.instance)
+        assertNotNull(journal.frame(JSONObject("""{"seq":86,"message":{"event":"decision/snapshot","params":{"data":[]}}}""")))
+        assertThrows(IllegalArgumentException::class.java) { journal.frame(JSONObject("""{"seq":88,"message":{}}""")) }
+    }
+
+    @Test fun checkpointsCannotSkipSavedEventsOrAcceptInvalidCursors() {
+        val saved = JournalState("same", 8)
+        assertThrows(IllegalArgumentException::class.java) {
+            saved.hello(JSONObject("""{"ready":true,"instance":"same","resynced":true,"cursor":85}"""))
+        }
+        assertEquals(8L, saved.cursor)
+        for (value in listOf("-1", "0", "8.5", "\"85\"", "null", "9223372036854775808")) {
+            val fresh = JournalState()
+            assertThrows(IllegalArgumentException::class.java) {
+                fresh.hello(JSONObject("""{"ready":true,"instance":"same","resynced":true,"cursor":$value}"""))
+            }
+            assertNull(fresh.instance)
+            assertEquals(0L, fresh.cursor)
+        }
+    }
     @Test fun readsLargeHistoryAndFollowingFrameWithoutLosingBoundaries() {
         val body = "x".repeat(5 * 1024 * 1024)
         val input = ("{\"text\":\"" + body + "\"}\n{\"ready\":true}\n").byteInputStream().buffered()

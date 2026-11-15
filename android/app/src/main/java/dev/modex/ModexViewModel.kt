@@ -457,9 +457,8 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         if (frame.optString("event") == "skills/changed") { refreshReferences(); return }
         val params = frame.optJSONObject("params") ?: return
         sessions.event(frame.optString("event"), params)
+        decisions = updatePendingDecisions(decisions, frame.optString("event"), params)
         when (frame.optString("event")) {
-            "decision/resolved" -> decisions = decisions.filterNot { it.optString("decision_id") == params.optString("decision_id") }
-            "decision/required" -> if (decisions.none { it.optString("decision_id") == params.optString("decision_id") }) decisions = decisions + params
             "error" -> if (params.optString("threadId") == selected) {
                 turnFailure(params)?.let { error = it }
             }

@@ -25,6 +25,12 @@ func NewJournal(maxEntries, maxBytes int) *Journal {
 	return &Journal{maxEntries: maxEntries, maxBytes: maxBytes, wake: make(chan struct{})}
 }
 
+func (j *Journal) Checkpoint() uint64 {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.seq
+}
+
 func (j *Journal) Append(raw json.RawMessage) error {
 	if !json.Valid(raw) || len(raw) > j.maxBytes {
 		return errors.New("invalid or oversized bridge frame")

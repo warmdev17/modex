@@ -70,9 +70,16 @@ func (s *Server) Handle(conn net.Conn) {
 		reject("supervisor instance changed; do not reuse cursor")
 		return
 	}
-	if _, _, err := s.Journal.After(hello.Cursor); err != nil {
-		reject(err.Error())
-		return
+	cursor := hello.Cursor
+	resynced := false
+	if _, _, err := s.Journal.After(cursor); err != nil {
+		if cursor != 0 {
+			reject(err.Error())
+			return
+		}
+		// A deliberate reset starts from current state, not an expired replay.
+		cursor = s.Journal.Checkpoint()
+		resynced = true
 	}
 	s.mu.Lock()
 	if s.attached {
@@ -103,7 +110,11 @@ func (s *Server) Handle(conn net.Conn) {
 		s.stop()
 		return
 	}
-	if send(map[string]any{"ready": true, "instance": s.instance}) != nil {
+	ready := map[string]any{"ready": true, "instance": s.instance}
+	if resynced {
+		ready["resynced"], ready["cursor"] = true, cursor
+	}
+	if send(ready) != nil {
 		return
 	}
 	_ = conn.SetReadDeadline(time.Time{})
@@ -128,7 +139,6 @@ func (s *Server) Handle(conn net.Conn) {
 			}
 		}
 	}()
-	cursor := hello.Cursor
 	for {
 		entries, wake, err := s.Journal.After(cursor)
 		if err != nil {

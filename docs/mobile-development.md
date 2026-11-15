@@ -24,6 +24,8 @@ The current service runs `modex-host --supervise`, which owns a persistent bridg
 
 The Android client currently reconnects on foreground return, but it does not implement a general background reconnect loop or automatic recovery across a new supervisor journal instance. A drain-only command would therefore not, by itself, complete the phone-only upgrade experience.
 
+Journal retention is separate from a service failure. In the updated Android/host protocol, choose Connection settings → Reset session cursor, then Connect / reconnect to recover an expired replay without restarting the host. The host returns a fresh checkpoint; Android requires an explicitly cleared journal before accepting it, reloads the selected session, and reconciles pending approvals/questions. Unconfirmed prompts and decisions are never resent. Both ends need this protocol update: an older host can still reject cursor 0 after retention, and an older Android client cannot consume the new checkpoint. This recovery does not make upgrading/restarting the host non-disruptive.
+
 Until those mechanisms are implemented and tested, build/test host changes in a private temporary workspace and stage the new binary without restarting the active service. Never claim that waiting an arbitrary number of seconds or observing no output proves the host is idle. Never replay an uncertain prompt or approval after a restart.
 
 ## Needed for host upgrades without lost work

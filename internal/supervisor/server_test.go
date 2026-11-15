@@ -114,3 +114,41 @@ func TestServerRejectsStaleInstanceAndAuthenticatedStop(t *testing.T) {
 		t.Fatal("stop did not cancel")
 	}
 }
+
+func TestFreshAttachRecoversExpiredJournalWithoutRestartOrCommandReplay(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var child lockedBuffer
+	s := NewServer(ctx, "token", "same-instance", &child, cancel)
+	s.Journal = NewJournal(2, 1024)
+	for i := 0; i < 4; i++ {
+		if err := s.Journal.Append(json.RawMessage(`{"event":"old-delta"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stale, decoder := connect(t, s, Hello{Token: "token", Instance: "same-instance", Cursor: 1})
+	var reply map[string]any
+	if err := decoder.Decode(&reply); err != nil || reply["error"] == nil {
+		t.Fatalf("expired resume must remain explicit: reply=%v err=%v", reply, err)
+	}
+	stale.Close()
+	s.OnAttachment = func(attached bool) error {
+		if attached {
+			return s.Journal.Append(json.RawMessage(`{"event":"decision/reset","params":{}}`))
+		}
+		return nil
+	}
+	client, decoder := connect(t, s, Hello{Token: "token"})
+	defer client.Close()
+	reply = nil
+	if err := decoder.Decode(&reply); err != nil || reply["ready"] != true || reply["instance"] != "same-instance" || reply["resynced"] != true || reply["cursor"] != float64(4) {
+		t.Fatalf("fresh attach must acknowledge a new checkpoint: reply=%v err=%v", reply, err)
+	}
+	var entry Entry
+	if err := decoder.Decode(&entry); err != nil || entry.Seq != 5 || !bytes.Contains(entry.Message, []byte("decision/reset")) {
+		t.Fatalf("must deliver events after the checkpoint: entry=%v err=%v", entry, err)
+	}
+	if ctx.Err() != nil || child.String() != "" {
+		t.Fatal("recovery restarted the backend or replayed a command")
+	}
+}
