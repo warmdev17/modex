@@ -3,6 +3,8 @@ package dev.modex
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,7 +26,10 @@ internal fun InlineDecisionCard(decision: JSONObject, responding: Boolean, enabl
     val fileMode = decision.optString("method") == "item/fileChange/requestApproval"
     val questionMode = decision.optString("method") == "item/tool/requestUserInput"
     val questions = context.optJSONArray("questions") ?: JSONArray()
-    var answers by rememberSaveable(decision.optString("decision_id")) { mutableStateOf(hashMapOf<String, String>()) }
+    val identity = decision.toString()
+    var answers by rememberSaveable(identity) { mutableStateOf(hashMapOf<String, String>()) }
+    var selections by rememberSaveable(identity) { mutableStateOf(hashMapOf<String, Int>()) }
+    fun select(id: String, index: Int) { selections = HashMap(selections).apply { put(id, index) } }
     fun answer(id: String, value: String) { answers = HashMap(answers).apply { put(id, value) } }
     val offered = context.optJSONArray("availableDecisions")
     fun offered(choice: String): Boolean = offered == null || (0 until offered.length()).any { offered.opt(it) == choice }
@@ -50,32 +55,27 @@ internal fun InlineDecisionCard(decision: JSONObject, responding: Boolean, enabl
                     val id = question.getString("id")
                     Text(question.getString("question"), style = MaterialTheme.typography.bodyMedium)
                     val options = question.optJSONArray("options")
-                    if (options != null) for (n in 0 until options.length()) {
-                        val option = options.getJSONObject(n)
-                        OutlinedButton(
-                            onClick = { answer(id, option.getString("label")) },
-                            enabled = enabled && !responding,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                        ) {
-                            Column(Modifier.fillMaxWidth()) {
-                                Text(option.getString("label"))
-                                option.optString("description").takeIf { it.isNotBlank() }?.let { Text(it, color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall) }
-                            }
+                    val hasOptions = options != null && options.length() > 0
+                    if (hasOptions) {
+                        for (n in 0 until options!!.length()) {
+                            val option = options.getJSONObject(n)
+                            QuestionOption(option.getString("label"), option.optString("description"),
+                                selections[id] == n, enabled && !responding) { select(id, n) }
                         }
+                        QuestionOption("Other", "Write your own answer", selections[id] == -1,
+                            enabled && !responding) { select(id, -1) }
                     }
-                    OutlinedTextField(
+                    if (!hasOptions || selections[id] == -1) OutlinedTextField(
                         answers[id].orEmpty(), { answer(id, it) }, enabled = enabled && !responding,
-                        label = { Text("Your answer") }, modifier = Modifier.fillMaxWidth()
+                        label = { Text("Your answer") }, modifier = Modifier.fillMaxWidth(), minLines = 2
                     )
                 }
+                val result = questionAnswerResult(questions, selections, answers)
                 Button(
-                    enabled = enabled && !responding && (0 until questions.length()).all { !answers[questions.getJSONObject(it).getString("id")].isNullOrBlank() },
-                    onClick = {
-                        val result = JSONObject()
-                        answers.forEach { (id, answer) -> result.put(id, JSONObject().put("answers", JSONArray().put(answer))) }
-                        respond(JSONObject().put("answers", result))
-                    }, modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)
-                ) { Text("Submit answer") }
+                    enabled = enabled && !responding && result != null,
+                    onClick = { if (enabled && !responding && result != null) respond(result) },
+                    modifier = Modifier.align(Alignment.End).heightIn(min = 48.dp)
+                ) { Text(if (responding) "Sending…" else "Submit answer") }
             } else {
                 Text(
                     if (fileMode) "File changes cannot be allowed until a diff viewer is available. You can decline or cancel this request."
@@ -126,4 +126,38 @@ private fun DecisionGlyph(question: Boolean) {
             drawCircle(color, stroke / 1.6f, Offset(size.width * .5f, size.height * .72f))
         }
     }
+}
+
+@Composable
+private fun QuestionOption(label: String, description: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    Surface(color = if (selected) Mocha.Surface else Mocha.Mantle,
+        border = BorderStroke(1.dp, if (selected) Mocha.Blue else Mocha.Surface),
+        shape = MaterialTheme.shapes.small) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(selected = selected, onClick = null, enabled = enabled)
+            Column(Modifier.weight(1f).padding(start = 8.dp)) {
+                Text(label, color = if (selected) Mocha.Blue else Mocha.Text, style = MaterialTheme.typography.bodyMedium)
+                if (description.isNotBlank()) Text(description, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+internal fun questionAnswerResult(questions: JSONArray, selections: Map<String, Int>, drafts: Map<String, String>): JSONObject? {
+    if (questions.length() == 0) return null
+    val answers = JSONObject()
+    for (i in 0 until questions.length()) {
+        val question = questions.getJSONObject(i)
+        val id = question.getString("id")
+        val options = question.optJSONArray("options")
+        val answer = if (options != null && options.length() > 0) {
+            val selection = selections[id] ?: return null
+            if (selection == -1) drafts[id] else options.optJSONObject(selection)?.optString("label")
+        } else drafts[id]
+        if (answer.isNullOrBlank()) return null
+        answers.put(id, JSONObject().put("answers", JSONArray().put(answer)))
+    }
+    return JSONObject().put("answers", answers)
 }
