@@ -40,7 +40,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
@@ -228,6 +227,8 @@ internal fun ChatWorkspace(
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
             val scroll = rememberLazyListState()
             var openAtLatest by remember(selected) { mutableStateOf(true) }
+            var followLatest by remember(selected) { mutableStateOf(true) }
+            var autoScrolling by remember(selected) { mutableStateOf(false) }
             var requestingOlder by remember(selected) { mutableStateOf(false) }
             fun loadEarlier() {
                 if (!connected || !hasOlderHistory || historyLoading || olderHistoryLoading || requestingOlder) return
@@ -248,20 +249,34 @@ internal fun ChatWorkspace(
                     requestingOlder = false
                 }
             }
-            LaunchedEffect(selected, historyLoading, timeline.size, timeline.lastOrNull(), selectedDecisions.map { it.optString("decision_id") }) {
+            LaunchedEffect(selected) {
+                snapshotFlow {
+                    if (autoScrolling) null else scroll.isScrollInProgress to scroll.canScrollForward
+                }.collect { gesture ->
+                    if (gesture?.first == true) followLatest = !gesture.second
+                }
+            }
+            LaunchedEffect(selected, historyLoading, olderHistoryLoading, requestingOlder) {
                 if (historyLoading) {
                     openAtLatest = true
+                    followLatest = true
                     return@LaunchedEffect
                 }
                 if (olderHistoryLoading || requestingOlder) return@LaunchedEffect
-                val layout = scroll.layoutInfo
-                val nearBottom = layout.visibleItemsInfo.lastOrNull()?.index?.let { it >= layout.totalItemsCount - 2 } ?: true
-                if (timeline.isNotEmpty() && (openAtLatest || nearBottom)) {
-                    snapshotFlow { scroll.layoutInfo.totalItemsCount }.first { it == timeline.size + selectedDecisions.size + 1 }
-                    // The final spacer anchors the bottom even when the last message is taller than the viewport.
-                    scroll.scrollToItem(timeline.size + selectedDecisions.size)
-                    openAtLatest = false
-                }
+                // Observe rendered growth too: streaming text keeps expanding after its data arrives.
+                snapshotFlow { Triple(scroll.layoutInfo, followLatest, scroll.isScrollInProgress) }
+                    .collect { (layout, following, scrolling) ->
+                        if ((openAtLatest || following) && !scrolling && layout.totalItemsCount > 0 &&
+                            (openAtLatest || scroll.canScrollForward)) {
+                            autoScrolling = true
+                            try {
+                                scroll.scrollToItem(layout.totalItemsCount - 1)
+                                openAtLatest = false
+                            } finally {
+                                autoScrolling = false
+                            }
+                        }
+                    }
             }
             if (timeline.isEmpty() && selectedDecisions.isEmpty() && !hasOlderHistory) {
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {

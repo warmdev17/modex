@@ -19,6 +19,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "new-chat") { newChatSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }
+        if (args.getString("preview") == "auto-follow") { autoFollowSmoke(); return }
         if (args.getString("preview") == "history-scroll") { historyScrollSmoke(); return }
         if (args.getString("preview") == "continuity") { continuitySmoke(args); return }
         if (args.getString("preview") == "storage") {
