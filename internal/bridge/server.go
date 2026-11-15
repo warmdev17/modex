@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -67,6 +68,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["name"] = true
 		allowed["idempotency_key"] = true
 	case "threads/start":
+		allowed["standalone"] = true
 		allowed["project_id"] = true
 		allowed["model"] = true
 		allowed["permission_mode"] = true
@@ -153,7 +155,29 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	case "projects/create":
 		return createProject(p, fetch)
 	case "threads/start":
+		standalone := false
+		if raw, ok := p["standalone"]; ok {
+			if string(raw) == "null" || json.Unmarshal(raw, &standalone) != nil {
+				return nil, errors.New("standalone must be boolean")
+			}
+		}
+		if standalone {
+			if _, ok := p["workspace"]; ok {
+				return nil, errors.New("standalone cannot specify workspace")
+			}
+			if _, ok := p["project_id"]; ok {
+				return nil, errors.New("standalone cannot specify project_id")
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			cwd = filepath.Join(home, "Documents", "Codex")
+		}
 		params := map[string]any{"cwd": cwd}
+		if standalone {
+			params["projectId"] = nil
+		}
 		if raw, ok := p["project_id"]; ok {
 			var project string
 			if json.Unmarshal(raw, &project) != nil || !validProjectText(project) {
@@ -186,6 +210,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("model must be a nonempty single-line string up to 256 bytes")
 			}
 			params["model"] = model
+		}
+		if standalone {
+			if err := os.MkdirAll(cwd, 0700); err != nil {
+				return nil, err
+			}
 		}
 		raw, err := fetch("thread/start", params)
 		if err != nil {

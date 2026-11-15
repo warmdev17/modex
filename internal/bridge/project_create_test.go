@@ -83,3 +83,38 @@ func TestStartThreadRejectsInvalidProjectIdentity(t *testing.T) {
 		}
 	}
 }
+
+func TestStandaloneThreadUsesCodexHomeFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	want := filepath.Join(home, "Documents", "Codex")
+	_, err := Handle(context.Background(), "/selected-project", Command{Method: "threads/start", Params: json.RawMessage(`{"standalone":true}`)}, func(_ context.Context, method string, value any) (json.RawMessage, error) {
+		p := value.(map[string]any)
+		if method != "thread/start" || p["cwd"] != want {
+			t.Fatalf("%s: %v", method, p)
+		}
+		if project, present := p["projectId"]; !present || project != nil {
+			t.Fatalf("project inherited: %v", p)
+		}
+		if info, err := os.Stat(want); err != nil || !info.IsDir() {
+			t.Fatal("missing Codex folder", err)
+		}
+		return json.Marshal(map[string]any{"thread": map[string]any{"id": "standalone", "cwd": want}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStandaloneThreadRejectsConflictingSelection(t *testing.T) {
+	for _, params := range []string{`{"standalone":true,"project_id":"p1"}`, `{"standalone":true,"workspace":"/other"}`, `{"standalone":null}`, `{"standalone":"true"}`} {
+		_, err := Handle(context.Background(), "/work", Command{Method: "threads/start", Params: json.RawMessage(params)}, func(context.Context, string, any) (json.RawMessage, error) {
+			t.Fatal("invalid request reached Codex")
+			return nil, nil
+		})
+		if err == nil {
+			t.Fatal(params)
+		}
+	}
+}
