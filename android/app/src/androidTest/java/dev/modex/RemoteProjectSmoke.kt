@@ -20,7 +20,8 @@ internal fun Instrumentation.remoteProjectSmoke() {
         var chosenFolder = ""
         var started = emptyList<String>()
         runOnMainSync { activity.setContent { ModexTheme { Surface {
-            ChatWorkspace(host = "fixture", connected = true, connecting = false, selected = "", threads = emptyList(), titles = emptyMap(), messages = emptyList(), busy = false, historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture", decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> error("Project selection lost") }, onSend = { _, _, _, _ -> false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {}, hostModel = "fixture", hostEffort = "low",
+            ChatWorkspace(host = "fixture", connected = true, connecting = false, selected = "existing", threads = listOf("existing"), titles = emptyMap(), messages = emptyList(), busy = false, historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture", decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> error("Project selection lost") }, onSend = { _, _, _, _ -> false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {}, hostModel = "fixture", hostEffort = "low",
+                threadWorkspaces = mapOf("existing" to "/work/other"), projectMembership = mapOf("existing" to "p2"),
                 registeredProjects = listOf(RemoteProject("p2", "other", listOf("/work/other"))),
                 onNewProject = { showFolders = true }, onCreateInProject = { model, mode, effort, root, project -> started = listOf(model, mode, effort, root, project) })
             if (showFolders) RemoteFilePicker("~", directory, false, "", true, 0, { path -> directory = RemoteDirectory(path, "/home/fixture", emptyList(), false) }, {}, { showFolders = false }, onChooseDirectory = { chosenFolder = it; showFolders = false }, onCreateDirectory = { createdFolder = it })
@@ -53,6 +54,13 @@ internal fun Instrumentation.remoteProjectSmoke() {
             check(n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) { "Cannot click $label" }
             waitForIdleSync(); Thread.sleep(400)
         }
+        click("Open sessions")
+        val newChatBounds = android.graphics.Rect().also { await("New chat").getBoundsInScreen(it) }
+        val projectBounds = android.graphics.Rect().also { await("New project").getBoundsInScreen(it) }
+        check(kotlin.math.abs(newChatBounds.centerX() - projectBounds.centerX()) <= 2) { "Sidebar labels are not centered on the same axis" }
+        uiAutomation.takeScreenshot()?.let { bmp -> File(targetContext.filesDir, "sidebar-actions.png").outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; bmp.recycle() }
+        click("New chat"); await("Outside projects"); click("Create chat")
+        runOnMainSync { check(started[3].isBlank() && started[4].isBlank()) { "Standalone chat inherited the selected project" } }
         click("Open sessions"); click("New chat in other"); await("/work/other"); click("Create chat")
         runOnMainSync { check(started[3] == "/work/other" && started[4] == "p2") }
         click("Open sessions"); click("New project"); await("Use this folder")

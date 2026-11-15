@@ -59,7 +59,7 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color
         fun line(x: Float, y: Float, x2: Float, y2: Float) = drawLine(color, Offset(x*u,y*u), Offset(x2*u,y2*u), 1.8f*u, StrokeCap.Round)
         when (icon) {
             ChatIcon.Menu -> { line(4f,6f,20f,6f); line(4f,12f,16f,12f); line(4f,18f,20f,18f) }
-            ChatIcon.New -> { line(5f,19f,9f,18f); line(9f,18f,20f,7f); line(20f,7f,17f,4f); line(17f,4f,6f,15f); line(6f,15f,5f,19f); line(14f,7f,17f,10f) }
+            ChatIcon.New -> { line(10f,4f,5f,4f); line(5f,4f,4f,5f); line(4f,5f,4f,19f); line(4f,19f,5f,20f); line(5f,20f,19f,20f); line(19f,20f,20f,19f); line(20f,19f,20f,14f); line(10f,14f,14f,13f); line(14f,13f,21f,6f); line(21f,6f,18f,3f); line(18f,3f,11f,10f); line(11f,10f,10f,14f); line(16f,5f,19f,8f) }
             ChatIcon.Send -> { line(12f,19f,12f,5f); line(6f,11f,12f,5f); line(12f,5f,18f,11f) }
             ChatIcon.ChevronRight -> { line(9f,6f,15f,12f); line(15f,12f,9f,18f) }
             ChatIcon.ChevronDown -> { line(6f,9f,12f,15f); line(12f,15f,18f,9f) }
@@ -142,7 +142,7 @@ internal fun ChatWorkspace(
     var newWorkspace by rememberSaveable { mutableStateOf("") }
     var newProjectId by rememberSaveable { mutableStateOf("") }
     var projectMenu by remember { mutableStateOf(false) }
-    fun openNewChat(workspace: String = threadWorkspaces[selected].orEmpty(), projectId: String = projectMembership[selected].orEmpty()) {
+    fun openNewChat(workspace: String = "", projectId: String = "") {
         newWorkspace = workspace; newProjectId = projectId; newChat = true
     }
     var permissionMode by rememberSaveable { mutableStateOf("host-default") }
@@ -171,10 +171,10 @@ internal fun ChatWorkspace(
                     IconButton(onClick = { scope.launch { drawer.close() } }) { ChatGlyph(ChatIcon.Close,"Close sessions") }
                 }
                 FilledTonalButton(onClick = { openNewChat() }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentPadding = PaddingValues(14.dp)) {
-                    ChatGlyph(ChatIcon.New); Spacer(Modifier.width(12.dp)); Text("New chat"); Spacer(Modifier.weight(1f))
+                    ChatGlyph(ChatIcon.New); Spacer(Modifier.width(12.dp)); Text("New chat")
                 }
                 TextButton(onClick = { scope.launch { drawer.close(); onNewProject() } }, enabled = canSwitch && !attachmentWorking, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), contentPadding = PaddingValues(14.dp)) {
-                    ChatGlyph(ChatIcon.Folder); Spacer(Modifier.width(12.dp)); Text("New project"); Spacer(Modifier.weight(1f))
+                    ChatGlyph(ChatIcon.Folder); Spacer(Modifier.width(12.dp)); Text("New project")
                 }
                 OutlinedTextField(search, { search = it }, placeholder = { Text("Search sessions or projects") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -385,17 +385,17 @@ internal fun ChatWorkspace(
             Box {
                 OutlinedButton(onClick = { projectMenu = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
                     ChatGlyph(ChatIcon.Folder)
-                    Text(registeredProjects.firstOrNull { it.id == newProjectId }?.name ?: newWorkspace.ifBlank { "Host workspace" }, Modifier.weight(1f).padding(horizontal = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(registeredProjects.firstOrNull { it.id == newProjectId }?.name ?: newWorkspace.ifBlank { "Outside projects" }, Modifier.weight(1f).padding(horizontal = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     ChatGlyph(ChatIcon.ChevronDown)
                 }
                 DropdownMenu(expanded = projectMenu, onDismissRequest = { projectMenu = false }) {
-                    DropdownMenuItem(text = { Text("Host workspace") }, onClick = { newWorkspace = ""; newProjectId = ""; projectMenu = false })
+                    DropdownMenuItem(text = { Text("Outside projects") }, onClick = { newWorkspace = ""; newProjectId = ""; projectMenu = false })
                     registeredProjects.forEach { project -> project.roots.forEach { root ->
                         DropdownMenuItem(text = { Column { Text(project.name); Text(root, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) } }, onClick = { newWorkspace = root; newProjectId = project.id; projectMenu = false })
                     } }
                 }
             }
-            Text(newWorkspace.ifBlank { "Host workspace" }, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
+            Text(newWorkspace.ifBlank { "Outside projects" }, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
             ModelPicker(models, modelCatalogStatus, model, { model = it; newEffort = defaultEffort(it) })
             ReasoningControl(models.firstOrNull { it.model == model }, newEffort) { newEffort = it }
             Column(Modifier.selectableGroup()) {

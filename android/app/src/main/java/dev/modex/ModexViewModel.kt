@@ -255,10 +255,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         leaveSession(); current?.close(); persist()
         getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java))
     }
-    fun create(model: String, mode: String, effort: String = "", workspace: String = selectedWorkspace, projectId: String = "") {
+    fun create(model: String, mode: String, effort: String = "", workspace: String = "", projectId: String = "") {
         if (!connected || historyLoading || switching()) return
         clearSelection()
-        request("threads/start", newThreadParams(model, mode, workspace, projectId), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())?.let { selectionRequests += it }
+        request("threads/start", newThreadParams(model, mode, workspace, projectId, standalone = workspace.isBlank() && projectId.isBlank()), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())?.let { selectionRequests += it }
     }
     fun createProject(name: String, workspace: String) {
         if (!connected || projectCreating || name.isBlank() || workspace.isBlank()) return

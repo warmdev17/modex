@@ -9,9 +9,11 @@ internal val permissionModes = linkedMapOf(
     "full-access" to "Full access"
 )
 
-internal fun newThreadParams(model: String, mode: String, workspace: String = "", projectId: String = ""): JSONObject {
+internal fun newThreadParams(model: String, mode: String, workspace: String = "", projectId: String = "", standalone: Boolean = false): JSONObject {
     require(mode in permissionModes)
+    require(!standalone || (workspace.isBlank() && projectId.isBlank()))
     return JSONObject().apply {
+        if (standalone) put("standalone", true)
         if (workspace.isNotBlank()) put("workspace", workspace)
         if (projectId.isNotBlank()) put("project_id", projectId)
         if (model.isNotBlank()) put("model", model)
