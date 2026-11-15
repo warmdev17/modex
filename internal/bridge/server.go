@@ -62,7 +62,12 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	case "client/attached":
 		allowed["attached"] = true
 	case "status":
+	case "projects/create":
+		allowed["workspace"] = true
+		allowed["name"] = true
+		allowed["idempotency_key"] = true
 	case "threads/start":
+		allowed["project_id"] = true
 		allowed["model"] = true
 		allowed["permission_mode"] = true
 		allowed["workspace"] = true
@@ -145,8 +150,17 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, errors.New("attached must be boolean")
 		}
 		return fetch("client/attached", map[string]any{"attached": attached})
+	case "projects/create":
+		return createProject(p, fetch)
 	case "threads/start":
 		params := map[string]any{"cwd": cwd}
+		if raw, ok := p["project_id"]; ok {
+			var project string
+			if json.Unmarshal(raw, &project) != nil || !validProjectText(project) {
+				return nil, errors.New("invalid project_id")
+			}
+			params["projectId"] = project
+		}
 		if raw, ok := p["permission_mode"]; ok {
 			var mode string
 			if json.Unmarshal(raw, &mode) != nil {

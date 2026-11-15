@@ -97,3 +97,11 @@ Android reduces forwarded `item/started`, `item/completed`, `item/agentMessage/d
 ## Explicit registered CLI takeover (2026-11-12)
 
 `threads/takeover {thread_id, confirm:true, workspace?}` is a non-replayable, explicitly confirmed state change. Validate workspace via `thread/read`, ask the CODEX_HOME-scoped launcher to release its exact session, then perform one `thread/resume` with the same ID and normal projected response. No `turn/start` is generated. Rejections preserve stable `takeover_unmanaged`, `takeover_mismatch`, `takeover_unavailable` and `takeover_uncertain` categories, without raw upstream diagnostics. A mobile timeout is not permission to replay takeover or a prompt. The command uses the existing authenticated SSH/supervisor channel; the private local launcher socket only controls its owned children. Linux/macOS only; ordinary CLI/Desktop is never terminated by inference from its process name.
+
+## Creating remote projects
+
+`projects/create` requires `workspace` (an existing absolute directory), `name` (nonblank, at most 256 UTF-8 bytes, no control characters), and `idempotency_key` (same bounds). It forwards one root to Codex `project/create` and returns only `{project: {id, name, roots}}`; arbitrary project metadata is not exposed. A missing/unreadable folder or a regular file is rejected before calling Codex. No folders are created by this RPC.
+
+`threads/start` accepts optional `project_id` alongside `workspace`, forwarding `projectId` and `cwd` to Codex. Android's New project action uses SFTP to select an existing folder or explicitly create one child folder, then registers a canonical Codex project. New chat offers registered projects and the default workspace; a project's sidebar action starts chat settings with that project selected. Remote folder browsing begins at SSH home. No Git repository is initialized.
+
+Neither project creation nor folder creation retries automatically. After an uncertain result, refresh projects/folders and inspect before creating again. Older hosts need updating for `projects/create` and project-aware `threads/start`; existing thread commands retain their behavior. Build and test host upgrades separately, then activate only when the supervisor's active turns and pending decisions are settled.
