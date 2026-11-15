@@ -84,6 +84,25 @@ private fun ModexApp() {
     val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (phoneTarget == vm.savedConnection.toString()) vm.attachments.fromPhone(phoneThread, uris, phoneGeneration, context.contentResolver)
     }
+    var projectBrowser by rememberSaveable { mutableStateOf(false) }
+    var projectFolder by rememberSaveable { mutableStateOf("") }
+    var projectNameInput by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(vm.connected) { if (!vm.connected) { projectBrowser = false; projectFolder = "" } }
+    if (projectBrowser) RemoteFilePicker(
+        "~", vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
+        0, { vm.attachments.browse(it) }, {}, { projectBrowser = false },
+        onChooseDirectory = { path -> projectFolder = path; projectNameInput = projectName(path); projectBrowser = false },
+        onCreateDirectory = vm.attachments::createDirectory
+    )
+    if (projectFolder.isNotBlank()) AlertDialog(
+        onDismissRequest = { projectFolder = "" }, title = { Text("New project") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(projectNameInput, { projectNameInput = it }, label = { Text("Project name") }, singleLine = true)
+            Text(projectFolder, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
+        } },
+        confirmButton = { TextButton(enabled = vm.connected && !vm.projectCreating && projectNameInput.isNotBlank() && projectNameInput.toByteArray().size <= 256 && projectNameInput.none { it.isISOControl() }, onClick = { vm.createProject(projectNameInput, projectFolder); projectFolder = "" }) { Text("Create project") } },
+        dismissButton = { TextButton(onClick = { projectFolder = "" }) { Text("Cancel") } }
+    )
     if (remoteThread.isNotEmpty()) RemoteFilePicker(
         vm.attachments.directoryFor(remoteThread), vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
         MAX_ATTACHMENTS - vm.attachments.drafts[remoteThread].orEmpty().size, { vm.attachments.browse(it, remoteThread) },
@@ -97,7 +116,8 @@ private fun ModexApp() {
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
             hasOlderHistory = vm.hasOlderHistory, olderHistoryLoading = vm.olderHistoryLoading, onOlderHistory = vm::loadOlderHistory,
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
-            onCreate = vm::create, onSend = vm::send, onAnswer = vm::answer,
+            onCreate = { model, mode, effort -> vm.create(model, mode, effort) }, onCreateInProject = vm::create,
+            onNewProject = { vm.attachments.browse("~"); projectBrowser = true }, onSend = vm::send, onAnswer = vm::answer,
             onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect,
             takeoverSession = vm.takeoverThread, onTakeover = vm::takeOver,
             models = vm.models, modelCatalogStatus = vm.modelCatalogStatus,

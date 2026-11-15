@@ -18,6 +18,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "attachment-preview") { attachmentPreviewSmoke(); return }
         if (args.getString("preview") == "remote-picker") { remoteFilePickerSmoke(); return }
         if (args.getString("preview") == "attachments") { attachmentTransportSmoke(args); return }
+        if (args.getString("preview") == "remote-project") { remoteProjectSmoke(); return }
         if (args.getString("preview") == "new-chat") { newChatSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }

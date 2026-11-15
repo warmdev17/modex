@@ -22,6 +22,7 @@ internal fun takeoverTarget(method: String, detail: String, target: String): Str
 
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
+        method == "projects/create" -> "Project creation was not confirmed. Check the folder and update modex-host/Codex if needed. Refresh projects before retrying."
         detail.contains("response_too_large") -> "This session exceeds the history transfer limit. Open it on your computer; the host is still available."
         detail.contains("takeover_unmanaged") -> "This CLI was not started with the Modex launcher. Close it on your computer, or use make cli THREAD=<session-id> next time."
         detail.contains("takeover_mismatch") -> "The registered CLI has changed sessions or loaded multiple sessions. Nothing was taken over. Close it on your computer."
@@ -52,6 +53,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     var savedConnection by mutableStateOf<Connection?>(null); private set
     private var reconnectAllowed = true
     internal var projects by mutableStateOf(emptyList<RemoteProject>()); private set
+    var projectCreating by mutableStateOf(false); private set
     var projectMembership by mutableStateOf(mapOf<String,String>()); private set
     var projectStatus by mutableStateOf(""); private set
     private val projectCursors = mutableSetOf<String>()
@@ -170,7 +172,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     fun forget() {
         attachments.clear(); sentAttachmentPaths.clear(); modelChoices = emptyMap(); hostChoice = ModelChoice()
         sessionSettings = ""
-        disconnect(); transport = null; connected = false; connecting = false; reconnectAllowed = false; saveJob?.cancel()
+        disconnect(); transport = null; connected = false; connecting = false; projectCreating = false; reconnectAllowed = false; saveJob?.cancel()
         historyCache.clear(); lastThread = ""; ownedThread = ""
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
         threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
@@ -240,7 +242,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 copy.fill(0)
                 withContext(Dispatchers.Main) { if (transport === current) {
-                    connected = false; connecting = false; transport = null; threadListLoading = false
+                    connected = false; connecting = false; transport = null; threadListLoading = false; projectCreating = false
                     leaveSession(); persist()
                     getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java))
                 } }
@@ -249,15 +251,20 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun disconnect() {
         reconnectAllowed = false
-        val current = transport; transport = null; connected = false; connecting = false
+        val current = transport; transport = null; connected = false; connecting = false; projectCreating = false
         leaveSession(); current?.close(); persist()
         getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java))
     }
-    fun create(model: String, mode: String, effort: String = "") {
+    fun create(model: String, mode: String, effort: String = "", workspace: String = selectedWorkspace, projectId: String = "") {
         if (!connected || historyLoading || switching()) return
-        val workspace = selectedWorkspace
         clearSelection()
-        request("threads/start", withWorkspace(newThreadParams(model, mode), workspace), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())?.let { selectionRequests += it }
+        request("threads/start", newThreadParams(model, mode, workspace, projectId), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())?.let { selectionRequests += it }
+    }
+    fun createProject(name: String, workspace: String) {
+        if (!connected || projectCreating || name.isBlank() || workspace.isBlank()) return
+        projectCreating = true
+        error = ""
+        request("projects/create", JSONObject().put("name", name.trim()).put("workspace", workspace).put("idempotency_key", java.util.UUID.randomUUID().toString()))
     }
     fun select(id: String) {
         if (!connected || id.isBlank() || historyLoading || switching()) return
@@ -333,6 +340,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             val id = frame.getLong("id")
             val sentAttachments = sentAttachmentPaths.remove(id)
             val operation = pending.remove(id) ?: return
+            if (operation.first == "projects/create") projectCreating = false
             if (operation.first == "references/list") {
                 val result = frame.optJSONObject("result")
                 if (result == null) references.fail(id, operation.second, selectedWorkspace)
@@ -367,6 +375,10 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
             when (operation.first) {
                 "status" -> {
                     hostChoice = readModelChoice(result.optJSONObject("config")) ?: ModelChoice()
+                }
+                "projects/create" -> {
+                    val project = result.optJSONObject("project")
+                    if (project != null) projects = (projects + readProjects(JSONObject().put("data", JSONArray().put(project)))).distinctBy { it.id }
                 }
                 "projects/list" -> {
                     projects = (projects + readProjects(result)).distinctBy { it.id }

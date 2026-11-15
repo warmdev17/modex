@@ -102,6 +102,8 @@ internal fun ChatWorkspace(
     attachments: List<Attachment> = emptyList(), attachmentWorking: Boolean = false,
     attachmentProgress: String = "", attachmentError: String = "",
     loadAttachment: suspend (Attachment) -> java.io.File = { error("Reconnect to open attachment") },
+    onNewProject: () -> Unit = {},
+    onCreateInProject: (String, String, String, String, String) -> Unit = { model, mode, effort, _, _ -> onCreate(model, mode, effort) },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {}
 ) {
     var showTakeover by remember(takeoverSession) { mutableStateOf(false) }
@@ -137,6 +139,12 @@ internal fun ChatWorkspace(
     fun applyEdit(text: String) { updatePrompt(text); scope.launch { focus.requestFocus(); keyboard?.show() } }
     editing?.let { text -> AlertDialog(onDismissRequest = { editing = null }, title = { Text("Replace draft?") }, text = { Text("Your current draft will be replaced. The message will be sent as a new turn only when you press Send.") }, confirmButton = { TextButton(onClick = { applyEdit(text); editing = null }) { Text("Replace") } }, dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } }) }
     var newChat by rememberSaveable { mutableStateOf(false) }
+    var newWorkspace by rememberSaveable { mutableStateOf("") }
+    var newProjectId by rememberSaveable { mutableStateOf("") }
+    var projectMenu by remember { mutableStateOf(false) }
+    fun openNewChat(workspace: String = threadWorkspaces[selected].orEmpty(), projectId: String = projectMembership[selected].orEmpty()) {
+        newWorkspace = workspace; newProjectId = projectId; newChat = true
+    }
     var permissionMode by rememberSaveable { mutableStateOf("host-default") }
     LaunchedEffect(newChat) { if (newChat) permissionMode = "host-default" }
     var showSettings by rememberSaveable { mutableStateOf(false) }
@@ -162,8 +170,11 @@ internal fun ChatWorkspace(
                     Text("modex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     IconButton(onClick = { scope.launch { drawer.close() } }) { ChatGlyph(ChatIcon.Close,"Close sessions") }
                 }
-                FilledTonalButton(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentPadding = PaddingValues(14.dp)) {
+                FilledTonalButton(onClick = { openNewChat() }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentPadding = PaddingValues(14.dp)) {
                     ChatGlyph(ChatIcon.New); Spacer(Modifier.width(12.dp)); Text("New chat"); Spacer(Modifier.weight(1f))
+                }
+                TextButton(onClick = { scope.launch { drawer.close(); onNewProject() } }, enabled = canSwitch && !attachmentWorking, modifier = Modifier.padding(horizontal = 16.dp)) {
+                    ChatGlyph(ChatIcon.Folder); Spacer(Modifier.width(10.dp)); Text("New project")
                 }
                 OutlinedTextField(search, { search = it }, placeholder = { Text("Search sessions or projects") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -191,6 +202,7 @@ internal fun ChatWorkspace(
                                         Text(project.name.ifBlank { projectName(project.roots.firstOrNull().orEmpty()) }, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         if (project.roots.isNotEmpty()) Text(project.roots.joinToString(" · "), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
+                                    IconButton(onClick = { openNewChat(project.roots.firstOrNull().orEmpty(), project.id) }, enabled = canSwitch && project.roots.isNotEmpty()) { ChatGlyph(ChatIcon.New, "New chat in ${project.name}", color = Mocha.Subtext) }
                                     ChatGlyph(if (expanded) ChatIcon.ChevronDown else ChatIcon.ChevronRight, color = Mocha.Subtext)
                                 }
                             }
@@ -293,7 +305,7 @@ internal fun ChatWorkspace(
                 Column(Modifier.weight(1f).fillMaxWidth().padding(32.dp), verticalArrangement = Arrangement.Center) {
                     Text("Your workspace.\nWithin reach.", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Medium)
                     Text(if (selected.isBlank()) "Open a conversation from the sidebar, or start a new chat." else "Ask Codex to explore, build or fix something.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(top = 16.dp))
-                    if (selected.isBlank()) Button(onClick = { newChat = true }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
+                    if (selected.isBlank()) Button(onClick = { openNewChat() }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.buttonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.padding(top = 12.dp)) { Text("New chat") }
                 }
             } else Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(state = scroll, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -369,7 +381,21 @@ internal fun ChatWorkspace(
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Uses your host’s provider. Folder: ${threadWorkspaces[selected].orEmpty().ifBlank { "Host workspace" }}", color = Mocha.Subtext)
+            Text("Uses your host’s provider.", color = Mocha.Subtext)
+            Box {
+                OutlinedButton(onClick = { projectMenu = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+                    ChatGlyph(ChatIcon.Folder)
+                    Text(registeredProjects.firstOrNull { it.id == newProjectId }?.name ?: newWorkspace.ifBlank { "Host workspace" }, Modifier.weight(1f).padding(horizontal = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    ChatGlyph(ChatIcon.ChevronDown)
+                }
+                DropdownMenu(expanded = projectMenu, onDismissRequest = { projectMenu = false }) {
+                    DropdownMenuItem(text = { Text("Host workspace") }, onClick = { newWorkspace = ""; newProjectId = ""; projectMenu = false })
+                    registeredProjects.forEach { project -> project.roots.forEach { root ->
+                        DropdownMenuItem(text = { Column { Text(project.name); Text(root, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) } }, onClick = { newWorkspace = root; newProjectId = project.id; projectMenu = false })
+                    } }
+                }
+            }
+            Text(newWorkspace.ifBlank { "Host workspace" }, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
             ModelPicker(models, modelCatalogStatus, model, { model = it; newEffort = defaultEffort(it) })
             ReasoningControl(models.firstOrNull { it.model == model }, newEffort) { newEffort = it }
             Column(Modifier.selectableGroup()) {
@@ -387,7 +413,7 @@ internal fun ChatWorkspace(
                 else -> "Requests user approval when sandbox restrictions need to be lifted. Host policy may restrict this mode."
             }, style = MaterialTheme.typography.bodySmall, color = if (permissionMode == "full-access") MaterialTheme.colorScheme.error else Mocha.Subtext)
         } },
-        confirmButton = { TextButton(enabled = canSwitch && model.isNotBlank() && validModelId(model), onClick = { onCreate(model.trim(), permissionMode, newEffort); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
+        confirmButton = { TextButton(enabled = canSwitch && model.isNotBlank() && validModelId(model), onClick = { onCreateInProject(model.trim(), permissionMode, newEffort, newWorkspace, newProjectId); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
         dismissButton = { TextButton(onClick = { newChat = false }) { Text("Cancel") } }
     )
     if (showSettings) AlertDialog(

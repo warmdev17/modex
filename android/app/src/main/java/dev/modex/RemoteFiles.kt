@@ -7,6 +7,7 @@ import java.util.UUID
 
 internal fun SshTransport.listRemoteDirectory(path: String): RemoteDirectory = withFiles { sftp ->
     val current = sftp.realpath(if (path.isBlank() || path == "~") "." else if (path.startsWith("~/")) sftp.home.trimEnd('/') + path.drop(1) else path)
+    require(sftp.stat(literalSftpPath(current)).isDir) { "Select a folder" }
     val parent = sftp.realpath("$current/..").takeUnless { it == current }
     val entries = mutableListOf<RemoteFile>()
     var truncated = false
@@ -68,4 +69,14 @@ internal fun SshTransport.downloadAttachment(file: Attachment, cache: java.io.Fi
         }
         target
     } catch (e: Exception) { partial.delete(); throw e }
+}
+
+internal fun validDirectoryName(name: String): Boolean = name.isNotBlank() && name != "." && name != ".." &&
+    name.toByteArray(Charsets.UTF_8).size <= 255 && name.none { it == '/' || it == '\\' || it.isISOControl() }
+
+internal fun SshTransport.createRemoteDirectory(parent: String, name: String): Unit = withFiles { sftp ->
+    require(validDirectoryName(name))
+    val root = sftp.realpath(parent)
+    require(sftp.stat(literalSftpPath(root)).isDir)
+    sftp.mkdir(root.trimEnd('/') + "/" + name)
 }

@@ -38,3 +38,11 @@ Keep transport replacement separate from engine replacement:
 - Installing the first version of this architecture on the current runtime needs a deliberately idle activation boundary. It cannot retroactively preserve an active backend owned by the process being stopped. Keep a usable old APK/binary and report this bootstrap limit explicitly.
 
 Acceptance requires isolated integration tests for active streaming, shell tools, pending approval/question, concurrent CLI/mobile clients, reconnect, rejected versions and failed activation. Engine PID/turn identity must survive gateway restart. Engine replacement must either wait for a verified drain or refuse; a best-effort sleep followed by kill is not acceptable. A transport reconnect can still briefly show reconnecting, even when no agent work is lost.
+
+## Creating projects from Android
+
+Open the sidebar and choose **New project**. The full-screen remote folder browser starts at SSH home; open a folder, type a path, or explicitly create one child with **New folder**. Choose **Use this folder**, set the project name and confirm. The project is stored in Codex's canonical project registry, so refreshing or reconnecting discovers it again.
+
+Use the new-chat icon beside a project to start a conversation in its root. New conversation settings also offer a project picker and the host's default workspace. Project identity and the chosen root travel together; changing projects does not change the supervisor's default workspace. Model, effort and permission controls keep their existing behavior.
+
+Both the new APK and updated host are needed. Folder operations require SFTP access for the existing SSH account. No Git repository is initialized, no existing files are replaced, and uncertain create requests are never replayed automatically. Refresh and inspect the folder/project list before retrying an uncertain creation.
