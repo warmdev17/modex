@@ -79,11 +79,10 @@ func newSharedBackend(ctx context.Context, p *bridge.Process, emit func(string, 
 		}
 		s.pending[string(id)] = d
 		s.nativeParams[string(id)] = append(json.RawMessage(nil), params...)
-		s.mu.Unlock()
-		if d.ID != "" {
-			raw, _ := json.Marshal(d)
-			s.event("decision/required", raw)
+		if d.ID != "" && s.emit != nil {
+			s.emit("decision/required", mustJSON(d))
 		}
+		s.mu.Unlock()
 		s.broadcast(method, params, id)
 	})
 	p.SetNotificationHandler(func(method string, params json.RawMessage) {
@@ -148,6 +147,19 @@ func (s *sharedBackend) call(ctx context.Context, method string, params any, emi
 		return requestTakeover(ctx, s.home, id)
 	}
 	if method == "client/attached" {
+		if values["attached"] == true {
+			s.mu.Lock()
+			if s.emit != nil {
+				// Serialize the reset and replay with pending-map changes.
+				s.emit("decision/reset", json.RawMessage(`{}`))
+				for _, d := range s.pending {
+					if d.ID != "" {
+						s.emit("decision/required", mustJSON(d))
+					}
+				}
+			}
+			s.mu.Unlock()
+		}
 		return json.RawMessage(`{"updated":true}`), nil
 	}
 	if method == "decision/respond" {

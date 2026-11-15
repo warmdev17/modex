@@ -21,6 +21,12 @@ class AttachedRPC(RPC):
             raise RuntimeError("attach_failed")
         self.instance = hello["instance"]
         self.cursor = cursor
+        if hello.get("resynced"):
+            checkpoint = hello.get("cursor")
+            if cursor != 0 or type(checkpoint) is not int or checkpoint <= 0:
+                self.close()
+                raise RuntimeError("invalid_journal_checkpoint")
+            self.cursor = checkpoint
 
     def receive(self, deadline):
         entry = RPC.receive(self, deadline)

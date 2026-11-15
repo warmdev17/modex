@@ -67,6 +67,51 @@ func TestSharedCodexChild(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestMobileAttachmentSnapshotsOnlyPendingReviewableDecisions(t *testing.T) {
+	var events []struct {
+		Method string
+		Params json.RawMessage
+	}
+	s := &sharedBackend{pending: map[string]bridge.Decision{
+		"77": {ID: "approval", Method: "item/commandExecution/requestApproval", ThreadID: "shared", TurnID: "turn", ItemID: "shell", Context: map[string]json.RawMessage{"command": json.RawMessage(`"echo shared"`)}},
+		"78": {ID: "question", Method: "item/tool/requestUserInput", ThreadID: "shared", TurnID: "turn", ItemID: "question", Context: map[string]json.RawMessage{"questions": json.RawMessage(`[{"id":"choice","question":"Choose","options":[{"label":"Yes"}]}]`)}},
+		"79": {Method: "unsupported/native-only"},
+	}}
+	emit := func(method string, params json.RawMessage) {
+		events = append(events, struct {
+			Method string
+			Params json.RawMessage
+		}{method, append(json.RawMessage(nil), params...)})
+	}
+	if _, err := s.call(context.Background(), "client/attached", map[string]any{"attached": true}, emit); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 || events[0].Method != "decision/reset" {
+		t.Fatalf("expected authoritative pending snapshot, got %d events", len(events))
+	}
+	seen := map[string]bool{}
+	for _, event := range events[1:] {
+		var d bridge.Decision
+		if event.Method != "decision/required" || json.Unmarshal(event.Params, &d) != nil || d.ID == "" || d.Context == nil {
+			t.Fatal("snapshot lost review context or included an unsupported request")
+		}
+		seen[d.ID] = true
+	}
+	if !seen["approval"] || !seen["question"] {
+		t.Fatal("missing approval or question")
+	}
+	delete(s.pending, "77")
+	delete(s.pending, "78")
+	_, _ = s.call(context.Background(), "client/attached", map[string]any{"attached": false}, emit)
+	if len(events) != 3 {
+		t.Fatal("detach must not emit a snapshot")
+	}
+	_, _ = s.call(context.Background(), "client/attached", map[string]any{"attached": true}, emit)
+	if len(events) != 4 || events[3].Method != "decision/reset" {
+		t.Fatal("empty snapshot must clear decisions resolved while disconnected")
+	}
+}
+
 func TestSharedBackendDisconnectDoesNotInterruptApprovalOrTurn(t *testing.T) {
 	testSharedBackendDisconnect(t, false)
 }

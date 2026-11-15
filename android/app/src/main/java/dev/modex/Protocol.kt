@@ -24,7 +24,14 @@ class JournalState(instance: String? = null, cursor: Long = 0) {
         require(frame.optBoolean("ready") && frame.optString("instance").isNotBlank()) { "Supervisor did not acknowledge attach" }
         val incoming = frame.getString("instance")
         require(instance == null || instance == incoming) { "Supervisor restarted. Reset connection to load a new journal." }
+        val checkpoint = if (frame.optBoolean("resynced")) {
+            require(instance == null && cursor == 0L) { "Reset session cursor before accepting a new checkpoint." }
+            val value = frame.get("cursor")
+            require(value is Number && value.toString().toLongOrNull()?.let { it > 0 } == true) { "Invalid journal checkpoint" }
+            value.toLong()
+        } else cursor
         instance = incoming
+        cursor = checkpoint
     }
     fun frame(frame: JSONObject, apply: (JSONObject) -> Unit = {}): JSONObject? {
         require(!frame.has("error")) { "Replay unavailable. Reset connection after reviewing session state." }
@@ -36,6 +43,13 @@ class JournalState(instance: String? = null, cursor: Long = 0) {
         cursor = next
         return message
     }
+}
+
+internal fun updatePendingDecisions(current: List<JSONObject>, event: String, params: JSONObject): List<JSONObject> = when (event) {
+    "decision/reset" -> emptyList()
+    "decision/resolved" -> current.filterNot { it.optString("decision_id") == params.optString("decision_id") }
+    "decision/required" -> if (current.none { it.optString("decision_id") == params.optString("decision_id") }) current + params else current
+    else -> current
 }
 
 // Never display raw upstream errors: they can include credential-bearing URLs.
