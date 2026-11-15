@@ -2,6 +2,7 @@
 import os
 from pathlib import Path
 import shutil
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -53,6 +54,24 @@ chmod 755 "$modex_output"
         self.assertEqual(profile.count('export PATH='), 1)
         resolved = subprocess.run(['/bin/sh', '-c', '. "$HOME/.profile"; command -v modex'], env=self.env, text=True, capture_output=True, check=True)
         self.assertEqual(resolved.stdout.strip(), str(self.prefix / 'bin/modex'))
+
+    def test_default_host_is_the_installed_binary(self):
+        self.env.pop('HOST_BINARY')
+        # Guard the historical destination so a failing regression cannot replace a real host.
+        mktemp = self.root / 'tools/mktemp'
+        actual_mktemp = shutil.which('mktemp')
+        mktemp.write_text('#!/bin/sh\ncase "$1" in /tmp/modex-host*) exit 9 ;; esac\nexec ' + shlex.quote(actual_mktemp) + ' "$@"\n')
+        mktemp.chmod(0o700)
+        result = self.build()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('Phone host binary: ' + str(self.prefix / 'bin/modex-host'), result.stdout)
+        self.assertFalse(self.host.exists())
+
+    def test_make_defaults_to_the_same_installed_host(self):
+        result = subprocess.run(['make', '-n', 'host', 'PREFIX=' + str(self.prefix)],
+                                cwd=SCRIPT.parent.parent, text=True, capture_output=True, check=True)
+        self.assertIn('HOST_BINARY="' + str(self.prefix / 'bin/modex-host') + '"', result.stdout)
+        self.assertNotIn('/tmp/modex-host', result.stdout)
 
     def test_failed_second_build_keeps_previous_binaries_and_profiles(self):
         for binary in [self.prefix / 'bin/modex', self.prefix / 'bin/modex-host', self.host]:

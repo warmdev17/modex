@@ -4,7 +4,7 @@ set -eu
 
 modex_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 modex_prefix=${PREFIX:-"$HOME/.local"}
-modex_host=${HOST_BINARY:-/tmp/modex-host}
+modex_host=${HOST_BINARY:-"$modex_prefix/bin/modex-host"}
 case "$modex_prefix:$modex_host" in *'
 '*) printf '%s\n' 'Build paths must be single-line.' >&2; exit 1 ;; esac
 case "$modex_prefix" in /*) ;; *) printf '%s\n' 'PREFIX must be absolute.' >&2; exit 1 ;; esac
