@@ -23,3 +23,9 @@
 - Test host changes in an isolated supervisor before deployment. A successful test does not make an ordinary service restart non-disruptive: the current service owns the Codex backend. Do not restart it from its own active turn or discard pending decisions.
 - After each verified modex-host update, install the tested binary and schedule one external, one-shot service restart with a 30-second delay. Arm the job only as the final operational step of the turn, after all other work and checks, then send the final reply immediately; never restart directly from the active backend turn. Check for an existing restart job before scheduling another. This standing authorization covers host-update activation, not Android-only updates or unrelated restarts.
 - Tell bradar when the restart is scheduled and explicitly instruct: on Android, open Connection settings → Reset session cursor → reconnect. Do not resend uncertain prompts, approvals or answers automatically. A delayed restart can still interrupt active turns; it is not a drain/reconnect or persistent-engine handover. See docs/mobile-development.md.
+
+# Android UI rules
+
+- Use compact app bars on management, navigation and settings screens: a single title at titleMedium or smaller, with a toolbar around 48–56 dp high. Do not add large headline/hero titles, oversized page-name blocks or a repeated brand/subtitle above the content. This applies to Home tabs and host settings opened from chat too.
+- Each navigation tab must serve a distinct user task. Do not dedicate a second tab to the same host list with only a connection-state filter.
+- Preserve Catppuccin Mocha with blue accent, restrained corner radii and clear host identity when switching remote sessions.
