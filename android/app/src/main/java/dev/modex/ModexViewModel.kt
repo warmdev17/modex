@@ -38,8 +38,8 @@ internal fun explainHostRejection(method: String, detail: String): String {
 }
 
 // State survives rotations, but not process death. No automatic command retries.
-class ModexViewModel(application: Application) : AndroidViewModel(application) {
-    private val saved = SavedHost(application)
+class ModexViewModel(application: Application, storageName: String = "host") : AndroidViewModel(application) {
+    private val saved = SavedHost(application, storageName)
     private val sessions = SessionState()
     private val historyCache = HistoryCache()
     private data class HistoryRequest(val thread: String, val cursor: String, val activity: Long, val before: List<ChatEntry>)
@@ -114,7 +114,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
     private val sentAttachmentPaths = mutableMapOf<Long, Pair<String, Set<String>>>()
 
     init {
-        (application as ModexApplication).session = this
+        (application as ModexApplication).apply { sessions[storageName] = this@ModexViewModel; if (storageName == "host") session = this@ModexViewModel }
         try {
             saved.load()?.let { data ->
                 val c = data.getJSONObject("connection")
@@ -209,10 +209,24 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         sessions.reset(); historyLoading = false; selectedWorkspace = ""; threadWorkspaces = emptyMap(); decisions = emptyList(); answeringDecisionIds = emptySet(); error = ""
         persist()
     }
+    fun configure(value: Connection): Boolean {
+        if (connected || connecting) return false
+        if (value.host.isBlank() || value.user.isBlank() || value.port !in 1..65535 ||
+            !value.pin.matches(Regex("SHA256:[A-Za-z0-9+/]{43}")) || !value.binary.startsWith("/") || !value.state.startsWith("/")) {
+            error = "Check the host, port, fingerprint and absolute remote paths."; return false
+        }
+        if (!keyLoaded) { error = "Import an unencrypted SSH private key first."; return false }
+        if (config != null && config != value) {
+            reset(); historyCache.clear(); lastThread = ""; modelChoices = emptyMap(); hostChoice = ModelChoice()
+            attachments.clear(); projects = emptyList(); projectMembership = emptyMap()
+        }
+        config = value; savedConnection = value; error = ""; persist()
+        return true
+    }
     fun connect(value: Connection) {
         if (connected || connecting) return
         if (key == null) { error = "Import an unencrypted SSH private key first."; return }
-        if (config != null && config != value) { error = "Forget saved host before changing the target."; return }
+        if (!configure(value)) return
         config = value; savedConnection = value; reconnectAllowed = true; error = ""; connecting = true
         try { getApplication<Application>().startForegroundService(Intent(getApplication(), ConnectionService::class.java)) }
         catch (_: Exception) { connecting = false; error = "Android could not start the connection service. Open Modex and connect again."; return }
@@ -244,7 +258,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
                 withContext(Dispatchers.Main) { if (transport === current) {
                     connected = false; connecting = false; transport = null; threadListLoading = false; projectCreating = false
                     leaveSession(); persist()
-                    getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java))
+                    getApplication<ModexApplication>().stopConnectionServiceIfIdle()
                 } }
             }
         }
@@ -253,7 +267,7 @@ class ModexViewModel(application: Application) : AndroidViewModel(application) {
         reconnectAllowed = false
         val current = transport; transport = null; connected = false; connecting = false; projectCreating = false
         leaveSession(); current?.close(); persist()
-        getApplication<Application>().stopService(Intent(getApplication(), ConnectionService::class.java))
+        getApplication<ModexApplication>().stopConnectionServiceIfIdle()
     }
     fun create(model: String, mode: String, effort: String = "", workspace: String = "", projectId: String = "") {
         if (!connected || historyLoading || switching()) return

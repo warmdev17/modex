@@ -12,7 +12,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
-/** One device-local encrypted host; excluded from cloud backup and device transfer. */
+/** A named device-local encrypted store; excluded from cloud backup and device transfer. */
 class SavedHost(context: Context, name: String = "host") {
     private val file = AtomicFile(File(context.noBackupFilesDir, "$name.enc"))
     private var generation = 0L
