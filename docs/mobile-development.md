@@ -58,3 +58,9 @@ Activity shows running conversations and pending questions/approvals across remo
 Use the host menu to edit or remove a profile. Disconnect before changing SSH fields or keys. Changing a remote target clears that profile's old history/cursor before connecting. Removing a profile deletes its saved device key/state, while remote files and Codex conversations remain. If a supervisor has restarted, disconnect that host, open its Connection settings, use Reset session cursor and reconnect; other remotes can remain online.
 
 The aggregate foreground service remains subject to Android dataSync service limits; simultaneous remote connections do not bypass OS background restrictions. Profiles and SSH keys remain device-local, Keystore encrypted and excluded from Android backup. There is no cloud profile sync or shared keychain in this milestone.
+
+## Confirming a proposed plan
+
+After a completed structured Codex plan, Android displays its Markdown and **Implement this plan?**, with three choices: implement in the current session, clear context and implement in a new chat, or stay in Plan mode. Clearing context creates another thread; it does not delete the source conversation. The host uses Codex's native approved-plan preparation and explicitly checks copied permissions before dispatch.
+
+The planning turn has already finished, so Send replacing Stop is expected while confirmation is waiting. Stop is reserved for an active turn. Confirmations are hidden for interrupted/failed plans, newer turns and handled plans. Typed plan history and handled IDs survive encrypted state restoration. If delivery is uncertain, reconnect and inspect; Modex never automatically submits the choice again. Both the updated APK and host are required. CLI's local confirmation popup is not a remotely controllable approval dialog.

@@ -6,11 +6,11 @@ import org.json.JSONObject
 internal data class ChatEntry(
     val id: String = "", val role: String, val text: String = "", val command: String = "",
     val status: String = "", val exitCode: Int? = null, val cwd: String = "", val attachments: List<Attachment> = emptyList(),
-    val turnId: String = "", val startedAtMs: Long? = null, val durationMs: Long? = null, val summaryParts: List<String> = emptyList()
+    val turnId: String = "", val startedAtMs: Long? = null, val durationMs: Long? = null, val summaryParts: List<String> = emptyList(), val planHandled: Boolean = false
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("role", when (role) { "You" -> "user"; "Codex" -> "assistant"; else -> role })
         .put("turn_id", turnId).put("started_at_ms", startedAtMs ?: JSONObject.NULL).put("duration_ms", durationMs ?: JSONObject.NULL)
-        .put("summary_parts", JSONArray(summaryParts)).put("attachments", JSONArray().apply { attachments.forEach { put(it.toJson().put("name", it.name).put("size", it.size)) } }).put("text", text).put("command", command).put("status", status).put("cwd", cwd).put("exit_code", exitCode ?: JSONObject.NULL)
+        .put("plan_handled", planHandled).put("summary_parts", JSONArray(summaryParts)).put("attachments", JSONArray().apply { attachments.forEach { put(it.toJson().put("name", it.name).put("size", it.size)) } }).put("text", text).put("command", command).put("status", status).put("cwd", cwd).put("exit_code", exitCode ?: JSONObject.NULL)
 }
 
 private const val OUTPUT_LIMIT = 65536
@@ -34,7 +34,7 @@ internal fun readChat(list: JSONArray, now: Long = System.currentTimeMillis()): 
         m.optString("command"), m.optString("status").ifBlank { m.optString("turn_status") }, if (m.isNull("exit_code")) null else m.optInt("exit_code"), m.optString("cwd"), files, m.optString("turn_id"),
         when { !m.isNull("started_at_ms") -> m.optLong("started_at_ms").takeIf { it >= 0 }; !m.isNull("elapsed_ms") -> (now - m.optLong("elapsed_ms").coerceAtLeast(0)).coerceAtLeast(0); else -> null },
         if (m.isNull("duration_ms")) null else m.optLong("duration_ms").takeIf { it >= 0 },
-        m.optJSONArray("summary_parts")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty())
+        m.optJSONArray("summary_parts")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty(), m.optBoolean("plan_handled"))
 }
 
 /** Apply only events already checked against the selected thread by the caller. */
@@ -49,9 +49,9 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
     val previous = entries.getOrNull(index)
     val turnId = params.optString("turnId").ifBlank { previous?.turnId.orEmpty() }
     val entry = when (event) {
-        "item/agentMessage/delta" -> {
+        "item/plan/delta", "item/agentMessage/delta" -> {
             if (previous?.status == "completed") return entries
-            (previous ?: ChatEntry(id, "Codex", turnId = turnId)).copy(text = (previous?.text ?: "") + params.optString("delta"), status = "inProgress")
+            (previous ?: ChatEntry(id, if (event == "item/plan/delta") "plan" else "Codex", turnId = turnId)).copy(text = (previous?.text ?: "") + params.optString("delta"), status = "inProgress")
         }
         "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" -> {
             val part = params.optInt("summaryIndex", -1)
@@ -73,7 +73,7 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
                 (previous ?: ChatEntry(id, "You", recovered.first, attachments = recovered.second, status = "inProgress"))
                     .copy(id = id, turnId = turnId)
             }
-            "agentMessage" -> ChatEntry(id, "Codex", item.optString("text").ifEmpty { previous?.text.orEmpty() }, status = if (event == "item/started") "inProgress" else "completed", turnId = turnId)
+            "plan", "agentMessage" -> ChatEntry(id, if (item.optString("type") == "plan") "plan" else "Codex", if (item.has("text")) item.optString("text") else previous?.text.orEmpty(), status = if (event == "item/started") "inProgress" else "completed", turnId = turnId)
             "reasoning" -> {
                 val parts = item.optJSONArray("summary")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().ifEmpty { previous?.summaryParts.orEmpty() }
                 ChatEntry(id, "reasoning", parts.joinToString("\n\n"), status = if (event == "item/started") "inProgress" else "completed", turnId = turnId, summaryParts = parts)

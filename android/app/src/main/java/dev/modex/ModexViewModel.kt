@@ -73,6 +73,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     internal val messages: List<ChatEntry> get() = sessions.messages
     val runningThreads: Set<String> get() = sessions.runningThreads
     var decisions by mutableStateOf(listOf<JSONObject>()); private set
+    var handledPlans by mutableStateOf(setOf<String>()); private set
+    val planResponding: Boolean get() = planSending
+    private var planSending by mutableStateOf(false)
     var answeringDecisionIds by mutableStateOf(setOf<String>()); private set
     val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
@@ -122,6 +125,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 savedConnection = config
                 key = Base64.decode(data.getString("key"), Base64.NO_WRAP); keyLoaded = true
                 journal = JournalState(data.optString("instance").ifEmpty { null }, data.optLong("cursor"))
+                handledPlans = data.optJSONArray("handled_plans")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }.orEmpty()
                 modelChoices = readModelChoices(data.optJSONObject("model_choices"))
                 hostChoice = readModelChoice(data.optJSONObject("host_choice")) ?: ModelChoice()
                 lastThread = data.optString("last_thread").ifBlank { data.optString("selected") }
@@ -136,6 +140,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 val requests = data.optJSONArray("pending") ?: JSONArray()
                 for (i in 0 until requests.length()) {
                     val r = requests.getJSONObject(i); pending[r.getLong("id")] = r.getString("method") to r.getString("tag")
+                    if (r.getString("method") == "plans/respond") handledPlans += r.getString("tag")
                     if (r.getString("method") == "decision/respond") answeringDecisionIds += r.getString("tag")
                 }
             }
@@ -152,7 +157,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
                 .put("model_choices", modelChoicesJson(modelChoices)).put("host_choice", hostChoice.toJson()).put("selected_workspace", selectedWorkspace).put("attachment_directories", attachments.directoriesJson())
                 .put("active_turns", sessions.activityJson()).put("last_thread", lastThread).put("history_cache", historyCache.toJson())
-                .put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
+                .put("handled_plans", JSONArray(handledPlans.toList())).put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
             withContext(Dispatchers.IO) {
             try { saved.save(snapshot, revision) } catch (_: Exception) { withContext(Dispatchers.Main) { error = "Could not save connection securely. Keep the app open or import again next time." } }
         } }
@@ -176,7 +181,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         historyCache.clear(); lastThread = ""; ownedThread = ""
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
         threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
-        journal = JournalState(); config = null; savedConnection = null; pending.clear(); sessions.reset(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList()
+        journal = JournalState(); config = null; savedConnection = null; pending.clear(); handledPlans = emptySet(); planSending = false; sessions.reset(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList()
     }
     private fun loadHistory(older: Boolean = false) {
         if (!connected || selected.isBlank() || ownedThread != selected) return
@@ -189,6 +194,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     fun loadOlderHistory() = loadHistory(true)
     private fun leaveSession() {
+        handledPlans += pending.values.filter { it.first == "plans/respond" }.map { it.second }
+        planSending = false
         references.clear()
         if (selected.isNotBlank()) lastThread = selected
         ownedThread = ""
@@ -217,7 +224,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         }
         if (!keyLoaded) { error = "Import an unencrypted SSH private key first."; return false }
         if (config != null && config != value) {
-            reset(); historyCache.clear(); lastThread = ""; modelChoices = emptyMap(); hostChoice = ModelChoice()
+            reset(); handledPlans = emptySet(); planSending = false; historyCache.clear(); lastThread = ""; modelChoices = emptyMap(); hostChoice = ModelChoice()
             attachments.clear(); projects = emptyList(); projectMembership = emptyMap()
         }
         config = value; savedConnection = value; error = ""; persist()
@@ -318,7 +325,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
-        if (!connected || busy || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
+        if (!connected || busy || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
         val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace), selected)
         if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
@@ -328,6 +335,15 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (!connected || historyLoading || switching()) return
         val target = sessions.requestStop() ?: return
         request("turn/interrupt", withWorkspace(target, selectedWorkspace), target.toString())
+    }
+    internal fun respondPlan(plan: ChatEntry, action: String) {
+        if (!connected || busy || historyLoading || switching() || ownedThread != selected || planResponding ||
+            action !in listOf("implement", "fresh", "stay") || pendingPlan(messages, busy, handledPlans) != plan) return
+        val params = JSONObject().put("thread_id", selected).put("turn_id", plan.turnId).put("item_id", plan.id).put("action", action)
+        if (sessionModel.isNotBlank()) params.put("model", sessionModel)
+        if (sessionEffort.isNotBlank()) params.put("effort", sessionEffort)
+        planSending = true
+        if (request("plans/respond", withWorkspace(params, selectedWorkspace), planKey(plan)) == null) planSending = false
     }
     fun answer(decision: JSONObject, result: JSONObject) {
         if (!connected) return
@@ -364,7 +380,13 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             val historyRequest = historyRequests.remove(id)
             if (operation.first in listOf("threads/start", "threads/resume", "threads/takeover") && (!selectionRequests.remove(id) || !connected)) return
             if (operation.first == "threads/read" && (historyRequest == null || !connected || historyRequest.thread != selected || ownedThread != selected)) return
+            if (operation.first == "plans/respond") planSending = pending.values.any { it.first == "plans/respond" && it.second !in handledPlans }
             if (frame.has("error")) {
+                if (operation.first == "plans/respond") {
+                    handledPlans += operation.second
+                    error = "Plan action was not confirmed. Refresh the session and inspect it before continuing; do not resend an uncertain action. Update modex-host if needed."
+                    return
+                }
                 if (operation.first == "projects/list") { projectStatus = "Project list unavailable. Update the host/Codex; chats remain in Recents."; return }
                 if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
                 if (operation.first == "turn/interrupt") {
@@ -472,6 +494,22 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     val active = if (request.cursor.isBlank()) result.optBoolean("active_turn") else busy
                     sessions.loadHistory(selected, page.entries, active, if (request.cursor.isBlank()) request.activity else -1, result.optString("active_turn_id"))
                 }
+                "plans/respond" -> {
+                    handledPlans += operation.second
+                    val target = result.optString("thread_id")
+                    val session = result.optJSONObject("session")
+                    if (session != null) {
+                        val source = result.optString("source_thread_id")
+                        modelChoices = modelChoices + (target to resolveModelChoice(readModelChoice(session) ?: choiceFor(source), null, hostChoice, models))
+                        val workspace = session.optJSONObject("thread")?.optString("cwd").orEmpty()
+                        if (workspace.isNotBlank()) threadWorkspaces = threadWorkspaces + (target to workspace)
+                        threads = (listOf(target) + threads).distinct()
+                    }
+                    if (connected && selected == result.optString("source_thread_id") && result.optString("action") != "stay" && target.isNotBlank()) {
+                        if (target == selected) { sessionSettings = session?.let(::sessionSettingsLabel).orEmpty(); loadHistory() }
+                        else select(target)
+                    }
+                }
                 "decision/respond" -> {
                     answeringDecisionIds -= operation.second
                     decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
@@ -482,6 +520,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         }
         if (frame.optString("event") == "skills/changed") { refreshReferences(); return }
         val params = frame.optJSONObject("params") ?: return
+        if (frame.optString("event") == "plan/resolved") {
+            params.optString("plan_key").takeIf { it.isNotBlank() }?.let { handledPlans += it }
+        }
         sessions.event(frame.optString("event"), params)
         decisions = updatePendingDecisions(decisions, frame.optString("event"), params)
         when (frame.optString("event")) {

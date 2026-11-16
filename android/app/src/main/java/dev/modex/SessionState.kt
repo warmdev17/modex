@@ -84,14 +84,14 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
                         val status = params.optJSONObject("turn")?.optString("status").orEmpty().ifBlank { "completed" }
                         val reported = params.optJSONObject("turn")?.takeUnless { it.isNull("durationMs") }?.optLong("durationMs")?.takeIf { it >= 0 }
                         messages = messages.map { entry ->
-                            if (entry.turnId == turn) entry.copy(status = if (entry.role == "You") status else if (entry.status == "inProgress") "completed" else entry.status,
+                            if (entry.turnId == turn) entry.copy(status = if (entry.role in listOf("You", "plan")) status else if (entry.status == "inProgress") "completed" else entry.status,
                                 durationMs = if (entry.role == "You") reported ?: entry.startedAtMs?.let { (now() - it).coerceAtLeast(0) } else entry.durationMs) else entry
                         }
                     }
                     changed(id)
                 }
             }
-            "item/started", "item/completed", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
+            "item/started", "item/completed", "item/plan/delta", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
                 if (id == selected) {
                     messages = updateChat(messages, method, params.apply { if (optString("turnId").isBlank()) put("turnId", activeTurns[id].orEmpty()) })
                         .map { if (it.role == "You" && it.status == "inProgress" && it.startedAtMs == null) it.copy(startedAtMs = now()) else it }

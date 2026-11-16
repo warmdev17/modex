@@ -105,6 +105,7 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
             runningThreads = vm.runningThreads, busy = vm.busy, stopping = vm.stopping, onStop = vm::stop, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
+            handledPlans = vm.handledPlans, planResponding = vm.planResponding, onPlanAction = vm::respondPlan,
             hasOlderHistory = vm.hasOlderHistory, olderHistoryLoading = vm.olderHistoryLoading, onOlderHistory = vm::loadOlderHistory,
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
             onCreate = { model, mode, effort -> vm.create(model, mode, effort) }, onCreateInProject = vm::create,

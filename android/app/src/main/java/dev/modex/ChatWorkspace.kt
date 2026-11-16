@@ -93,6 +93,7 @@ internal fun ChatWorkspace(
     onCreate: (String, String, String) -> Unit, onSend: (String, String, String, List<PromptReference>) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
     onConnection: () -> Unit, onDisconnect: () -> Unit, onHome: (() -> Unit)? = null,
     hasOlderHistory: Boolean = false, olderHistoryLoading: Boolean = false, onOlderHistory: () -> Unit = {},
+    handledPlans: Set<String> = emptySet(), planResponding: Boolean = false, onPlanAction: (ChatEntry, String) -> Unit = { _, _ -> },
     stopping: Boolean = false, onStop: () -> Unit = {},
     runningThreads: Set<String> = emptySet(),
     takeoverSession: String = "", onTakeover: () -> Unit = {},
@@ -333,6 +334,9 @@ internal fun ChatWorkspace(
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
                     InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
+                }
+                pendingPlan(messages, busy, handledPlans)?.let { plan ->
+                    item(key = "plan-review-${planKey(plan)}") { PlanReviewCard(connected && !historyLoading, planResponding) { onPlanAction(plan, it) } }
                 }
                 item(key = "history-bottom") { Spacer(Modifier.height(1.dp)) }
                 }
