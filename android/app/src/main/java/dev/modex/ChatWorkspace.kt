@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Terminal, Settings }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color = LocalContentColor.current) {
@@ -70,6 +70,8 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color
             ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }
             ChatIcon.Plugin -> { line(8f,3f,8f,8f); line(16f,3f,16f,8f); line(5f,8f,19f,8f); line(5f,8f,5f,13f); line(19f,8f,19f,13f); line(5f,13f,9f,17f); line(19f,13f,15f,17f); line(9f,17f,15f,17f); line(12f,17f,12f,22f) }
             ChatIcon.Skill -> { line(4f,4f,10f,4f); line(10f,4f,12f,6f); line(12f,6f,14f,4f); line(14f,4f,20f,4f); line(20f,4f,20f,19f); line(20f,19f,14f,19f); line(14f,19f,12f,21f); line(12f,21f,10f,19f); line(10f,19f,4f,19f); line(4f,19f,4f,4f); line(12f,6f,12f,21f) }
+            ChatIcon.Terminal -> { line(3f,4f,21f,4f); line(21f,4f,21f,20f); line(21f,20f,3f,20f); line(3f,20f,3f,4f); line(7f,8f,11f,12f); line(11f,12f,7f,16f); line(13f,16f,17f,16f) }
+            ChatIcon.Settings -> { line(4f,6f,8f,6f); line(12f,6f,20f,6f); line(4f,12f,14f,12f); line(18f,12f,20f,12f); line(4f,18f,6f,18f); line(10f,18f,20f,18f); for ((x,y) in listOf(10f to 6f,16f to 12f,8f to 18f)) drawCircle(color, 2f*u, Offset(x*u,y*u), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8f*u)) }
             ChatIcon.Model -> Unit
             ChatIcon.Attach -> { line(5f,12f,19f,12f); line(12f,5f,12f,19f) }
             ChatIcon.File -> { line(5f,3f,14f,3f); line(14f,3f,19f,8f); line(19f,8f,19f,21f); line(19f,21f,5f,21f); line(5f,21f,5f,3f); line(14f,3f,14f,8f); line(14f,8f,19f,8f) }
@@ -88,7 +90,7 @@ internal fun ChatWorkspace(
     sessionModel: String, decisions: List<JSONObject>, answeringDecisionIds: Set<String>,
     onSelect: (String) -> Unit, onRefresh: () -> Unit, onMore: () -> Unit,
     onCreate: (String, String, String) -> Unit, onSend: (String, String, String, List<PromptReference>) -> Boolean, onAnswer: (JSONObject, JSONObject) -> Unit,
-    onConnection: () -> Unit, onDisconnect: () -> Unit,
+    onConnection: () -> Unit, onDisconnect: () -> Unit, onHome: (() -> Unit)? = null,
     hasOlderHistory: Boolean = false, olderHistoryLoading: Boolean = false, onOlderHistory: () -> Unit = {},
     stopping: Boolean = false, onStop: () -> Unit = {},
     runningThreads: Set<String> = emptySet(),
@@ -219,6 +221,7 @@ internal fun ChatWorkspace(
                     if (hasMore && !threadListLoading) item { TextButton(onClick = onMore, enabled = connected) { Text("Load more") } }
                 }
                 HorizontalDivider(color = Mocha.Surface)
+                if (onHome != null) TextButton(onClick = onHome, modifier = Modifier.fillMaxWidth()) { Text("All hosts") }
                 TextButton(onClick = { scope.launch { drawer.close() }; onConnection() }, modifier = Modifier.fillMaxWidth().padding(8.dp)) {
                     Column(Modifier.fillMaxWidth().padding(4.dp)) { Text(host.ifBlank { "Connection settings" }, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(status, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) }
                 }
@@ -230,12 +233,13 @@ internal fun ChatWorkspace(
                 IconButton(onClick = { scope.launch { drawer.open() }; if (connected) onRefresh() }) { ChatGlyph(ChatIcon.Menu,"Open sessions") }
                 Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                     Text(if (selected.isBlank()) "modex" else titles[selected] ?: "Conversation", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
-                    Text(status, style = MaterialTheme.typography.labelSmall, color = if (connected) Mocha.Blue else Mocha.Subtext)
+                    Text(if (onHome != null) "$host · $status" else status, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = if (connected) Mocha.Blue else Mocha.Subtext)
                 }
                 Box {
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("Session settings") }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true })
+                        if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, onClick = { menu = false; onHome() })
                         DropdownMenuItem(text = { Text("Connection settings") }, onClick = { menu = false; onConnection() })
                         if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, onClick = { menu = false; onDisconnect() })
                     }

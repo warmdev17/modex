@@ -48,3 +48,13 @@ Use the new-chat icon beside a project to start a conversation in its root. New 
 Both the new APK and updated host are needed. Folder operations require SFTP access for the existing SSH account. No Git repository is initialized, no existing files are replaced, and uncertain create requests are never replayed automatically. Refresh and inspect the folder/project list before retrying an uncertain creation.
 
 The main New chat action starts outside projects in the remote account Documents/Codex folder. It does not inherit the selected conversation workspace or project. Use the square-and-pencil action beside a project for project chats. The standalone request requires an updated host; stage its binary and activate only at an idle boundary.
+
+## Managing Android connections
+
+The Home screen contains **Hosts**, **Connections** and **Settings**. Hosts lists encrypted saved profiles; add a host, set its SSH address/account, verified fingerprint, remote host binary and supervisor state directory, import its key, then Save host or Connect. Existing single-host installations retain their original encrypted host/key/cursor as My computer; migration does not rewrite those credentials.
+
+Connections shows every currently connected/connecting remote. Open switches to that host's chat; Android Back or All hosts returns Home without disconnecting other hosts. Chat headers include the host name. Each profile has an independent SSH transport, journal cursor, history, model/effort and pending decisions. Disconnect affects only that profile; the foreground notification Disconnect all action affects all profiles. A manually disconnected profile is not automatically reopened during that app process. Settings controls reconnect-on-foreground; after process replacement, enabled reconnect restores saved hosts without replaying prompts or decisions.
+
+Use the host menu to edit or remove a profile. Disconnect before changing SSH fields or keys. Changing a remote target clears that profile's old history/cursor before connecting. Removing a profile deletes its saved device key/state, while remote files and Codex conversations remain. If a supervisor has restarted, disconnect that host, open its Connection settings, use Reset session cursor and reconnect; other remotes can remain online.
+
+The aggregate foreground service remains subject to Android dataSync service limits; simultaneous remote connections do not bypass OS background restrictions. Profiles and SSH keys remain device-local, Keystore encrypted and excluded from Android backup. There is no cloud profile sync or shared keychain in this milestone.

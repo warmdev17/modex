@@ -18,11 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import android.os.Build
 
@@ -31,29 +26,22 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(0xFF1E1E2E.toInt()), navigationBarStyle = SystemBarStyle.dark(0xFF1E1E2E.toInt()))
         setContent {
-            ModexTheme { Surface(Modifier.fillMaxSize()) { ModexApp() } }
+            ModexTheme { Surface(Modifier.fillMaxSize()) { ConnectionHome() } }
         }
     }
 }
 
 @Composable
-private fun ModexApp() {
+internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditing: Boolean, onHome: () -> Unit, onName: (String) -> Unit, onForget: () -> Unit) {
     val context = LocalContext.current
-    val app = context.applicationContext as ModexApplication
-    val vm: ModexViewModel = viewModel(viewModelStoreOwner = app, factory = ViewModelProvider.AndroidViewModelFactory.getInstance(app))
+    var displayName by rememberSaveable { mutableStateOf(hostName) }
     val saved = vm.savedConnection
     var host by rememberSaveable { mutableStateOf(saved?.host.orEmpty()) }; var port by rememberSaveable { mutableStateOf(saved?.port?.toString() ?: "22") }
     var user by rememberSaveable { mutableStateOf(saved?.user.orEmpty()) }; var pin by rememberSaveable { mutableStateOf(saved?.pin.orEmpty()) }
     var binary by rememberSaveable { mutableStateOf(saved?.binary.orEmpty()) }; var state by rememberSaveable { mutableStateOf(saved?.state.orEmpty()) }
-    val owner = LocalLifecycleOwner.current
-    DisposableEffect(owner) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_START) vm.foreground() }
-        owner.lifecycle.addObserver(observer)
-        onDispose { owner.lifecycle.removeObserver(observer) }
-    }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
-    var connectionSettings by rememberSaveable { mutableStateOf(false) }; var importError by rememberSaveable { mutableStateOf("") }
+    var connectionSettings by rememberSaveable { mutableStateOf(initiallyEditing) }; var importError by rememberSaveable { mutableStateOf("") }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) try {
             if (vm.connected || vm.connecting) {
@@ -110,7 +98,7 @@ private fun ModexApp() {
     )
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
         ChatWorkspace(
-            host = vm.savedConnection?.host.orEmpty(), connected = vm.connected, connecting = vm.connecting,
+            host = hostName, connected = vm.connected, connecting = vm.connecting,
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
             runningThreads = vm.runningThreads, busy = vm.busy, stopping = vm.stopping, onStop = vm::stop, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
@@ -118,7 +106,7 @@ private fun ModexApp() {
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
             onCreate = { model, mode, effort -> vm.create(model, mode, effort) }, onCreateInProject = vm::create,
             onNewProject = { vm.attachments.browse("~"); projectBrowser = true }, onSend = vm::send, onAnswer = vm::answer,
-            onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect,
+            onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect, onHome = onHome,
             takeoverSession = vm.takeoverThread, onTakeover = vm::takeOver,
             models = vm.models, modelCatalogStatus = vm.modelCatalogStatus,
             referenceCatalog = vm.references.catalog, referencesLoading = vm.references.loading, referenceStatus = vm.references.status, onRefreshReferences = { vm.refreshReferences() },
@@ -134,9 +122,10 @@ private fun ModexApp() {
     } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Connection", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Host settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text("Your Codex host", color = Mocha.Subtext, modifier = Modifier.padding(top = 4.dp))
             }
+            TextButton(onClick = onHome) { Text("Hosts") }
             if (vm.savedConnection != null) TextButton(onClick = { connectionSettings = false }) { Text("Back to chat") }
         }
         Spacer(Modifier.height(20.dp))
@@ -145,6 +134,7 @@ private fun ModexApp() {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Connect to your host", style = MaterialTheme.typography.titleLarge)
                 Text("Start the Modex supervisor on your laptop or VPS first. Verify its SSH fingerprint through a trusted channel.")
+                OutlinedTextField(displayName, { displayName = it.take(80) }, label = { Text("Host name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(host, { host = it }, label = { Text("Hostname or IP") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(user, { user = it }, label = { Text("SSH username") }, singleLine = true, modifier = Modifier.weight(2f))
@@ -159,12 +149,15 @@ private fun ModexApp() {
                     importError = ""
                     keyPicker.launch(arrayOf("*/*"))
                 }, modifier = Modifier.fillMaxWidth()) { Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH private key") }
-                Text("Your key and connection are encrypted on this device. Use Forget saved host to remove them. Passphrase keys are not supported yet.", style = MaterialTheme.typography.bodySmall)
+                Text("Your key and connection are encrypted on this device. Use Remove saved host to remove them. Passphrase keys are not supported yet.", style = MaterialTheme.typography.bodySmall)
                 if (importError.isNotEmpty()) Text(importError, color = MaterialTheme.colorScheme.error)
-                Button(onClick = { vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary, state)); connectionSettings = false }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && binary.startsWith("/") && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
+                Button(onClick = { onName(displayName); vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary.trim(), state.trim())); if (vm.connecting) connectionSettings = false }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && binary.startsWith("/") && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
+                OutlinedButton(onClick = {
+                    if (vm.configure(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary.trim(), state.trim()))) { onName(displayName); onHome() }
+                }, enabled = vm.keyLoaded && displayName.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Save host") }
                 Row {
                     TextButton(onClick = vm::reset) { Text("Reset session cursor") }
-                    TextButton(onClick = { vm.forget(); host = ""; user = ""; pin = ""; state = "" }) { Text("Forget saved host") }
+                    TextButton(onClick = onForget) { Text("Remove saved host") }
                 }
             }
         } else {
