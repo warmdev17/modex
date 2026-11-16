@@ -18,6 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Alignment
 import android.os.Build
 
@@ -64,7 +67,7 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
             importError = "The file provider could not open this file. Copy it to Downloads and select it again."
         }
     }
-    BackHandler(connectionSettings && vm.savedConnection != null) { connectionSettings = false }
+    BackHandler(connectionSettings) { if (initiallyEditing || vm.savedConnection == null) onHome() else connectionSettings = false }
     var phoneThread by rememberSaveable { mutableStateOf("") }
     var phoneGeneration by rememberSaveable { mutableStateOf(0) }
     var phoneTarget by rememberSaveable { mutableStateOf("") }
@@ -119,20 +122,18 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
             onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.attachments.directoryFor(remoteThread), remoteThread) },
             onRemoveAttachment = { vm.attachments.remove(vm.selected, it) }
         )
-    } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(20.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Host settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text("Your Codex host", color = Mocha.Subtext, modifier = Modifier.padding(top = 4.dp))
+    } else Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth().height(56.dp).semantics { contentDescription = "Host settings toolbar" }, verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { if (initiallyEditing || vm.savedConnection == null) onHome() else connectionSettings = false }) {
+                Box(Modifier.rotate(180f)) { ChatGlyph(ChatIcon.ChevronRight, "Back") }
             }
-            TextButton(onClick = onHome) { Text("Hosts") }
-            if (vm.savedConnection != null) TextButton(onClick = { connectionSettings = false }) { Text("Back to chat") }
+            Text("Host settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            IconButton(onClick = onHome) { ChatGlyph(ChatIcon.Computer, "All hosts") }
         }
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(8.dp))
         if (vm.error.isNotBlank()) Text(vm.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
         if (!vm.connected && !vm.connecting) {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Connect to your host", style = MaterialTheme.typography.titleLarge)
                 Text("Start the Modex supervisor on your laptop or VPS first. Verify its SSH fingerprint through a trusted channel.")
                 OutlinedTextField(displayName, { displayName = it.take(80) }, label = { Text("Host name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(host, { host = it }, label = { Text("Hostname or IP") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -175,7 +176,6 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
                 Text("Disconnect to edit connection settings.", color = Mocha.Subtext)
             }
             TextButton(onClick = vm::disconnect) { Text("Disconnect") }
-            TextButton(onClick = { connectionSettings = false }) { Text("Back to chat") }
         }
     }
 }

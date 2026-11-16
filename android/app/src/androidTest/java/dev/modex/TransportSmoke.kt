@@ -10,6 +10,7 @@ class TransportSmoke : Instrumentation() {
     private lateinit var args: Bundle
     override fun onCreate(arguments: Bundle) { super.onCreate(arguments); args = arguments; start() }
     override fun onStart() {
+        if (args.getString("preview") == "activity-navigation") { activityNavigationSmoke(); return }
         if (args.getString("preview") == "connection-management") { connectionManagementSmoke(args); return }
         if (args.getString("preview") == "legacy-connections") { legacyConnectionSmoke(); return }
         if (args.getString("preview") == "journal-recovery") { journalRecoverySmoke(args); return }

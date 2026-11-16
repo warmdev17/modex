@@ -14,6 +14,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -24,6 +26,7 @@ internal fun ConnectionHome() {
     val manager = app.connections
     var page by rememberSaveable { mutableStateOf("Hosts") }
     var opened by rememberSaveable { mutableStateOf("") }
+    var targetThread by rememberSaveable { mutableStateOf("") }
     var editor by rememberSaveable { mutableStateOf(false) }
     var create by rememberSaveable { mutableStateOf(false) }
     var newName by rememberSaveable { mutableStateOf("") }
@@ -34,12 +37,25 @@ internal fun ConnectionHome() {
         owner.lifecycle.addObserver(observer)
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
+    val activities = manager.profiles.flatMap { host ->
+        val vm = manager.controller(host.id)
+        hostActivity(host.id, vm.runningThreads, vm.decisions, vm.titles)
+    }.sortedWith(compareByDescending<HostActivity> { it.waiting > 0 }.thenBy { it.hostId }.thenBy { it.title })
+    val connectedHosts = manager.profiles.filter { manager.controller(it.id).connected }.map { it.id }.toSet()
+    val liveWaiting = activities.filter { it.hostId in connectedHosts }.sumOf { it.waiting }
     val profile = manager.profiles.firstOrNull { it.id == opened }
     if (profile != null) {
-        BackHandler { opened = "" }
+        val vm = manager.controller(profile.id)
+        BackHandler { opened = ""; targetThread = "" }
+        LaunchedEffect(profile.id, targetThread, vm.connected, vm.historyLoading) {
+            if (targetThread.isNotBlank() && vm.connected && !vm.historyLoading) {
+                val target = targetThread; targetThread = ""
+                if (vm.selected != target) vm.select(target)
+            }
+        }
         key(profile.id) {
             HostWorkspace(manager.controller(profile.id), profile.name, editor,
-                onHome = { opened = "" }, onName = { manager.rename(profile.id, it) },
+                onHome = { opened = ""; targetThread = "" }, onName = { manager.rename(profile.id, it) },
                 onForget = { delete = profile.id })
         }
     } else Scaffold(
@@ -47,20 +63,17 @@ internal fun ConnectionHome() {
         containerColor = Mocha.Base,
         bottomBar = {
             NavigationBar(containerColor = Mocha.Mantle) {
-                listOf("Hosts" to ChatIcon.Computer, "Connections" to ChatIcon.Terminal, "Settings" to ChatIcon.Settings).forEach { (title, icon) ->
+                listOf("Hosts" to ChatIcon.Computer, "Activity" to ChatIcon.Activity, "Settings" to ChatIcon.Settings).forEach { (title, icon) ->
                     NavigationBarItem(selected = page == title, onClick = { page = title },
-                        icon = { ChatGlyph(icon, title) }, label = { Text(title) },
+                        icon = { BadgedBox(badge = { if (title == "Activity" && liveWaiting > 0) Badge { Text(liveWaiting.toString()) } }) { ChatGlyph(icon, title) } }, label = { Text(title) },
                         colors = NavigationBarItemDefaults.colors(indicatorColor = Mocha.Surface, selectedIconColor = Mocha.Blue, selectedTextColor = Mocha.Blue))
                 }
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
-            Row(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Modex", color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge)
-                    Text(page, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
-                }
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
+            Row(Modifier.fillMaxWidth().height(56.dp).semantics { contentDescription = "Navigation toolbar" }, verticalAlignment = Alignment.CenterVertically) {
+                Text(page, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                 if (page == "Hosts") FilledTonalButton(shape = RoundedCornerShape(10.dp), onClick = { newName = ""; create = true },
                     colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base)) {
                     ChatGlyph(ChatIcon.Attach); Spacer(Modifier.width(6.dp)); Text("Add host")
@@ -68,6 +81,11 @@ internal fun ConnectionHome() {
             }
             if (manager.error.isNotBlank()) Text(manager.error, color = Mocha.Red, modifier = Modifier.padding(bottom = 12.dp))
             when (page) {
+                "Activity" -> ActivityList(activities, manager.profiles.associate { it.id to it.name }, connectedHosts) { hostId, threadId ->
+                    opened = hostId; targetThread = threadId; editor = false
+                    val vm = manager.controller(hostId)
+                    if (!vm.connected && !vm.connecting) vm.savedConnection?.let(vm::connect)
+                }
                 "Settings" -> {
                     Surface(color = Mocha.Mantle, shape = RoundedCornerShape(12.dp)) {
                         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -85,11 +103,11 @@ internal fun ConnectionHome() {
                     Text("Modex $version", color = Mocha.Subtext, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 24.dp))
                 }
                 else -> {
-                    val visible = manager.profiles.filter { page == "Hosts" || manager.controller(it.id).let { vm -> vm.connected || vm.connecting } }
+                    val visible = manager.profiles
                     if (visible.isEmpty()) Column(Modifier.fillMaxWidth().padding(vertical = 64.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         ChatGlyph(ChatIcon.Computer, color = Mocha.Subtext)
-                        Text(if (page == "Hosts") "Your computers, anywhere" else "No active connections", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-                        Text(if (page == "Hosts") "Save a laptop or VPS to connect in one tap." else "Connect a saved host to start working.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+                        Text("Your computers, anywhere", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
+                        Text("Save a laptop or VPS to connect in one tap.", color = Mocha.Subtext, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
                     }
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 20.dp)) {
                         items(visible, key = { it.id }) { host ->
@@ -119,7 +137,7 @@ internal fun ConnectionHome() {
                                         Spacer(Modifier.weight(1f))
                                         if (vm.connected || vm.connecting) TextButton(onClick = vm::disconnect) { Text("Disconnect") }
                                         Button(shape = RoundedCornerShape(10.dp), onClick = {
-                                            editor = vm.savedConnection == null
+                                            editor = vm.savedConnection == null; targetThread = ""
                                             opened = host.id
                                             if (!vm.connected && !vm.connecting) vm.savedConnection?.let(vm::connect)
                                         }) { Text(if (vm.connected || vm.connecting) "Open" else if (vm.savedConnection == null) "Set up" else "Connect") }

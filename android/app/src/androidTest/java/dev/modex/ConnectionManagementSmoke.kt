@@ -89,7 +89,7 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
             val deadline = System.currentTimeMillis() + 5000
             while (nodes(label).size <= index && System.currentTimeMillis() < deadline) Thread.sleep(80)
             val matches = nodes(label)
-            val node = if (label in listOf("Hosts", "Connections", "Settings")) matches.last() else matches.getOrNull(index) ?: error("Missing UI: $label")
+            val node = if (label in listOf("Hosts", "Activity", "Settings")) matches.last() else matches.getOrNull(index) ?: error("Missing UI: $label")
             val bounds = Rect().also(node::getBoundsInScreen)
             val time = SystemClock.uptimeMillis()
             // Native navigation tabs can expose selection without isClickable; exercise real touch.
@@ -105,7 +105,7 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
             while (nodes(label).isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(100)
             check(nodes(label).isNotEmpty()) { "UI did not show $label" }
         }
-        click("Connections"); check(nodes("Open").size == 2) { "Expected two Open nodes, found ${nodes("Open").size}" }
+        click("Activity"); awaitLabel("Nothing needs attention")
         click("Settings"); awaitLabel("Reconnect on open")
         click("Hosts")
         click("Open")

@@ -46,7 +46,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Terminal, Settings }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Terminal, Settings, Activity }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color = LocalContentColor.current) {
@@ -70,6 +70,7 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color
             ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }
             ChatIcon.Plugin -> { line(8f,3f,8f,8f); line(16f,3f,16f,8f); line(5f,8f,19f,8f); line(5f,8f,5f,13f); line(19f,8f,19f,13f); line(5f,13f,9f,17f); line(19f,13f,15f,17f); line(9f,17f,15f,17f); line(12f,17f,12f,22f) }
             ChatIcon.Skill -> { line(4f,4f,10f,4f); line(10f,4f,12f,6f); line(12f,6f,14f,4f); line(14f,4f,20f,4f); line(20f,4f,20f,19f); line(20f,19f,14f,19f); line(14f,19f,12f,21f); line(12f,21f,10f,19f); line(10f,19f,4f,19f); line(4f,19f,4f,4f); line(12f,6f,12f,21f) }
+            ChatIcon.Activity -> { line(3f,12f,7f,12f); line(7f,12f,10f,5f); line(10f,5f,14f,19f); line(14f,19f,17f,12f); line(17f,12f,21f,12f) }
             ChatIcon.Terminal -> { line(3f,4f,21f,4f); line(21f,4f,21f,20f); line(21f,20f,3f,20f); line(3f,20f,3f,4f); line(7f,8f,11f,12f); line(11f,12f,7f,16f); line(13f,16f,17f,16f) }
             ChatIcon.Settings -> { line(4f,6f,8f,6f); line(12f,6f,20f,6f); line(4f,12f,14f,12f); line(18f,12f,20f,12f); line(4f,18f,6f,18f); line(10f,18f,20f,18f); for ((x,y) in listOf(10f to 6f,16f to 12f,8f to 18f)) drawCircle(color, 2f*u, Offset(x*u,y*u), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8f*u)) }
             ChatIcon.Model -> Unit
