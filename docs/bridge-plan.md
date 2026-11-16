@@ -107,3 +107,13 @@ Android reduces forwarded `item/started`, `item/completed`, `item/agentMessage/d
 Neither project creation nor folder creation retries automatically. After an uncertain result, refresh projects/folders and inspect before creating again. Older hosts need updating for `projects/create` and project-aware `threads/start`; existing thread commands retain their behavior. Build and test host upgrades separately, then activate only when the supervisor's active turns and pending decisions are settled.
 
 Standalone Android chat: `threads/start {standalone:true}` selects remote `~/Documents/Codex` and creates that directory if absent. It sends a null canonical project identity and never creates a project. The flag must be boolean and cannot be combined with workspace or project_id. Omitted/false retains the existing host-workspace behavior for older clients. Project-specific requests still send both workspace and project_id.
+
+## Proposed plan confirmation
+
+Codex structured `plan` items are projected as role `plan`, preserving the canonical Markdown, item/turn IDs and originating turn status. Live `item/plan/delta` is rendered; the completed item's text replaces accumulated deltas. A task checklist (`turn/plan/updated`) is not a proposed plan.
+
+`plans/respond` accepts `workspace`, `thread_id`, `turn_id`, `item_id`, `action` (`implement`, `fresh`, `stay`), and optional `model`/`effort`. The host resumes metadata and verifies the exact latest completed turn, last plan item and workspace before claiming the action. Private supervisor `plan-receipts` files prevent a second dispatch, including after a process restart or an uncertain response. Never replay an uncertain action.
+
+`implement` submits `Implement the plan.` in Default collaboration mode in the same thread. `fresh` creates a new thread in the same workspace/project/provider, copies the source permission profile or supported legacy sandbox, compares effective permissions, calls native `thread/prepareApprovedPlan`, then submits the returned prompt in Default mode with the chosen model/effort. Unsupported or changed permissions refuse implementation; no host full-access fallback is allowed. `stay` records dismissal without starting a turn or changing the source's Plan mode. The original thread/history is retained.
+
+Responses identify `source_thread_id`, `thread_id`, `plan_key`, `action`, and, for implementation, the projected `session` and native `turn_result`. `plan/resolved` synchronizes dismissal across phone views; history adds `plan_handled`. A fresh-thread failure after creation can leave an empty thread: inspect history instead of retrying. CLI's confirmation popup is local TUI state; Modex does not inject keys into it or promise to close it remotely.

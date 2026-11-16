@@ -19,6 +19,7 @@ import (
 // One backend owns all managed sessions. Native TUI connections are views of it,
 // not process owners; losing a view must never cancel a dispatched turn.
 type sharedBackend struct {
+	plans          *bridge.PlanActions
 	home           string
 	ctx            context.Context
 	p              *bridge.Process
@@ -43,6 +44,9 @@ type nativeClient struct {
 
 func newSharedBackend(ctx context.Context, p *bridge.Process, emit func(string, json.RawMessage)) (*sharedBackend, error) {
 	s := &sharedBackend{ctx: ctx, p: p, clients: map[*nativeClient]bool{}, pending: map[string]bridge.Decision{}, nativeParams: map[string]json.RawMessage{}, emit: emit}
+	s.plans = bridge.NewPlanActions(os.Getenv("MODEX_PLAN_STATE_DIR"), func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+		return s.call(ctx, method, params, nil)
+	})
 	s.decisions = bridge.NewDecisions(p.Respond)
 	p.SetRequestHandler(func(id json.RawMessage, method string, params json.RawMessage) {
 		d, err := s.decisions.Add(id, method, params)
@@ -142,6 +146,21 @@ func (s *sharedBackend) call(ctx context.Context, method string, params any, emi
 		s.mu.Unlock()
 	}
 	values, _ := params.(map[string]any)
+	if method == "modex/plan/state" {
+		handled, err := s.plans.Handled(stringValue(values, "threadId"), stringValue(values, "turnId"), stringValue(values, "itemId"))
+		if err != nil {
+			return nil, err
+		}
+		return mustJSON(map[string]bool{"handled": handled}), nil
+	}
+	if method == "modex/plan/respond" {
+		raw, err := s.plans.Respond(ctx, values)
+		if err != nil {
+			return nil, err
+		}
+		s.event("plan/resolved", raw)
+		return raw, nil
+	}
 	if method == "client/takeover" {
 		id, _ := values["threadId"].(string)
 		return requestTakeover(ctx, s.home, id)
@@ -536,4 +555,9 @@ func (s *sharedBackend) listen(socket string) (func(), error) {
 		}
 		s.mu.Unlock()
 	}, nil
+}
+
+func stringValue(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
 }

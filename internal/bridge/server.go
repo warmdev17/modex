@@ -57,6 +57,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "plans/respond":
+		for _, key := range []string{"workspace", "thread_id", "turn_id", "item_id", "action", "model", "effort"} {
+			allowed[key] = true
+		}
 	case "references/list":
 		allowed["workspace"] = true
 		allowed["force_reload"] = true
@@ -138,6 +142,18 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 	}
 	switch cmd.Method {
+	case "plans/respond":
+		params := map[string]any{"cwd": cwd}
+		for _, pair := range [][2]string{{"thread_id", "threadId"}, {"turn_id", "turnId"}, {"item_id", "itemId"}, {"action", "action"}, {"model", "model"}, {"effort", "effort"}} {
+			if raw, ok := p[pair[0]]; ok {
+				var value string
+				if json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value) == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {
+					return nil, errors.New("invalid plan action parameter")
+				}
+				params[pair[1]] = value
+			}
+		}
+		return fetch("modex/plan/respond", params)
 	case "references/list":
 		force := false
 		if raw, ok := p["force_reload"]; ok {
@@ -535,13 +551,29 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 							text = strings.ToValidUTF8(text[:65536], "") + "\n[Summary truncated]"
 						}
 						displayText = text
+					case "plan":
+						role = "plan"
+						text = item.Text
+						displayText = item.Text
 					case "agentMessage":
 						role = "assistant"
 						text = item.Text
 						displayText = item.Text
 					}
 					if role != "" && text != "" {
-						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments})
+						message := map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments}
+						if role == "plan" {
+							state, stateErr := fetch("modex/plan/state", map[string]any{"threadId": id, "turnId": turn.ID, "itemId": item.ID})
+							if stateErr == nil {
+								var handled struct {
+									Handled bool `json:"handled"`
+								}
+								if json.Unmarshal(state, &handled) == nil {
+									message["plan_handled"] = handled.Handled
+								}
+							}
+						}
+						messages = append(messages, message)
 					}
 				}
 				for _, message := range messages[first:] {

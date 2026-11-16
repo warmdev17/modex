@@ -4,6 +4,7 @@ import "encoding/json"
 
 // Project only known permission labels, never filesystem scopes or raw policy objects.
 type sessionResult struct {
+	Mode     string `json:"collaboration_mode,omitempty"`
 	Thread   Thread `json:"thread"`
 	Model    string `json:"model"`
 	Effort   string `json:"effort,omitempty"`
@@ -14,6 +15,9 @@ type sessionResult struct {
 
 func projectSession(raw json.RawMessage) (sessionResult, error) {
 	var source struct {
+		Mode struct {
+			Mode string `json:"mode"`
+		} `json:"collaborationMode"`
 		Thread   Thread          `json:"thread"`
 		Model    string          `json:"model"`
 		Effort   string          `json:"reasoningEffort"`
@@ -26,7 +30,7 @@ func projectSession(raw json.RawMessage) (sessionResult, error) {
 	if err := json.Unmarshal(raw, &source); err != nil {
 		return sessionResult{}, err
 	}
-	result := sessionResult{Thread: source.Thread, Model: source.Model, Effort: source.Effort}
+	result := sessionResult{Mode: source.Mode.Mode, Thread: source.Thread, Model: source.Model, Effort: source.Effort}
 	if result.Effort == "" {
 		result.Effort = source.Thread.Effort
 	}
