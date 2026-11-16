@@ -4,7 +4,6 @@ import android.app.Instrumentation
 import android.content.Intent
 import android.os.Bundle
 import android.util.Base64
-import androidx.lifecycle.ViewModelProvider
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,7 +17,7 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
             args.getString("pin")!!, args.getString("binary")!!, args.getString("state")!!)
         val connection = JSONObject().put("host", config.host).put("port", config.port).put("user", config.user)
             .put("pin", config.pin).put("binary", config.binary).put("state", config.state)
-        val store = SavedHost(targetContext)
+        val store = SavedHost(targetContext, "journal-fixture")
         store.clear()
         val keyPath = args.getString("keyPath")!!
         require(keyPath.startsWith("/data/local/tmp/modex-journal-") && keyPath.matches(Regex("[A-Za-z0-9_./-]+")))
@@ -31,7 +30,7 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
         key.fill(0)
         startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val app = targetContext.applicationContext as ModexApplication
-        runOnMainSync { vm = ViewModelProvider(app, ViewModelProvider.AndroidViewModelFactory.getInstance(app))[ModexViewModel::class.java] }
+        runOnMainSync { vm = ModexViewModel(app, "journal-fixture") }
         val session = vm!!
         // Kotlin internal getter names differ between debug tests and the release APK.
         val messages = session.javaClass.methods.single { it.name.substringBefore('$') == "getMessages" }

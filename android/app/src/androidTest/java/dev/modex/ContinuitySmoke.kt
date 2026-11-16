@@ -3,7 +3,6 @@ package dev.modex
 import android.app.Instrumentation
 import android.content.Intent
 import android.os.Bundle
-import androidx.lifecycle.ViewModelProvider
 import java.io.File
 
 fun Instrumentation.continuitySmoke(args: Bundle) {
@@ -11,10 +10,10 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
     var vm: ModexViewModel? = null
     try {
         val restore = args.getString("stage") == "restore"
-        if (!restore) SavedHost(targetContext).clear()
+        if (!restore) SavedHost(targetContext, "continuity-fixture").clear()
         startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val app = targetContext.applicationContext as ModexApplication
-        runOnMainSync { vm = ViewModelProvider(app, ViewModelProvider.AndroidViewModelFactory.getInstance(app))[ModexViewModel::class.java] }
+        runOnMainSync { vm = ModexViewModel(app, "continuity-fixture") }
         val session = vm!!
         if (restore) runOnMainSync { session.foreground() }
         if (!restore) runOnMainSync {
