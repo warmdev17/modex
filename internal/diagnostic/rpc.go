@@ -32,12 +32,15 @@ func NewRPCError(raw json.RawMessage) *RPCError {
 
 func classifyRPCError(raw json.RawMessage) string {
 	var detail struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
+		Code    json.RawMessage `json:"code"`
+		Message string          `json:"message"`
 	}
 	_ = json.Unmarshal(raw, &detail)
-	s := detail.Code + " " + detail.Message
+	s := string(detail.Code) + " " + detail.Message
 	for _, known := range []struct{ key, category string }{
+		{"forked history still references", "thread_has_dependents"},
+		{"attached threads", "thread_has_dependents"},
+		{"missing source rollout", "thread_history_missing"},
 		{"list_turns is not supported", "history_pagination_unsupported"},
 		{"takeover_unmanaged", "takeover_unmanaged"},
 		{"takeover_mismatch", "takeover_mismatch"},

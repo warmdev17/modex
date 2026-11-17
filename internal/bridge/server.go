@@ -18,11 +18,13 @@ type Caller func(context.Context, string, any) (json.RawMessage, error)
 type EventCaller func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error)
 
 type Thread struct {
-	ID       string `json:"id"`
-	Cwd      string `json:"cwd"`
-	Provider string `json:"modelProvider"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"reasoningEffort,omitempty"`
+	ID        string        `json:"id"`
+	Cwd       string        `json:"cwd"`
+	Provider  string        `json:"modelProvider"`
+	Model     string        `json:"model,omitempty"`
+	Effort    string        `json:"reasoningEffort,omitempty"`
+	ProjectID *string       `json:"projectId,omitempty"`
+	Status    *threadStatus `json:"status,omitempty"`
 }
 
 type threadListItem struct {
@@ -80,9 +82,16 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	case "threads/list", "models/list", "projects/list":
 		if cmd.Method == "threads/list" {
 			allowed["all_workspaces"] = true
+			allowed["archived"] = true
 		}
 		allowed["limit"] = true
 		allowed["cursor"] = true
+	case "threads/archive", "threads/unarchive", "threads/delete", "threads/fork":
+		allowed["workspace"] = true
+		allowed["thread_id"] = true
+		if cmd.Method == "threads/delete" {
+			allowed["confirm"] = true
+		}
 	case "threads/read", "threads/resume", "threads/takeover":
 		if cmd.Method == "threads/takeover" {
 			allowed["confirm"] = true
@@ -142,6 +151,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 	}
 	switch cmd.Method {
+	case "threads/archive", "threads/unarchive", "threads/delete", "threads/fork":
+		return threadLifecycle(cmd.Method, p, cwd, fetch)
 	case "plans/respond":
 		params := map[string]any{"cwd": cwd}
 		for _, pair := range [][2]string{{"thread_id", "threadId"}, {"turn_id", "turnId"}, {"item_id", "itemId"}, {"action", "action"}, {"model", "model"}, {"effort", "effort"}} {
@@ -323,7 +334,13 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("all_workspaces must be boolean")
 			}
 		}
-		params := map[string]any{"limit": limit, "modelProviders": []string{}, "sourceKinds": []string{"cli", "vscode", "appServer"}, "sortKey": "updated_at"}
+		archived := false
+		if raw, ok := p["archived"]; ok {
+			if string(raw) == "null" || json.Unmarshal(raw, &archived) != nil {
+				return nil, errors.New("archived must be boolean")
+			}
+		}
+		params := map[string]any{"archived": archived, "limit": limit, "modelProviders": []string{}, "sourceKinds": []string{"cli", "vscode", "appServer"}, "sortKey": "updated_at"}
 		if !all {
 			params["cwd"] = cwd
 		}
@@ -487,7 +504,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("thread outside workspace")
 			}
 			messages := []map[string]any{}
-			active := false
+			active := response.Thread.Status != nil && response.Thread.Status.Type == "active"
 			outputBudget := 1024 * 1024
 			for _, turn := range response.Thread.Turns {
 				first := len(messages)
