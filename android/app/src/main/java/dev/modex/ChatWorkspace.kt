@@ -96,6 +96,8 @@ internal fun ChatWorkspace(
     handledPlans: Set<String> = emptySet(), planResponding: Boolean = false, onPlanAction: (ChatEntry, String) -> Unit = { _, _ -> },
     stopping: Boolean = false, onStop: () -> Unit = {},
     runningThreads: Set<String> = emptySet(),
+    archived: Boolean = false, onArchived: (Boolean) -> Unit = {}, actionThreads: Set<String> = emptySet(),
+    onSessionAction: (String, String, Boolean) -> Unit = { _, _, _ -> },
     takeoverSession: String = "", onTakeover: () -> Unit = {},
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
     referenceCatalog: ReferenceCatalog = ReferenceCatalog(), referencesLoading: Boolean = false,
@@ -110,6 +112,16 @@ internal fun ChatWorkspace(
     onCreateInProject: (String, String, String, String, String) -> Unit = { model, mode, effort, _, _ -> onCreate(model, mode, effort) },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {}
 ) {
+    var deleting by remember(host, archived) { mutableStateOf("") }
+    if (deleting.isNotBlank()) AlertDialog(
+        onDismissRequest = { deleting = "" }, title = { Text("Delete conversation?") },
+        text = { Text("Permanently delete “${titles[deleting] ?: deleting}” and its history? This cannot be undone. Conversations required by a fork cannot be deleted.") },
+        confirmButton = { TextButton(enabled = connected && deleting !in actionThreads, onClick = { onSessionAction("delete", deleting, true); deleting = "" }) { Text("Delete permanently", color = Mocha.Red) } },
+        dismissButton = { TextButton(onClick = { deleting = "" }) { Text("Cancel") } }
+    )
+    fun sessionAction(action: String, id: String) {
+        if (action == "delete") deleting = id else onSessionAction(action, id, false)
+    }
     var showTakeover by remember(takeoverSession) { mutableStateOf(false) }
     if (showTakeover && takeoverSession.isNotBlank()) AlertDialog(
         onDismissRequest = { showTakeover = false },
@@ -182,16 +194,18 @@ internal fun ChatWorkspace(
                 }
                 OutlinedTextField(search, { search = it }, placeholder = { Text("Search sessions or projects") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))
                 Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Sessions", style = MaterialTheme.typography.labelLarge, color = Mocha.Subtext, modifier = Modifier.weight(1f))
+                    Text(if (archived) "Archived" else "Sessions", style = MaterialTheme.typography.labelLarge, color = Mocha.Subtext, modifier = Modifier.weight(1f))
                     TextButton(onClick = onRefresh, enabled = connected && !threadListLoading) { Text("Refresh") }
                 }
+                TextButton(onClick = { search = ""; onArchived(!archived) }, enabled = connected, modifier = Modifier.padding(horizontal = 12.dp)) { Text(if (archived) "Back to sessions" else "Archived conversations") }
+                if (error.isNotBlank()) Text(error, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = Mocha.Red, style = MaterialTheme.typography.bodySmall)
                 val visible = threads.filter { (titles[it] ?: it).contains(search, ignoreCase = true) || it.contains(search,ignoreCase = true) || threadWorkspaces[it].orEmpty().contains(search, ignoreCase = true) }
                 val projects = projectSessions(registeredProjects, visible, projectMembership, threadWorkspaces)
                 LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (visible.isEmpty()) item { Text(if (threadListLoading) "Loading sessions…" else if (search.isBlank()) "No conversations yet" else "No matching conversations", Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodyMedium) }
-                    item { Text("Projects", Modifier.padding(horizontal = 12.dp, vertical = 10.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
-                    if (projectStatus.isNotEmpty()) item { Text(projectStatus, Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall) }
-                    registeredProjects.filter { search.isBlank() || projects[it.id].orEmpty().isNotEmpty() || it.name.contains(search, true) || it.roots.any { root -> root.contains(search,true) } }.forEach { project ->
+                    if (!archived) item { Text("Projects", Modifier.padding(horizontal = 12.dp, vertical = 10.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
+                    if (!archived && projectStatus.isNotEmpty()) item { Text(projectStatus, Modifier.padding(12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall) }
+                    (if (archived) emptyList() else registeredProjects).filter { search.isBlank() || projects[it.id].orEmpty().isNotEmpty() || it.name.contains(search, true) || it.roots.any { root -> root.contains(search,true) } }.forEach { project ->
                         val path = project.id
                         val ids = projects[path].orEmpty()
                         val expanded = path !in collapsedProjects || search.isNotEmpty()
@@ -212,12 +226,12 @@ internal fun ChatWorkspace(
                             }
                         }
                         if (path !in collapsedProjects || search.isNotEmpty()) items(ids, key = { "project:$it" }) { id ->
-                            SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, Modifier.padding(start = 20.dp)) { onSelect(id); scope.launch { drawer.close() } }
+                            SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, Modifier.padding(start = 20.dp), archived, id in actionThreads, decisions.none { it.optString("thread_id") == id }, ::sessionAction) { onSelect(id); scope.launch { drawer.close() } }
                         }
                     }
-                    if (visible.isNotEmpty()) item { Text("Recents", Modifier.padding(horizontal = 12.dp, vertical = 12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
+                    if (visible.isNotEmpty()) item { Text(if (archived) "Archived conversations" else "Recents", Modifier.padding(horizontal = 12.dp, vertical = 12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
                     items(visible, key = { "recent:$it" }) { id ->
-                        SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads) { onSelect(id); scope.launch { drawer.close() } }
+                        SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, archived = archived, working = id in actionThreads, canFork = decisions.none { it.optString("thread_id") == id }, onAction = ::sessionAction) { onSelect(id); scope.launch { drawer.close() } }
                     }
                     if (threadListLoading) item { Text("Loading sessions…", Modifier.padding(12.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) }
                     if (hasMore && !threadListLoading) item { TextButton(onClick = onMore, enabled = connected) { Text("Load more") } }
@@ -327,6 +341,7 @@ internal fun ChatWorkspace(
                                 }
                                 if (body.isNotBlank()) Text(body, style = MaterialTheme.typography.bodyLarge)
                                 if (entry.status != "inProgress") WorkTimer(entry)
+                                entry.notice?.let { Text(it.message, style = MaterialTheme.typography.bodySmall, color = if (it.retrying) Mocha.Blue else Mocha.Subtext, modifier = Modifier.semantics { contentDescription = "Turn notice: ${it.message}" }) }
                             }
                         }
                     } else if (role == "command") CommandCard(entry) else MarkdownMessage(display, selectable = false)
@@ -541,11 +556,23 @@ private fun PromptComposer(
 }
 
 @Composable
-private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, enabled: Boolean, running: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Surface(onClick = onClick, enabled = enabled, color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = modifier.fillMaxWidth().semantics { this.selected = selected }) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-            if (running) CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = "Session running" }, strokeWidth = 2.dp, color = if (selected) Mocha.Base else Mocha.Blue)
+private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, enabled: Boolean, running: Boolean, modifier: Modifier = Modifier,
+    archived: Boolean = false, working: Boolean = false, canFork: Boolean = true, onAction: (String, String) -> Unit = { _, _ -> }, onClick: () -> Unit) {
+    var menu by remember(id, archived) { mutableStateOf(false) }
+    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Surface(onClick = onClick, enabled = enabled && !archived && !working, color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f).semantics { this.selected = selected }) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                if (running || working) CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = if (working) "Session action pending" else "Session running" }, strokeWidth = 2.dp, color = if (selected) Mocha.Base else Mocha.Blue)
+            }
+        }
+        Box {
+            IconButton(onClick = { menu = true }, enabled = enabled && !working) { ChatGlyph(ChatIcon.More, "Actions for ${title ?: id}") }
+            DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                DropdownMenuItem(text = { Text(if (archived) "Restore" else "Archive") }, onClick = { menu = false; onAction(if (archived) "unarchive" else "archive", id) })
+                if (!archived) DropdownMenuItem(text = { Text("Fork") }, enabled = !running && canFork, onClick = { menu = false; onAction("fork", id) })
+                DropdownMenuItem(text = { Text("Delete", color = Mocha.Red) }, onClick = { menu = false; onAction("delete", id) })
+            }
         }
     }
 }

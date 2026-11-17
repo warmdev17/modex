@@ -54,5 +54,5 @@ internal class ConnectionManager(private val app: ModexApplication) {
     }
     private fun controllerForRemoval(id: String) = app.sessions[id] ?: ModexViewModel(app, id)
     fun reconnectOnOpen(value: Boolean) { save(profiles, value) }
-    fun foreground() { if (reconnectOnOpen) profiles.forEach { controller(it.id).foreground() } }
+    fun foreground() { profiles.forEach { controller(it.id).let { vm -> if (vm.connected || reconnectOnOpen) vm.foreground() } } }
 }

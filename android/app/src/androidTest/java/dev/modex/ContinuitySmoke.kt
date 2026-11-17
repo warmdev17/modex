@@ -31,9 +31,7 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
             }
         }
         await { session.connected }
-        if (!restore) {
-            runOnMainSync { session.select("fixture-thread") }
-        }
+        runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
         await { session.selected == "fixture-thread" && !session.historyLoading && session.messages.any { it.text == "Stored assistant reply" } }
         runOnMainSync { check(session.messages.first { it.role == "You" }.attachments.size == 2) { "Attachment metadata lost from reloaded history" } }
         if (!restore) {
@@ -44,7 +42,9 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
                 check(session.selected.isEmpty() && session.messages.isEmpty()) { "Disconnect retained visible history" }
                 session.connect(session.savedConnection!!)
             }
-            await { session.connected && session.selected == "fixture-thread" && !session.historyLoading }
+            await { session.connected }
+            runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
+            await { session.selected == "fixture-thread" && !session.historyLoading }
         }
         runOnMainSync { check(session.sessionModel == "fixture-chosen" && session.sessionEffort == "high") { "Choice lost on reconnect/process restore" } }
         Thread.sleep(700)

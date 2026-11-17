@@ -54,6 +54,7 @@ internal fun updatePendingDecisions(current: List<JSONObject>, event: String, pa
 
 // Never display raw upstream errors: they can include credential-bearing URLs.
 fun turnFailure(params: JSONObject): String? {
+    readTurnNotice(params.optJSONObject("notice") ?: params.optJSONObject("turn")?.optJSONObject("notice"))?.let { return it.message }
     if (params.optBoolean("willRetry")) return null
     val turn = params.optJSONObject("turn")
     val failure = turn?.optJSONObject("error") ?: params.optJSONObject("error")

@@ -25,7 +25,7 @@ internal fun CommandCard(entry: ChatEntry) {
     var expanded by rememberSaveable(entry.id) { mutableStateOf(false) }
     val running = entry.status == "inProgress"
     val failed = entry.status in listOf("failed", "declined") || (entry.exitCode != null && entry.exitCode != 0)
-    val status = when { running -> "Running"; failed -> "Failed"; entry.status == "completed" -> "Completed"; else -> "Status unknown" }
+    val status = when { running -> "Running"; failed -> "Failed"; entry.status == "completed" -> "Completed"; entry.status in listOf("interrupted", "cancelled", "canceled") -> workStatusLabel(entry.status); else -> "Status unknown" }
     val color = when { failed -> MaterialTheme.colorScheme.error; running -> Mocha.Blue; else -> Mocha.Subtext }
     Column(Modifier.fillMaxWidth()) {
         Surface(onClick = { expanded = !expanded }, color = MaterialTheme.colorScheme.background,

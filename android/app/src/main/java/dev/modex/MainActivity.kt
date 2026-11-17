@@ -38,6 +38,11 @@ class MainActivity : ComponentActivity() {
 internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditing: Boolean, onHome: () -> Unit, onName: (String) -> Unit, onForget: () -> Unit) {
     val context = LocalContext.current
     var displayName by rememberSaveable { mutableStateOf(hostName) }
+    var wasConnected by remember { mutableStateOf(vm.connected) }
+    LaunchedEffect(vm.connected, vm.connecting) {
+        if (wasConnected && !vm.connected && !vm.connecting) onHome()
+        if (vm.connected) wasConnected = true
+    }
     val saved = vm.savedConnection
     var host by rememberSaveable { mutableStateOf(saved?.host.orEmpty()) }; var port by rememberSaveable { mutableStateOf(saved?.port?.toString() ?: "22") }
     var user by rememberSaveable { mutableStateOf(saved?.user.orEmpty()) }; var pin by rememberSaveable { mutableStateOf(saved?.pin.orEmpty()) }
@@ -107,6 +112,8 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
             handledPlans = vm.handledPlans, planResponding = vm.planResponding, onPlanAction = vm::respondPlan,
             hasOlderHistory = vm.hasOlderHistory, olderHistoryLoading = vm.olderHistoryLoading, onOlderHistory = vm::loadOlderHistory,
+            archived = vm.archived, onArchived = vm::showArchived, actionThreads = vm.actionThreads,
+            onSessionAction = { action, target, confirmed -> vm.lifecycle(action, target, confirmed) },
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
             onCreate = { model, mode, effort -> vm.create(model, mode, effort) }, onCreateInProject = vm::create,
             onNewProject = { vm.attachments.browse("~"); projectBrowser = true }, onSend = vm::send, onAnswer = vm::answer,

@@ -55,7 +55,7 @@ internal fun ConnectionHome() {
         }
         key(profile.id) {
             HostWorkspace(manager.controller(profile.id), profile.name, editor,
-                onHome = { opened = ""; targetThread = "" }, onName = { manager.rename(profile.id, it) },
+                onHome = { opened = ""; targetThread = ""; page = "Hosts" }, onName = { manager.rename(profile.id, it) },
                 onForget = { delete = profile.id })
         }
     } else Scaffold(

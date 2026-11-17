@@ -22,6 +22,18 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
     fun activityVersion(id: String): Long = activityVersions[id] ?: 0
     private fun changed(id: String) { activityVersions[id] = activityVersion(id) + 1 }
 
+    fun reconcileActivity(id: String, active: Boolean, turn: String, expected: Long) {
+        if (expected != activityVersion(id)) return
+        activeTurns = if (active) activeTurns + (id to turn) else activeTurns - id
+        if (!active || stoppingTurns[id] != turn) stoppingTurns = stoppingTurns - id
+        changed(id)
+    }
+
+    fun remove(id: String) {
+        activeTurns = activeTurns - id; stoppingTurns = stoppingTurns - id; changed(id)
+        if (selected == id) clearSelection()
+    }
+
     fun loadHistory(id: String, entries: List<ChatEntry>, active: Boolean, expectedActivityVersion: Long? = null, activeTurnId: String = "") {
         if (id != selected) return
         messages = entries
@@ -77,22 +89,36 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
             }
             "turn/completed" -> {
                 if (turn.isBlank()) return
-                if (activeTurns[id].isNullOrEmpty() || activeTurns[id] == turn) {
+                if (id !in activeTurns || activeTurns[id] == turn) {
                     activeTurns = activeTurns - id
                     interruptRejected(id, turn)
                     if (id == selected) {
                         val status = params.optJSONObject("turn")?.optString("status").orEmpty().ifBlank { "completed" }
                         val reported = params.optJSONObject("turn")?.takeUnless { it.isNull("durationMs") }?.optLong("durationMs")?.takeIf { it >= 0 }
                         messages = messages.map { entry ->
-                            if (entry.turnId == turn) entry.copy(status = if (entry.role in listOf("You", "plan")) status else if (entry.status == "inProgress") "completed" else entry.status,
+                            if (entry.turnId == turn) entry.copy(status = if (entry.role in listOf("You", "plan") || entry.status == "inProgress") status else entry.status,
+                                notice = if (entry.role == "You") eventTurnNotice(params) else entry.notice,
                                 durationMs = if (entry.role == "You") reported ?: entry.startedAtMs?.let { (now() - it).coerceAtLeast(0) } else entry.durationMs) else entry
                         }
                     }
                     changed(id)
                 }
             }
+            "error" -> {
+                val target = params.optString("turnId")
+                if (id == selected && target.isNotBlank() && activeTurns[id] == target) {
+                    val notice = eventTurnNotice(params) ?: return
+                    messages = messages.map { if (it.role == "You" && it.turnId == target) it.copy(notice = notice) else it }
+                    changed(id)
+                }
+            }
             "item/started", "item/completed", "item/plan/delta", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
                 if (id == selected) {
+                    val target = params.optString("turnId").ifBlank { activeTurns[id].orEmpty() }
+                    if (target.isNotBlank() && id in activeTurns && activeTurns[id] != target) return
+                    // A terminal turn stays terminal even when its late item arrives after activity was cleared.
+                    if (target.isNotBlank() && id !in activeTurns && messages.any { it.turnId == target && it.status in listOf("completed", "interrupted", "failed") }) return
+                    messages = messages.map { if (it.turnId == target && it.notice?.retrying == true) it.copy(notice = null) else it }
                     messages = updateChat(messages, method, params.apply { if (optString("turnId").isBlank()) put("turnId", activeTurns[id].orEmpty()) })
                         .map { if (it.role == "You" && it.status == "inProgress" && it.startedAtMs == null) it.copy(startedAtMs = now()) else it }
                     changed(id)

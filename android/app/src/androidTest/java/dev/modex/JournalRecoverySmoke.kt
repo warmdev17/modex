@@ -48,6 +48,8 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
         runOnMainSync { session.foreground() }
         await { !session.connected && !session.connecting && session.error.contains("Reset session cursor") }
         runOnMainSync { session.reset(); session.connect(config) }
+        await { session.connected }
+        runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
         await { session.connected && session.selected == "fixture-thread" && !session.historyLoading &&
             restoredReply() && session.decisions.size == 2 }
         runOnMainSync {
@@ -64,6 +66,8 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
         await { !session.connected && !session.connecting }
         // Reset again while retention is still exceeded: the resolved approval must stay gone.
         runOnMainSync { session.reset(); session.connect(config) }
+        await { session.connected }
+        runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
         await { session.connected && session.selected == "fixture-thread" && !session.historyLoading && session.decisions.size == 1 }
         runOnMainSync {
             check(session.busy && restoredReply())

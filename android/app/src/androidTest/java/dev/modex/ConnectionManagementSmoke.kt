@@ -70,7 +70,9 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
             val services = targetContext.getSystemService(ActivityManager::class.java).getRunningServices(50)
             check(services.any { it.service.className == ConnectionService::class.java.name && it.foreground }) { "Disconnecting A stopped B's foreground service" }
             runOnMainSync { a.connect(a.savedConnection!!) }
-            await { a.connected && !a.historyLoading && a.selected == "fixture-thread" }
+            await { a.connected }
+            runOnMainSync { check(a.selected.isBlank()); a.select("fixture-thread") }
+            await { !a.historyLoading && a.selected == "fixture-thread" }
         }
         runOnMainSync { check(a.sessionModel == "fixture-chosen" && a.sessionEffort == "high"); check(b.sessionModel == "fixture" && b.sessionEffort == "low") }
         startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

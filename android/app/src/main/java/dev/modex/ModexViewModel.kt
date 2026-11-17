@@ -23,6 +23,8 @@ internal fun takeoverTarget(method: String, detail: String, target: String): Str
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
         method == "projects/create" -> "Project creation was not confirmed. Check the folder and update modex-host/Codex if needed. Refresh projects before retrying."
+        detail.contains("thread_has_dependents") -> "This conversation is needed by a fork. Delete dependent conversations first; nothing was deleted."
+        method in listOf("threads/archive", "threads/unarchive", "threads/delete", "threads/fork") -> "Session action was not confirmed. Refresh sessions and inspect before trying again. Update modex-host if needed."
         detail.contains("response_too_large") -> "This session exceeds the history transfer limit. Open it on your computer; the host is still available."
         detail.contains("takeover_unmanaged") -> "This CLI was not started with the Modex launcher. Close it on your computer, or use make cli THREAD=<session-id> next time."
         detail.contains("takeover_mismatch") -> "The registered CLI has changed sessions or loaded multiple sessions. Nothing was taken over. Close it on your computer."
@@ -44,6 +46,15 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private val historyCache = HistoryCache()
     private data class HistoryRequest(val thread: String, val cursor: String, val activity: Long, val before: List<ChatEntry>)
     private val historyRequests = mutableMapOf<Long, HistoryRequest>()
+    private data class LifecycleRequest(val target: String, val generation: Long, val selection: Long, val activity: Long)
+    private var listGeneration = 0L
+    private var selectionGeneration = 0L
+    private val listRequests = mutableMapOf<Long, Long>()
+    private val lifecycleRequests = mutableMapOf<Long, LifecycleRequest>()
+    private val observationRequests = mutableMapOf<Long, Pair<String, Long>>()
+    private val observationAgain = mutableSetOf<String>()
+    var archived by mutableStateOf(false); private set
+    var actionThreads by mutableStateOf(emptySet<String>()); private set
     private val selectionRequests = mutableSetOf<Long>()
     private var lastThread = ""
     private var ownedThread = ""
@@ -172,6 +183,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         transport?.downloadAttachment(file, cache, host.toString(), currentCoroutineContext().let { job -> { job.ensureActive() } }) ?: error("Reconnect to open this attachment.")
     }
     fun foreground() {
+        if (connected) { (runningThreads + selected).filter { it.isNotBlank() }.take(32).forEach(::observe); return }
         if (reconnectAllowed && !connected && !connecting) savedConnection?.let { connect(it) }
     }
     fun forget() {
@@ -194,6 +206,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     fun loadOlderHistory() = loadHistory(true)
     private fun leaveSession() {
+        selectionGeneration++
         handledPlans += pending.values.filter { it.first == "plans/respond" }.map { it.second }
         planSending = false
         references.clear()
@@ -234,6 +247,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (connected || connecting) return
         if (key == null) { error = "Import an unencrypted SSH private key first."; return }
         if (!configure(value)) return
+        invalidateSessionRequests()
+        leaveSession()
         config = value; savedConnection = value; reconnectAllowed = true; error = ""; connecting = true
         try { getApplication<Application>().startForegroundService(Intent(getApplication(), ConnectionService::class.java)) }
         catch (_: Exception) { connecting = false; error = "Android could not start the connection service. Open Modex and connect again."; return }
@@ -250,7 +265,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         request("status", JSONObject())
                         request("models/list", JSONObject().put("limit", 100))
                         refreshThreads()
-                        if (lastThread.isNotBlank()) select(lastThread)
+                        runningThreads.take(32).forEach(::observe)
                     } }
                 }, onFrame = { frame ->
                     kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) {
@@ -264,7 +279,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 copy.fill(0)
                 withContext(Dispatchers.Main) { if (transport === current) {
                     connected = false; connecting = false; transport = null; threadListLoading = false; projectCreating = false
-                    leaveSession(); persist()
+                    invalidateSessionRequests(); leaveSession(); persist()
                     getApplication<ModexApplication>().stopConnectionServiceIfIdle()
                 } }
             }
@@ -273,7 +288,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     fun disconnect() {
         reconnectAllowed = false
         val current = transport; transport = null; connected = false; connecting = false; projectCreating = false
-        leaveSession(); current?.close(); persist()
+        invalidateSessionRequests(); leaveSession(); current?.close(); persist()
         getApplication<ModexApplication>().stopConnectionServiceIfIdle()
     }
     fun create(model: String, mode: String, effort: String = "", workspace: String = "", projectId: String = "") {
@@ -309,16 +324,45 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         historyLoading = true
         request("threads/takeover", withWorkspace(JSONObject().put("thread_id", target).put("confirm", true), threadWorkspaces[target].orEmpty()), target)?.let { selectionRequests += it }
     }
+    private fun invalidateSessionRequests() {
+        listGeneration++; listRequests.clear(); lifecycleRequests.clear(); actionThreads = emptySet()
+        observationRequests.clear(); observationAgain.clear(); threadListLoading = false
+    }
+    fun showArchived(value: Boolean) {
+        if (archived == value) return
+        archived = value; listGeneration++; threadListLoading = false
+        threads = emptyList(); nextCursor = null; error = ""
+        refreshThreads()
+    }
+    internal fun lifecycle(action: String, target: String, confirmed: Boolean = false) {
+        if (!connected || target !in threads || target in actionThreads || action !in listOf("archive", "unarchive", "delete", "fork")) return
+        if ((action == "unarchive") != archived && action != "delete") return
+        if (action == "delete" && !confirmed) return
+        if (action == "fork" && (target in runningThreads || decisions.any { it.optString("thread_id") == target } || historyLoading || switching())) return
+        val params = withWorkspace(JSONObject().put("thread_id", target), threadWorkspaces[target].orEmpty())
+        if (action == "delete") params.put("confirm", true)
+        request("threads/$action", params, target)?.let {
+            lifecycleRequests[it] = LifecycleRequest(target, listGeneration, selectionGeneration, sessions.activityVersion(target))
+            actionThreads += target
+        }
+    }
+    private fun observe(target: String) {
+        if (!connected || target.isBlank()) return
+        if (observationRequests.values.any { it.first == target }) { observationAgain += target; return }
+        if (observationRequests.size >= 32) return
+        val params = withWorkspace(JSONObject().put("thread_id", target).put("include_turns", true).put("limit", 10), threadWorkspaces[target].orEmpty())
+        request("threads/read", params, target)?.let { observationRequests[it] = target to sessions.activityVersion(target) }
+    }
     fun refreshThreads() {
         if (!connected || threadListLoading) return
         projects = emptyList(); projectCursors.clear(); projectStatus = "Loading projects…"
         request("projects/list", JSONObject().put("limit", 100))
         threadCursors.clear(); threadListLoading = true
-        request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true))
+        request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("archived", archived))?.let { listRequests[it] = listGeneration }
     }
     fun more() {
         if (!connected || threadListLoading) return
-        nextCursor?.let { threadListLoading = true; request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("cursor", it), "more") }
+        nextCursor?.let { threadListLoading = true; request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("archived", archived).put("cursor", it), "more")?.let { request -> listRequests[request] = listGeneration } }
     }
     internal fun send(text: String, model: String, effort: String = "", references: List<PromptReference> = emptyList()): Boolean {
         val selectedReferences = referencesInText(text, references)
@@ -370,6 +414,30 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             val id = frame.getLong("id")
             val sentAttachments = sentAttachmentPaths.remove(id)
             val operation = pending.remove(id) ?: return
+            if (operation.first == "threads/list" && (listRequests.remove(id) != listGeneration || !connected)) return
+            val lifecycle = lifecycleRequests.remove(id)
+            if (operation.first in listOf("threads/archive", "threads/unarchive", "threads/delete", "threads/fork")) {
+                if (lifecycle == null) return
+                actionThreads -= lifecycle.target
+                if (!connected) return
+            }
+            val observation = observationRequests.remove(id)
+            if (observation != null) {
+                val (target, version) = observation
+                if (!connected) return
+                val result = frame.optJSONObject("result")
+                if (result != null && result.optJSONObject("thread")?.optString("id") == target && result.has("history_revision") && version == sessions.activityVersion(target)) {
+                    val entries = readChat(result.optJSONArray("messages") ?: JSONArray())
+                    sessions.reconcileActivity(target, result.optBoolean("active_turn"), result.optString("active_turn_id"), version)
+                    val page = historyCache.latest(target, entries, result.optString("next_cursor").takeUnless { result.isNull("next_cursor") }.orEmpty(), result.getString("history_revision"))
+                    if (target == selected && !historyLoading && !olderHistoryLoading) {
+                        visibleHistory = page; hasOlderHistory = page.cursor.isNotBlank()
+                        sessions.loadHistory(target, page.entries, result.optBoolean("active_turn"), version, result.optString("active_turn_id"))
+                    }
+                }
+                if (observationAgain.remove(target)) observe(target)
+                return
+            }
             if (operation.first == "projects/create") projectCreating = false
             if (operation.first == "references/list") {
                 val result = frame.optJSONObject("result")
@@ -409,6 +477,18 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             }
             val result = frame.optJSONObject("result") ?: return
             when (operation.first) {
+                "threads/archive", "threads/unarchive", "threads/delete" -> {
+                    val target = lifecycle?.target ?: return
+                    if (lifecycle.generation == listGeneration) threads = threads - target
+                    if (operation.first != "threads/unarchive" && target == selected) leaveSession()
+                    if (operation.first == "threads/delete") {
+                        historyCache.remove(target); sessions.remove(target)
+                        decisions = decisions.filterNot { it.optString("thread_id") == target }
+                        modelChoices -= target; threadWorkspaces -= target; titles -= target; projectMembership -= target
+                    }
+                    threadListLoading = false; listGeneration++
+                    refreshThreads()
+                }
                 "status" -> {
                     hostChoice = readModelChoice(result.optJSONObject("config")) ?: ModelChoice()
                 }
@@ -435,17 +515,25 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
                     val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
                     val membership = readProjectMembership(list)
-                    projectMembership = if (operation.second == "more") projectMembership + membership else membership
-                    threadWorkspaces = if (operation.second == "more") threadWorkspaces + paths else paths
+                    projectMembership = projectMembership + membership
+                    threadWorkspaces = threadWorkspaces + paths
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }
                     threads = if (operation.second == "more") (threads + ids).distinct() else ids
                     nextCursor = if (result.isNull("next_cursor")) null else result.optString("next_cursor").ifEmpty { null }
                     threadListLoading = false
                     nextCursor?.let { cursor ->
-                        if (threadCursors.add(cursor)) more() else { nextCursor = null; error = "Session listing stopped because the host repeated a page cursor. Refresh to retry." }
+                        if (!threadCursors.add(cursor)) { nextCursor = null; error = "Session listing stopped because the host repeated a page cursor. Refresh to retry." }
                     }
                 }
-                "threads/start", "threads/resume", "threads/takeover" -> {
+                "threads/start", "threads/resume", "threads/takeover", "threads/fork" -> {
+                    if (operation.first == "threads/fork") {
+                        if (lifecycle == null || lifecycle.generation != listGeneration || selectionGeneration != lifecycle.selection || sessions.activityVersion(lifecycle.target) != lifecycle.activity || historyLoading || switching()) return
+                        val thread = result.optJSONObject("thread")
+                        if (thread?.optString("id").isNullOrBlank() || thread?.optString("id") == lifecycle.target || thread?.optString("cwd") != threadWorkspaces[lifecycle.target]) {
+                            error = "Fork was not confirmed. Refresh sessions and inspect before trying again."; return
+                        }
+                        leaveSession()
+                    }
                     takeoverThread = ""
                     error = ""
                     sessionSettings = sessionSettingsLabel(result)
@@ -461,6 +549,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     rememberChoice(selected, reported)
                     selectedWorkspace = result.getJSONObject("thread").optString("cwd")
                     refreshReferences(false)
+                    projectMembership = projectMembership + readProjectMembership(JSONArray().put(result.getJSONObject("thread")))
                     threadWorkspaces = threadWorkspaces + (selected to selectedWorkspace)
                     threads = (listOf(selected) + threads).distinct()
                     if (operation.first == "threads/start") {
@@ -523,19 +612,21 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (frame.optString("event") == "plan/resolved") {
             params.optString("plan_key").takeIf { it.isNotBlank() }?.let { handledPlans += it }
         }
-        sessions.event(frame.optString("event"), params)
+        val event = frame.optString("event")
+        sessions.event(event, params)
+        if (selected.isNotBlank()) {
+            val page = visibleHistory ?: CachedHistory(emptyList(), "", "")
+            historyCache.remember(selected, page.copy(entries = messages, revision = ""))
+        }
+        if (event in listOf("thread/status/changed", "thread/closed")) {
+            observe(params.optString("threadId"))
+        }
         decisions = updatePendingDecisions(decisions, frame.optString("event"), params)
-        when (frame.optString("event")) {
-            "error" -> if (params.optString("threadId") == selected) {
-                turnFailure(params)?.let { error = it }
-            }
-            "turn/completed" -> {
-                if (params.optString("threadId") == selected) {
-                    turnFailure(params)?.let { error = it }
-                }
-                decisions = decisions.filterNot { it.optString("thread_id") == params.optString("threadId") && it.optString("turn_id") == params.optJSONObject("turn")?.optString("id") }
-            }
+        if (event == "turn/completed") {
+            if (params.optString("threadId") != selected) observe(params.optString("threadId"))
+            decisions = decisions.filterNot { it.optString("thread_id") == params.optString("threadId") && it.optString("turn_id") == params.optJSONObject("turn")?.optString("id") }
         }
     }
+
     override fun onCleared() { transport?.close(); key?.fill(0) }
 }
