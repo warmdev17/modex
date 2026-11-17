@@ -46,6 +46,11 @@ internal fun Instrumentation.attachmentTransportSmoke(args: Bundle) {
         check(failure.get() == null) { "SSH failed" }
         val root = args.getString("root")!!
         val state = args.getString("state")!!
+        transport.createRemoteDirectory(root, "mobile*? project")
+        val created = transport.listRemoteDirectory("$root/mobile*? project")
+        check(created.path == "$root/mobile*? project" && created.files.isEmpty())
+        try { transport.createRemoteDirectory(root, "../escape"); error("Traversal accepted") } catch (_: IllegalArgumentException) { }
+        try { transport.listRemoteDirectory("$root/notes.txt"); error("File accepted as project folder") } catch (_: IllegalArgumentException) { }
         val listing = transport.listRemoteDirectory(root)
         check(listing.files.any { it.name == "image.png" } && listing.files.any { it.name == "notes.txt" })
         check(transport.listRemoteDirectory("$root/literal*? folder").files.single().name == "inside.txt")

@@ -19,6 +19,7 @@ import (
 // One backend owns all managed sessions. Native TUI connections are views of it,
 // not process owners; losing a view must never cancel a dispatched turn.
 type sharedBackend struct {
+	plans          *bridge.PlanActions
 	home           string
 	ctx            context.Context
 	p              *bridge.Process
@@ -43,6 +44,9 @@ type nativeClient struct {
 
 func newSharedBackend(ctx context.Context, p *bridge.Process, emit func(string, json.RawMessage)) (*sharedBackend, error) {
 	s := &sharedBackend{ctx: ctx, p: p, clients: map[*nativeClient]bool{}, pending: map[string]bridge.Decision{}, nativeParams: map[string]json.RawMessage{}, emit: emit}
+	s.plans = bridge.NewPlanActions(os.Getenv("MODEX_PLAN_STATE_DIR"), func(ctx context.Context, method string, params any) (json.RawMessage, error) {
+		return s.call(ctx, method, params, nil)
+	})
 	s.decisions = bridge.NewDecisions(p.Respond)
 	p.SetRequestHandler(func(id json.RawMessage, method string, params json.RawMessage) {
 		d, err := s.decisions.Add(id, method, params)
@@ -142,6 +146,21 @@ func (s *sharedBackend) call(ctx context.Context, method string, params any, emi
 		s.mu.Unlock()
 	}
 	values, _ := params.(map[string]any)
+	if method == "modex/plan/state" {
+		handled, err := s.plans.Handled(stringValue(values, "threadId"), stringValue(values, "turnId"), stringValue(values, "itemId"))
+		if err != nil {
+			return nil, err
+		}
+		return mustJSON(map[string]bool{"handled": handled}), nil
+	}
+	if method == "modex/plan/respond" {
+		raw, err := s.plans.Respond(ctx, values)
+		if err != nil {
+			return nil, err
+		}
+		s.event("plan/resolved", raw)
+		return raw, nil
+	}
 	if method == "client/takeover" {
 		id, _ := values["threadId"].(string)
 		return requestTakeover(ctx, s.home, id)
@@ -511,7 +530,20 @@ func (s *sharedBackend) replayDecisions(c *nativeClient) {
 
 func (c *nativeClient) reply(id, result json.RawMessage, err error) {
 	if err != nil {
-		c.send(mustJSON(map[string]any{"id": id, "error": map[string]any{"code": -32000, "message": "Modex backend request failed; refresh session before retrying"}}))
+		category, message := "request_rejected", "Modex backend request failed; refresh session before retrying"
+		var rejection *diagnostic.RPCError
+		if errors.As(err, &rejection) {
+			category = rejection.Category()
+			switch category {
+			case "active_writer":
+				message = "This session is open in another Codex backend (active writer). Close it in Codex Desktop or the standalone CLI, then reopen with modex; restarting the Modex service will not release that writer."
+			case "unauthorized":
+				message = "Codex backend authentication failed. Check credentials available to the host service; uncertain commands must not be replayed."
+			case "model_provider_mismatch":
+				message = "Codex backend rejected the model or provider. Check the host service configuration and session provider before retrying."
+			}
+		}
+		c.send(mustJSON(map[string]any{"id": id, "error": map[string]any{"code": -32000, "message": message, "data": map[string]string{"category": category}}}))
 		return
 	}
 	c.send(mustJSON(map[string]any{"id": id, "result": result}))
@@ -536,4 +568,9 @@ func (s *sharedBackend) listen(socket string) (func(), error) {
 		}
 		s.mu.Unlock()
 	}, nil
+}
+
+func stringValue(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
 }

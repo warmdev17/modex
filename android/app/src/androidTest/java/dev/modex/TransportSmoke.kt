@@ -10,6 +10,11 @@ class TransportSmoke : Instrumentation() {
     private lateinit var args: Bundle
     override fun onCreate(arguments: Bundle) { super.onCreate(arguments); args = arguments; start() }
     override fun onStart() {
+        if (args.getString("preview") == "session-management") { sessionManagementSmoke(); return }
+        if (args.getString("preview") == "plan-review") { planReviewSmoke(); return }
+        if (args.getString("preview") == "activity-navigation") { activityNavigationSmoke(); return }
+        if (args.getString("preview") == "connection-management") { connectionManagementSmoke(args); return }
+        if (args.getString("preview") == "legacy-connections") { legacyConnectionSmoke(); return }
         if (args.getString("preview") == "journal-recovery") { journalRecoverySmoke(args); return }
         if (args.getString("preview") == "upgrade") { upgradeSmoke(args); return }
         if (args.getString("preview") == "skill-picker") { referencePickerSmoke(); return }
@@ -18,6 +23,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "attachment-preview") { attachmentPreviewSmoke(); return }
         if (args.getString("preview") == "remote-picker") { remoteFilePickerSmoke(); return }
         if (args.getString("preview") == "attachments") { attachmentTransportSmoke(args); return }
+        if (args.getString("preview") == "remote-project") { remoteProjectSmoke(); return }
         if (args.getString("preview") == "new-chat") { newChatSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }

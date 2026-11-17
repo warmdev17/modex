@@ -38,3 +38,37 @@ Keep transport replacement separate from engine replacement:
 - Installing the first version of this architecture on the current runtime needs a deliberately idle activation boundary. It cannot retroactively preserve an active backend owned by the process being stopped. Keep a usable old APK/binary and report this bootstrap limit explicitly.
 
 Acceptance requires isolated integration tests for active streaming, shell tools, pending approval/question, concurrent CLI/mobile clients, reconnect, rejected versions and failed activation. Engine PID/turn identity must survive gateway restart. Engine replacement must either wait for a verified drain or refuse; a best-effort sleep followed by kill is not acceptable. A transport reconnect can still briefly show reconnecting, even when no agent work is lost.
+
+## Creating projects from Android
+
+Open the sidebar and choose **New project**. The full-screen remote folder browser starts at SSH home; open a folder, type a path, or explicitly create one child with **New folder**. Choose **Use this folder**, set the project name and confirm. The project is stored in Codex's canonical project registry, so refreshing or reconnecting discovers it again.
+
+Use the new-chat icon beside a project to start a conversation in its root. New conversation settings also offer a project picker and the host's default workspace. Project identity and the chosen root travel together; changing projects does not change the supervisor's default workspace. Model, effort and permission controls keep their existing behavior.
+
+Both the new APK and updated host are needed. Folder operations require SFTP access for the existing SSH account. No Git repository is initialized, no existing files are replaced, and uncertain create requests are never replayed automatically. Refresh and inspect the folder/project list before retrying an uncertain creation.
+
+The main New chat action starts outside projects in the remote account Documents/Codex folder. It does not inherit the selected conversation workspace or project. Use the square-and-pencil action beside a project for project chats. The standalone request requires an updated host; stage its binary and activate only at an idle boundary.
+
+## Managing Android connections
+
+The Home screen contains **Hosts**, **Activity** and **Settings**. Hosts lists encrypted saved profiles; add a host, set its SSH address/account, verified fingerprint, remote host binary and supervisor state directory, import its key, then Save host or Connect. Existing single-host installations retain their original encrypted host/key/cursor as My computer; migration does not rewrite those credentials.
+
+Activity shows running conversations and pending questions/approvals across remotes, with waiting items first. Offline cached items explicitly require reconnecting to verify their status. Selecting a row opens that host and conversation; no prompt or answer is automatically submitted. Hosts manages saved remotes. All navigation/settings headers use a compact 56dp toolbar. Open switches to that host's chat; Android Back or All hosts returns Home without disconnecting other hosts. Chat headers include the host name. Each profile has an independent SSH transport, journal cursor, history, model/effort and pending decisions. Disconnect affects only that profile; the foreground notification Disconnect all action affects all profiles. A manually disconnected profile is not automatically reopened during that app process. Settings controls reconnect-on-foreground; after process replacement, enabled reconnect restores saved hosts without replaying prompts or decisions.
+
+Use the host menu to edit or remove a profile. Disconnect before changing SSH fields or keys. Changing a remote target clears that profile's old history/cursor before connecting. Removing a profile deletes its saved device key/state, while remote files and Codex conversations remain. If a supervisor has restarted, disconnect that host, open its Connection settings, use Reset session cursor and reconnect; other remotes can remain online.
+
+The aggregate foreground service remains subject to Android dataSync service limits; simultaneous remote connections do not bypass OS background restrictions. Profiles and SSH keys remain device-local, Keystore encrypted and excluded from Android backup. There is no cloud profile sync or shared keychain in this milestone.
+
+## Confirming a proposed plan
+
+After a completed structured Codex plan, Android displays its Markdown and **Implement this plan?**, with three choices: implement in the current session, clear context and implement in a new chat, or stay in Plan mode. Clearing context creates another thread; it does not delete the source conversation. The host uses Codex's native approved-plan preparation and explicitly checks copied permissions before dispatch.
+
+The planning turn has already finished, so Send replacing Stop is expected while confirmation is waiting. Stop is reserved for an active turn. Confirmations are hidden for interrupted/failed plans, newer turns and handled plans. Typed plan history and handled IDs survive encrypted state restoration. If delivery is uncertain, reconnect and inspect; Modex never automatically submits the choice again. Both the updated APK and host are required. CLI's local confirmation popup is not a remotely controllable approval dialog.
+
+## Connection and conversation actions
+
+Connect opens the selected host without automatically resuming its previous conversation. Choose a session, an Activity row or New chat explicitly. Foregrounding an already connected host keeps its current view. Disconnect or loss from chat returns to the saved Hosts screen and retains the encrypted host/key; other connected hosts keep running. Opening connection settings for setup remains a separate action.
+
+Each sidebar session has a conversation-actions menu. Archive preserves history, and Archived offers Restore. Delete requires confirmation, uses the native Codex API and can refuse a conversation whose history is still referenced by a fork; archive it instead. Fork creates an ordinary new branch and opens it without automatically starting a turn. Busy sessions and pending decisions must be settled first. Do not resubmit an action whose delivery is uncertain: refresh and inspect the list.
+
+Turn notices distinguish response-stream interruption, retries, exhausted retries, access/model/quota failures and terminal outcomes. They use safe fixed messages, never raw credential-bearing provider errors. Partial output remains available when a turn is interrupted. Interrupted from a shared Modex terminal is synchronized through the same backend; an independent Codex process is a separate event source and must not be assumed to provide instant live notifications to Android.

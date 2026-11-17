@@ -16,7 +16,10 @@ import androidx.compose.ui.window.DialogProperties
 
 @Composable
 internal fun RemoteFilePicker(initialPath: String, directory: RemoteDirectory?, working: Boolean, error: String, connected: Boolean, remaining: Int,
-    onBrowse: (String) -> Unit, onAttach: (List<RemoteFile>) -> Unit, onDismiss: () -> Unit) {
+    onBrowse: (String) -> Unit, onAttach: (List<RemoteFile>) -> Unit, onDismiss: () -> Unit, onChooseDirectory: ((String) -> Unit)? = null, onCreateDirectory: ((String) -> Unit)? = null) {
+    val folderMode = onChooseDirectory != null
+    var newFolder by rememberSaveable { mutableStateOf(false) }
+    var folderName by rememberSaveable { mutableStateOf("") }
     var path by rememberSaveable { mutableStateOf(initialPath) }
     var chosen by remember { mutableStateOf(emptyList<RemoteFile>()) }
     LaunchedEffect(directory?.path) { directory?.let { path = it.path } }
@@ -25,19 +28,20 @@ internal fun RemoteFilePicker(initialPath: String, directory: RemoteDirectory?, 
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onDismiss) { ChatGlyph(ChatIcon.Close, "Close file browser") }
-                Text("Connected computer", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                Text(if (folderMode) "Project folder" else "Connected computer", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
             }
             OutlinedTextField(path, { path = it }, label = { Text("Folder path") }, singleLine = true, modifier = Modifier.fillMaxWidth(), enabled = connected && !working)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { directory?.parent?.let(onBrowse) }, enabled = connected && !working && directory?.parent != null) { Text("Up") }
                 TextButton(onClick = { onBrowse(path) }, enabled = connected && !working) { Text("Open folder") }
+                if (folderMode && onCreateDirectory != null) TextButton(onClick = { folderName = ""; newFolder = true }, enabled = connected && !working && directory != null) { Text("New folder") }
                 if (working) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             }
             if (!connected) Text("Reconnect to browse files.", color = Mocha.Red, style = MaterialTheme.typography.bodySmall)
             if (error.isNotEmpty()) Text(error, color = Mocha.Red, style = MaterialTheme.typography.bodySmall)
             LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
                 if (directory?.files?.isEmpty() == true) item { Text("No regular files or folders here.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext) }
-                items(directory?.files.orEmpty(), key = { it.path }) { file ->
+                items(directory?.files.orEmpty().filter { !folderMode || it.directory }, key = { it.path }) { file ->
                     val selected = chosen.any { it.path == file.path }
                     val enabled = connected && !working && (file.directory || (file.size <= MAX_ATTACHMENT_BYTES && (selected || chosen.size < remaining)))
                     Row(Modifier.fillMaxWidth().clickable(enabled = enabled) {
@@ -53,9 +57,15 @@ internal fun RemoteFilePicker(initialPath: String, directory: RemoteDirectory?, 
                 }
             }
             if (directory?.truncated == true) Text("Showing the first 500 entries. Open a narrower folder.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
-            Text("${chosen.size} of $remaining selected · 20 MiB per file", style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
-            Button(onClick = { onAttach(chosen) }, enabled = connected && !working && chosen.isNotEmpty(), modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)) { Text("Attach (${chosen.size})") }
+            if (!folderMode) Text("${chosen.size} of $remaining selected · 20 MiB per file", style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
+            Button(onClick = { if (folderMode) directory?.path?.let { onChooseDirectory?.invoke(it) } else onAttach(chosen) }, enabled = connected && !working && (if (folderMode) directory != null else chosen.isNotEmpty()), modifier = Modifier.fillMaxWidth(), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)) { Text(if (folderMode) "Use this folder" else "Attach (${chosen.size})") }
         }
       }
     }
+    if (newFolder) AlertDialog(
+        onDismissRequest = { newFolder = false }, title = { Text("New folder") },
+        text = { OutlinedTextField(folderName, { folderName = it }, label = { Text("Folder name") }, singleLine = true) },
+        confirmButton = { TextButton(enabled = connected && !working && validDirectoryName(folderName), onClick = { onCreateDirectory?.invoke(folderName); newFolder = false }) { Text("Create folder") } },
+        dismissButton = { TextButton(onClick = { newFolder = false }) { Text("Cancel") } }
+    )
 }

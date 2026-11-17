@@ -55,6 +55,24 @@ internal class AttachmentState(private val scope: CoroutineScope, private val tr
             } finally { if (generation == revision) { working = false; progress = "" } }
         }
     }
+    fun createDirectory(name: String) {
+        if (working || !validDirectoryName(name)) return
+        val current = transport() ?: return
+        val parent = directory?.path ?: return
+        val revision = generation
+        working = true; error = ""
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { current.createRemoteDirectory(parent, name) }
+                if (generation == revision) {
+                    working = false
+                    if (transport() === current) browse(parent.trimEnd('/') + "/" + name)
+                }
+            } catch (_: Exception) {
+                if (generation == revision) { working = false; error = "Could not create folder. Check its name and write permission; refresh before retrying." }
+            }
+        }
+    }
     fun fromPhone(thread: String, uris: List<Uri>, revision: Int, resolver: ContentResolver) {
         if (revision != generation || working || thread.isBlank() || uris.isEmpty()) return
         if (drafts[thread].orEmpty().size + uris.size > MAX_ATTACHMENTS) { error = "Attach up to 8 files per message."; return }

@@ -3,7 +3,6 @@ package dev.modex
 import android.app.Instrumentation
 import android.content.Intent
 import android.os.Bundle
-import androidx.lifecycle.ViewModelProvider
 import java.io.File
 
 fun Instrumentation.continuitySmoke(args: Bundle) {
@@ -11,10 +10,10 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
     var vm: ModexViewModel? = null
     try {
         val restore = args.getString("stage") == "restore"
-        if (!restore) SavedHost(targetContext).clear()
+        if (!restore) SavedHost(targetContext, "continuity-fixture").clear()
         startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         val app = targetContext.applicationContext as ModexApplication
-        runOnMainSync { vm = ViewModelProvider(app, ViewModelProvider.AndroidViewModelFactory.getInstance(app))[ModexViewModel::class.java] }
+        runOnMainSync { vm = ModexViewModel(app, "continuity-fixture") }
         val session = vm!!
         if (restore) runOnMainSync { session.foreground() }
         if (!restore) runOnMainSync {
@@ -32,9 +31,7 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
             }
         }
         await { session.connected }
-        if (!restore) {
-            runOnMainSync { session.select("fixture-thread") }
-        }
+        runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
         await { session.selected == "fixture-thread" && !session.historyLoading && session.messages.any { it.text == "Stored assistant reply" } }
         runOnMainSync { check(session.messages.first { it.role == "You" }.attachments.size == 2) { "Attachment metadata lost from reloaded history" } }
         if (!restore) {
@@ -45,7 +42,9 @@ fun Instrumentation.continuitySmoke(args: Bundle) {
                 check(session.selected.isEmpty() && session.messages.isEmpty()) { "Disconnect retained visible history" }
                 session.connect(session.savedConnection!!)
             }
-            await { session.connected && session.selected == "fixture-thread" && !session.historyLoading }
+            await { session.connected }
+            runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
+            await { session.selected == "fixture-thread" && !session.historyLoading }
         }
         runOnMainSync { check(session.sessionModel == "fixture-chosen" && session.sessionEffort == "high") { "Choice lost on reconnect/process restore" } }
         Thread.sleep(700)

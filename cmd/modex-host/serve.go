@@ -95,7 +95,21 @@ func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Wr
 		}
 	})
 	defer sessions.Close()
+	plans := bridge.NewPlanActions(os.Getenv("MODEX_PLAN_STATE_DIR"), sessions.Call)
 	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+		if method == "modex/plan/state" {
+			values, _ := params.(map[string]any)
+			handled, err := plans.Handled(stringValue(values, "threadId"), stringValue(values, "turnId"), stringValue(values, "itemId"))
+			return mustJSON(map[string]bool{"handled": handled}), err
+		}
+		if method == "modex/plan/respond" {
+			values, _ := params.(map[string]any)
+			raw, err := plans.Respond(ctx, values)
+			if err == nil && emit != nil {
+				emit("plan/resolved", raw)
+			}
+			return raw, err
+		}
 		if method == "client/takeover" {
 			values, ok := params.(map[string]any)
 			if !ok {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -17,11 +18,13 @@ type Caller func(context.Context, string, any) (json.RawMessage, error)
 type EventCaller func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error)
 
 type Thread struct {
-	ID       string `json:"id"`
-	Cwd      string `json:"cwd"`
-	Provider string `json:"modelProvider"`
-	Model    string `json:"model,omitempty"`
-	Effort   string `json:"reasoningEffort,omitempty"`
+	ID        string        `json:"id"`
+	Cwd       string        `json:"cwd"`
+	Provider  string        `json:"modelProvider"`
+	Model     string        `json:"model,omitempty"`
+	Effort    string        `json:"reasoningEffort,omitempty"`
+	ProjectID *string       `json:"projectId,omitempty"`
+	Status    *threadStatus `json:"status,omitempty"`
 }
 
 type threadListItem struct {
@@ -56,22 +59,39 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "plans/respond":
+		for _, key := range []string{"workspace", "thread_id", "turn_id", "item_id", "action", "model", "effort"} {
+			allowed[key] = true
+		}
 	case "references/list":
 		allowed["workspace"] = true
 		allowed["force_reload"] = true
 	case "client/attached":
 		allowed["attached"] = true
 	case "status":
+	case "projects/create":
+		allowed["workspace"] = true
+		allowed["name"] = true
+		allowed["idempotency_key"] = true
 	case "threads/start":
+		allowed["standalone"] = true
+		allowed["project_id"] = true
 		allowed["model"] = true
 		allowed["permission_mode"] = true
 		allowed["workspace"] = true
 	case "threads/list", "models/list", "projects/list":
 		if cmd.Method == "threads/list" {
 			allowed["all_workspaces"] = true
+			allowed["archived"] = true
 		}
 		allowed["limit"] = true
 		allowed["cursor"] = true
+	case "threads/archive", "threads/unarchive", "threads/delete", "threads/fork":
+		allowed["workspace"] = true
+		allowed["thread_id"] = true
+		if cmd.Method == "threads/delete" {
+			allowed["confirm"] = true
+		}
 	case "threads/read", "threads/resume", "threads/takeover":
 		if cmd.Method == "threads/takeover" {
 			allowed["confirm"] = true
@@ -131,6 +151,20 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 	}
 	switch cmd.Method {
+	case "threads/archive", "threads/unarchive", "threads/delete", "threads/fork":
+		return threadLifecycle(cmd.Method, p, cwd, fetch)
+	case "plans/respond":
+		params := map[string]any{"cwd": cwd}
+		for _, pair := range [][2]string{{"thread_id", "threadId"}, {"turn_id", "turnId"}, {"item_id", "itemId"}, {"action", "action"}, {"model", "model"}, {"effort", "effort"}} {
+			if raw, ok := p[pair[0]]; ok {
+				var value string
+				if json.Unmarshal(raw, &value) != nil || strings.TrimSpace(value) == "" || len(value) > 256 || strings.ContainsAny(value, "\r\n\x00") {
+					return nil, errors.New("invalid plan action parameter")
+				}
+				params[pair[1]] = value
+			}
+		}
+		return fetch("modex/plan/respond", params)
 	case "references/list":
 		force := false
 		if raw, ok := p["force_reload"]; ok {
@@ -145,8 +179,39 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, errors.New("attached must be boolean")
 		}
 		return fetch("client/attached", map[string]any{"attached": attached})
+	case "projects/create":
+		return createProject(p, fetch)
 	case "threads/start":
+		standalone := false
+		if raw, ok := p["standalone"]; ok {
+			if string(raw) == "null" || json.Unmarshal(raw, &standalone) != nil {
+				return nil, errors.New("standalone must be boolean")
+			}
+		}
+		if standalone {
+			if _, ok := p["workspace"]; ok {
+				return nil, errors.New("standalone cannot specify workspace")
+			}
+			if _, ok := p["project_id"]; ok {
+				return nil, errors.New("standalone cannot specify project_id")
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			cwd = filepath.Join(home, "Documents", "Codex")
+		}
 		params := map[string]any{"cwd": cwd}
+		if standalone {
+			params["projectId"] = nil
+		}
+		if raw, ok := p["project_id"]; ok {
+			var project string
+			if json.Unmarshal(raw, &project) != nil || !validProjectText(project) {
+				return nil, errors.New("invalid project_id")
+			}
+			params["projectId"] = project
+		}
 		if raw, ok := p["permission_mode"]; ok {
 			var mode string
 			if json.Unmarshal(raw, &mode) != nil {
@@ -172,6 +237,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("model must be a nonempty single-line string up to 256 bytes")
 			}
 			params["model"] = model
+		}
+		if standalone {
+			if err := os.MkdirAll(cwd, 0700); err != nil {
+				return nil, err
+			}
 		}
 		raw, err := fetch("thread/start", params)
 		if err != nil {
@@ -264,7 +334,13 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("all_workspaces must be boolean")
 			}
 		}
-		params := map[string]any{"limit": limit, "modelProviders": []string{}, "sourceKinds": []string{"cli", "vscode", "appServer"}, "sortKey": "updated_at"}
+		archived := false
+		if raw, ok := p["archived"]; ok {
+			if string(raw) == "null" || json.Unmarshal(raw, &archived) != nil {
+				return nil, errors.New("archived must be boolean")
+			}
+		}
+		params := map[string]any{"archived": archived, "limit": limit, "modelProviders": []string{}, "sourceKinds": []string{"cli", "vscode", "appServer"}, "sortKey": "updated_at"}
 		if !all {
 			params["cwd"] = cwd
 		}
@@ -428,7 +504,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 				return nil, errors.New("thread outside workspace")
 			}
 			messages := []map[string]any{}
-			active := false
+			active := response.Thread.Status != nil && response.Thread.Status.Type == "active"
 			outputBudget := 1024 * 1024
 			for _, turn := range response.Thread.Turns {
 				first := len(messages)
@@ -492,13 +568,29 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 							text = strings.ToValidUTF8(text[:65536], "") + "\n[Summary truncated]"
 						}
 						displayText = text
+					case "plan":
+						role = "plan"
+						text = item.Text
+						displayText = item.Text
 					case "agentMessage":
 						role = "assistant"
 						text = item.Text
 						displayText = item.Text
 					}
 					if role != "" && text != "" {
-						messages = append(messages, map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments})
+						message := map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments}
+						if role == "plan" {
+							state, stateErr := fetch("modex/plan/state", map[string]any{"threadId": id, "turnId": turn.ID, "itemId": item.ID})
+							if stateErr == nil {
+								var handled struct {
+									Handled bool `json:"handled"`
+								}
+								if json.Unmarshal(state, &handled) == nil {
+									message["plan_handled"] = handled.Handled
+								}
+							}
+						}
+						messages = append(messages, message)
 					}
 				}
 				for _, message := range messages[first:] {

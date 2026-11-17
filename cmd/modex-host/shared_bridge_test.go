@@ -3,15 +3,55 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/warmdev/modex/internal/bridge"
+	"github.com/warmdev/modex/internal/diagnostic"
 )
+
+func TestNativeReplyReportsSafeResumeFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, message, category, advice string
+	}{
+		{"writer", "thread already has an active writer; secret-key", "active_writer", "Close"},
+		{"auth", "authentication failed; secret-key", "unauthorized", "authentication"},
+		{"provider", "model provider unavailable; secret-key", "model_provider_mismatch", "provider"},
+		{"unknown", "secret-key", "request_rejected", "refresh"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream, _ := json.Marshal(map[string]any{"code": -32600, "message": tc.message})
+			client := &nativeClient{out: make(chan []byte, 1)}
+			client.reply(json.RawMessage(`42`), nil, fmt.Errorf("resume: %w", diagnostic.NewRPCError(upstream)))
+			raw := <-client.out
+			var reply struct {
+				ID    int `json:"id"`
+				Error struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+					Data    struct {
+						Category string `json:"category"`
+					} `json:"data"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(raw, &reply) != nil || reply.ID != 42 || reply.Error.Code != -32000 || reply.Error.Data.Category != tc.category || !strings.Contains(reply.Error.Message, tc.advice) || strings.Contains(string(raw), "secret-key") {
+				t.Fatalf("unsafe or unhelpful reply: %s", raw)
+			}
+		})
+	}
+	client := &nativeClient{out: make(chan []byte, 1)}
+	client.reply(json.RawMessage(`43`), nil, errors.New("secret-key"))
+	if raw := <-client.out; strings.Contains(string(raw), "secret-key") {
+		t.Fatalf("raw error leaked: %s", raw)
+	}
+}
 
 func TestSharedCodexChild(t *testing.T) {
 	if os.Getenv("MODEX_SHARED_CHILD") != "1" {
@@ -29,6 +69,19 @@ func TestSharedCodexChild(t *testing.T) {
 		}
 		if r.Method == "thread/unsubscribe" {
 			os.Exit(3)
+		}
+		if os.Getenv("MODEX_SHARED_INTERRUPT") == "1" {
+			if r.Method == "turn/start" {
+				_ = e.Encode(map[string]any{"id": r.ID, "result": map[string]any{"turn": map[string]string{"id": "turn", "status": "inProgress"}}})
+				_ = e.Encode(map[string]any{"method": "turn/started", "params": map[string]any{"threadId": "shared", "turn": map[string]string{"id": "turn", "status": "inProgress"}}})
+				continue
+			}
+			if r.Method == "turn/interrupt" {
+				_ = e.Encode(map[string]any{"id": r.ID, "result": map[string]any{}})
+				_ = e.Encode(map[string]any{"method": "turn/completed", "params": map[string]any{"threadId": "shared", "turn": map[string]string{"id": "turn", "status": "interrupted"}}})
+				_ = e.Encode(map[string]any{"method": "thread/status/changed", "params": map[string]any{"threadId": "shared", "status": map[string]string{"type": "idle"}}})
+				continue
+			}
 		}
 		if r.Method == "turn/start" {
 			_ = e.Encode(map[string]any{"id": r.ID, "result": map[string]any{"turn": map[string]string{"id": "turn"}}})
@@ -218,6 +271,124 @@ func testSharedBackendDisconnect(t *testing.T, nativeError bool) {
 			}
 		case <-ctx.Done():
 			t.Fatal("turn stopped after CLI disconnected")
+		}
+	}
+}
+
+func TestNativeInterruptReachesMobileWithoutSelectingThread(t *testing.T) {
+	t.Setenv("MODEX_SHARED_CHILD", "1")
+	t.Setenv("MODEX_SHARED_INTERRUPT", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	p, err := bridge.StartProcess(ctx, os.Args[0], []string{"-test.run=^TestSharedCodexChild$"}, t.TempDir(), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	mobile := make(chan []byte, 16)
+	s, err := newSharedBackend(ctx, p, func(method string, params json.RawMessage) {
+		raw, err := bridge.EncodeEvent(method, params)
+		if err != nil {
+			t.Errorf("encode: %v", err)
+			return
+		}
+		mobile <- raw
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(s)
+	defer server.Close()
+	c, _, err := websocket.Dial(ctx, "ws"+server.URL[4:], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.CloseNow()
+	nativeCompleted := false
+	request := func(id int, method string) {
+		t.Helper()
+		if err := wsjson.Write(ctx, c, map[string]any{"id": id, "method": method, "params": map[string]any{"threadId": "shared", "turnId": "turn"}}); err != nil {
+			t.Fatal(err)
+		}
+		for {
+			var reply map[string]json.RawMessage
+			if err := wsjson.Read(ctx, c, &reply); err != nil {
+				t.Fatal(err)
+			}
+			if string(reply["method"]) == `"turn/completed"` {
+				var completion struct {
+					Thread string `json:"threadId"`
+					Turn   struct {
+						Status string `json:"status"`
+					} `json:"turn"`
+				}
+				_ = json.Unmarshal(reply["params"], &completion)
+				if completion.Thread != "shared" || completion.Turn.Status != "interrupted" {
+					t.Fatal("native outcome changed")
+				}
+				nativeCompleted = true
+			}
+			if string(reply["id"]) == fmt.Sprint(id) && reply["method"] == nil {
+				if reply["error"] != nil {
+					t.Fatalf("RPC error: %s", reply["error"])
+				}
+				break
+			}
+		}
+	}
+	request(1, "initialize")
+	request(2, "thread/resume")
+	request(3, "turn/start")
+	request(4, "turn/interrupt")
+	completed := false
+	for !completed {
+		select {
+		case raw := <-mobile:
+			var event struct {
+				Method string `json:"event"`
+				Params struct {
+					Thread string `json:"threadId"`
+					Turn   struct {
+						ID     string `json:"id"`
+						Status string `json:"status"`
+					} `json:"turn"`
+				} `json:"params"`
+			}
+			if json.Unmarshal(raw, &event) != nil {
+				t.Fatal("bad event")
+			}
+			if event.Method == "turn/completed" {
+				if event.Params.Thread != "shared" || event.Params.Turn.ID != "turn" || event.Params.Turn.Status != "interrupted" {
+					t.Fatalf("wrong outcome: %s", raw)
+				}
+				completed = true
+			}
+		case <-ctx.Done():
+			t.Fatal("native interruption did not reach mobile")
+		}
+	}
+	// The native subscriber receives the original documented completion too.
+	if nativeCompleted {
+		return
+	}
+	for {
+		var event struct {
+			Method string `json:"method"`
+			Params struct {
+				Thread string `json:"threadId"`
+				Turn   struct {
+					Status string `json:"status"`
+				} `json:"turn"`
+			} `json:"params"`
+		}
+		if err := wsjson.Read(ctx, c, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Method == "turn/completed" {
+			if event.Params.Thread != "shared" || event.Params.Turn.Status != "interrupted" {
+				t.Fatal("native completion changed")
+			}
+			return
 		}
 	}
 }

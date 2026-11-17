@@ -60,6 +60,7 @@ func superviseHost(cwd, binary, home, dir string) error {
 		args = append(args, "--codex-home", home)
 	}
 	child := exec.Command(self, args...)
+	child.Env = append(os.Environ(), "MODEX_PLAN_STATE_DIR="+filepath.Join(dir, "plan-receipts"))
 	child.Dir = cwd
 	child.Stderr = io.Discard
 	input, err := child.StdinPipe()

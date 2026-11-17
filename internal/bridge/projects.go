@@ -2,10 +2,12 @@ package bridge
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // Keep Desktop-owned project identity and roots without exposing arbitrary metadata.
@@ -92,4 +94,32 @@ func (p *Process) desktopMembership(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	return desktopMembership(raw, state, home)
+}
+
+func validProjectText(s string) bool {
+	return strings.TrimSpace(s) != "" && len(s) <= 256 && !strings.ContainsFunc(s, unicode.IsControl)
+}
+
+func createProject(params map[string]json.RawMessage, fetch func(string, any) (json.RawMessage, error)) (any, error) {
+	var name, root, key string
+	if json.Unmarshal(params["name"], &name) != nil || !validProjectText(name) ||
+		json.Unmarshal(params["idempotency_key"], &key) != nil || !validProjectText(key) ||
+		json.Unmarshal(params["workspace"], &root) != nil || !filepath.IsAbs(root) {
+		return nil, errors.New("project requires name, absolute workspace and idempotency_key")
+	}
+	info, err := os.Stat(root)
+	if err != nil || !info.IsDir() {
+		return nil, errors.New("project folder is unavailable")
+	}
+	raw, err := fetch("project/create", map[string]any{"name": strings.TrimSpace(name), "roots": []map[string]string{{"path": root}}, "idempotencyKey": key})
+	if err != nil {
+		return nil, err
+	}
+	var result struct {
+		Project projectEntry `json:"project"`
+	}
+	if json.Unmarshal(raw, &result) != nil || result.Project.ID == "" || len(result.Project.Roots) != 1 || result.Project.Roots[0].Path != root {
+		return nil, errors.New("invalid project response; refresh projects before retrying")
+	}
+	return result, nil
 }

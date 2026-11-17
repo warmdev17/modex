@@ -18,12 +18,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--host', required=True, type=Path)
     parser.add_argument('--adb', default='adb')
+    parser.add_argument('--connections', action='store_true')
     parser.add_argument('--continuity', action='store_true')
     parser.add_argument('--attachments', action='store_true')
     parser.add_argument('--journal-recovery', action='store_true')
     parser.add_argument('--serial', default='emulator-5554')
     args = parser.parse_args()
-    if sum((args.attachments, args.continuity, args.journal_recovery)) > 1:
+    if sum((args.attachments, args.continuity, args.journal_recovery, args.connections)) > 1:
         parser.error('choose one fixture mode')
     host = str(args.host.resolve())
     adb = [args.adb, '-s', args.serial]
@@ -65,6 +66,8 @@ Subsystem sftp internal-sftp
         sshd = subprocess.Popen([shutil.which('sshd'), '-D', '-e', '-f', str(config)], stdout=subprocess.DEVNULL, stderr=sshd_log)
         state = root / ('state[*?] space' if args.attachments else 'state')
         started = False
+        second_started = False
+        second_state = root / "second-state"
         remote_key = '/data/local/tmp/modex-journal-' + root.name + '.key'
         try:
             deadline = time.monotonic() + 5
@@ -122,6 +125,9 @@ for line in sys.stdin:
                 host_args += ['--codex-home', str(root / 'codex-home')]
             run(host_args)
             started = True
+            if args.connections:
+                run([host, "--background", "--workspace", str(root), "--state-dir", str(second_state), "--codex", str(fake)])
+                second_started = True
             if args.journal_recovery:
                 from live_supervisor_smoke import AttachedRPC
                 warmup = AttachedRPC(host, state, root)
@@ -141,9 +147,11 @@ for line in sys.stdin:
                 run(adb + ['shell', 'run-as', 'dev.modex', 'sh', '-c', '"cat > files/smoke-key"'], input=(root / 'client').read_bytes())
             blob = base64.b64decode((root / 'host.pub').read_text().split()[1])
             pin = 'SHA256:' + base64.b64encode(hashlib.sha256(blob).digest()).decode().rstrip('=')
-            stages = ('initial', 'restore') if args.continuity else ('transport',)
+            stages = ('initial', 'restore') if args.continuity or args.connections else ('transport',)
             for stage in stages:
                 extras = ['-e', 'preview', 'continuity', '-e', 'stage', stage] if args.continuity else ['-e','preview','attachments','-e','root',str(root)] if args.attachments else []
+                if args.connections:
+                    extras = ["-e", "preview", "connection-management", "-e", "stage", stage, "-e", "state2", str(second_state)]
                 if args.journal_recovery:
                     extras = ['-e', 'preview', 'journal-recovery', '-e', 'instance', instance, '-e', 'keyPath', remote_key]
                 result = run(adb + ['shell', shlex.join(['am', 'instrument', '-w'] + extras + ['-e', 'port', str(port), '-e', 'user', getpass.getuser(), '-e', 'pin', pin, '-e', 'binary', host, '-e', 'state', str(state), 'dev.modex.test/dev.modex.TransportSmoke'])])
@@ -164,7 +172,7 @@ for line in sys.stdin:
                     assert all(p.is_file() and p.stat().st_mode & 0o777 == 0o600 for p in uploads)
                     assert all(p.parent.stat().st_mode & 0o777 == 0o700 for p in uploads)
                     assert sorted(p.read_text() for p in uploads) == ['document-provider-stream','mobile-upload']
-                if args.continuity:
+                if args.continuity or args.connections:
                     run(adb + ['shell', 'am', 'force-stop', 'dev.modex'])
                     time.sleep(.4)
         except Exception:
@@ -182,6 +190,8 @@ for line in sys.stdin:
                     run(adb + ['shell', 'run-as', 'dev.modex', 'rm', '-f', 'files/smoke-key'])
             finally:
                 try:
+                    if second_started:
+                        run([host, "--stop", "--state-dir", str(second_state)])
                     if started:
                         run([host, '--stop', '--state-dir', str(state)])
                 finally:
