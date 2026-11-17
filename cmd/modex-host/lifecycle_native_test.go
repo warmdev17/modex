@@ -89,6 +89,7 @@ func TestNativeConversationLifecycle(t *testing.T) {
 	native("thread/inject_items", map[string]any{"threadId": source, "items": []any{map[string]any{"type": "message", "role": "user", "content": []any{map[string]any{"type": "input_text", "text": "Synthetic lifecycle storage fixture; never run a model turn."}}}}})
 	target := func(id string) map[string]any { return map[string]any{"thread_id": id, "workspace": workspace} }
 	native("thread/goal/set", map[string]any{"threadId": source, "objective": "Synthetic paused goal; never run a model turn.", "status": "paused", "origin": "user"})
+	native("thread/unsubscribe", map[string]any{"threadId": source})
 	fork := threadID(check("threads/fork", target(source)))
 	if fork == source {
 		t.Fatal("fork reused source identity")

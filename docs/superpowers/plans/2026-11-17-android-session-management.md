@@ -42,29 +42,29 @@ Existing Modex envelope {id,method,params} and safe errors remain.
 ## Task 1 — Backend commands and safe turn notices (coder-be)
 
 Owned: internal/bridge/{protocol.go,server.go,turn_metadata.go,new focused lifecycle/notice helpers and tests}, internal/diagnostic/{rpc.go,new notice helper and tests}, cmd/modex-host/shared_bridge_test.go for interruption coverage. No Kotlin/PROJECT_STATE edits.
-- [ ] Add failing command tests for exact mappings, native refusals, missing confirmation, unknown fields, bad workspace, returned fork provider/permissions and deferred goal.
-- [ ] Implement the shared contracts above using existing projection/validation patterns; add safe dependency/missing-source categories.
-- [ ] Add failing live-event/history notice projection/privacy tests, then implement the normalized notice shape without altering native TUI errors/events.
-- [ ] Add shared-backend synthetic native interruption→mobile events regression.
-- [ ] Run umask 022; GOCACHE=/tmp/modex-go-cache go test -race ./... and go vet ./...; report real versus fake evidence. Primary commits explicit paths after review.
+- [x] Add failing command tests for exact mappings, native refusals, missing confirmation, unknown fields, bad workspace, returned fork provider/permissions and deferred goal.
+- [x] Implement the shared contracts above using existing projection/validation patterns; add safe dependency/missing-source categories.
+- [x] Add failing live-event/history notice projection/privacy tests, then implement the normalized notice shape without altering native TUI errors/events.
+- [x] Add shared-backend synthetic native interruption→mobile events regression.
+- [x] Run umask 022; GOCACHE=/tmp/modex-go-cache go test -race ./... and go vet ./...; report real versus fake evidence. Primary commits explicit paths after review.
 
 ## Task 2 — Android navigation, lifecycle menus and synchronized notices (coder-fe, independent Kotlin ownership)
 
 Owned: android/app/src/main/java/dev/modex and relevant android test/androidTest files only. No Go/build configuration/PROJECT_STATE edits. Primary handles versioning/build/release.
-- [ ] Add failing JVM/state tests for no auto-resume, notices/retry/terminal/stale completion/status reconciliation, list response fencing and lifecycle decisions.
-- [ ] Remove automatic lastThread selection at connection. Navigate chat disconnect/loss back to Hosts while preserving profiles and other remotes. Explicit Activity/session selection still works.
-- [ ] Add accessible session overflow actions and Archived/Restore view with correctly scoped pagination/search/action progress. Delete confirmation and dependency refusal retain original entries/caches. Fork opens only successful validated result; no prompt sent.
-- [ ] Consume normalized notice fields, preserve in encrypted ChatEntry snapshots and show clear inline turn/retry/outcome text. Old-host known-error fallback remains safe.
-- [ ] Consume native status/closed notifications by authoritative bounded history reconciliation; keep newer-turn guards. Never infer interrupted from idle alone or resume for observation. Reconcile selected active sessions/foreground as supported; report independent-backend limits.
-- [ ] Update continuity/reconnect fixtures to explicitly select after connecting. Add real-touch UI fixture for connection return/blank selection/sidebar menus/turn notices.
-- [ ] Run affected/full JVM tests, assembleDebug/AndroidTest/lint using existing Gradle8.14.3/JDK21/caches; report screenshots/test selectors. Primary commits explicit paths after review.
+- [x] Add failing JVM/state tests for no auto-resume, notices/retry/terminal/stale completion/status reconciliation, list response fencing and lifecycle decisions.
+- [x] Remove automatic lastThread selection at connection. Navigate chat disconnect/loss back to Hosts while preserving profiles and other remotes. Explicit Activity/session selection still works.
+- [x] Add accessible session overflow actions and Archived/Restore view with correctly scoped pagination/search/action progress. Delete confirmation and dependency refusal retain original entries/caches. Fork opens only successful validated result; no prompt sent.
+- [x] Consume normalized notice fields, preserve in encrypted ChatEntry snapshots and show clear inline turn/retry/outcome text. Old-host known-error fallback remains safe.
+- [x] Consume native status/closed notifications by authoritative bounded history reconciliation; keep newer-turn guards. Never infer interrupted from idle alone or resume for observation. Reconcile selected active sessions/foreground as supported; report independent-backend limits.
+- [x] Update continuity/reconnect fixtures to explicitly select after connecting. Add real-touch UI fixture for connection return/blank selection/sidebar menus/turn notices.
+- [x] Run affected/full JVM tests, assembleDebug/AndroidTest/lint using existing Gradle8.14.3/JDK21/caches; report screenshots/test selectors. Primary commits explicit paths after review.
 
 ## Task 3 — Review, integration, delivery and host activation (primary + reviewer/tester)
 
-- [ ] Read-only reviewer checks each BE/FE deliverable against this plan, including scopes/contract/privacy/races; owners fix findings before final integration.
-- [ ] Primary updates docs/bridge-plan.md and docs/mobile-development.md from implementation, and the sole PROJECT_STATE ledger. Inspect combined diff and run Go/Python/Android checks appropriate to actual changes.
-- [ ] Test native archive/restore/delete/fork and native interruption through isolated supervisor with synthetic sessions. No user thread mutations. Test external-process observation independently and report actual coverage.
-- [ ] Produce dev.10 or next unused release with versionCode>10, same certificate; download exact dev.9 APK, seed encrypted synthetic state, upgrade in-place and run affected UI checks on the distributable. Inspect screenshots; stop owned emulator only.
+- [x] Read-only reviewer checks each BE/FE deliverable against this plan, including scopes/contract/privacy/races; owners fix findings before final integration.
+- [x] Primary updates docs/bridge-plan.md and docs/mobile-development.md from implementation, and the sole PROJECT_STATE ledger. Inspect combined diff and run Go/Python/Android checks appropriate to actual changes.
+- [x] Test native archive/restore/delete/fork and native interruption through isolated supervisor with synthetic sessions. No user thread mutations. Test external-process observation independently and report actual coverage.
+- [x] Produce dev.10 or next unused release with versionCode>10, same certificate; download exact dev.9 APK, seed encrypted synthetic state, upgrade in-place and run affected UI checks on the distributable. Inspect screenshots; stop owned emulator only.
 - [ ] Publish source tag, APK, code, host archives, checksums, verification notes and downloadable GitHub pre-release. Verify remote refs/assets and install exact tested binaries with rollback backup.
 - [ ] Per latest user sequencing, activate one delayed external host restart after phase-one delivery, verify it independently where the current backend is not owned by that service, then create PR/merge using merge commit. Never interrupt this backend or discard pending work. If a turn boundary is necessary, preserve exact next steps in PROJECT_STATE.
 
@@ -73,3 +73,13 @@ Owned: android/app/src/main/java/dev/modex and relevant android test/androidTest
 - [ ] After phase-one delivery/activation and PR/merge, inspect current native Codex slash-command behavior/API and existing Android controls. Produce a concrete include/exclude table; omit /keymap,/vim and terminal-only commands.
 - [ ] Implement the smallest Android command picker triggered by /, mapping only supported actions to real Android/native operations. Never submit a decorative/no-op command as a prompt. Destructive commands retain explicit confirmation.
 - [ ] Regression tests, UI verification, new versioned APK delivery and separate PR/merge for this feature; update state and final evidence. No repeated design approval: owner explicitly authorized continuing and primary settling routine details.
+
+## Verified implementation evidence (phase one)
+
+- BE milestone a20cefe; Android milestone6c06465. Full Go race/vet and33 Python tests PASS;115 JVM tests (0 failures/errors/skips), debug/test builds and lint PASS.
+- Native isolated lifecycle includes unloaded paginated source with paused goal; fork/archive/restore/delete guards PASS without inference. Native real-provider interrupt→mobile event→persisted interrupted history PASS.
+- Review fixed source-resume active-goal auto-dispatch and definitive lifecycle results being dropped by list generation; scoped rereview approved both. Late terminal-item revival regression also fixed.
+- Exact dev10/code11 APK retains dev9/code10 encrypted synthetic host/key/model/cursor during direct signed in-place upgrade. Package/version and established certificate verified.
+- Emulator real-touch session-management preview PASS; all3 synthetic screenshots inspected. Real SSH continuity (including process restore) and2-remote isolation/service/profile restore/removal PASS. System UI ANR initially obstructed UI; restarted only disposable emulator System UI and reran successfully. Test-only reflection/request-ID fixture defects were repaired before GREEN; no checks skipped.
+- Physical phone, independent Desktop backend live synchronization and non-Linux runtime remain unverified. Source-goal check/resume is not an atomic native operation; external concurrent goal mutation is outside this check.
+- Publication/activation and later authorized PR/merge→slash-command work remain below the phase-one delivery gate.
