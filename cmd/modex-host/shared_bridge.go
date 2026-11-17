@@ -530,7 +530,20 @@ func (s *sharedBackend) replayDecisions(c *nativeClient) {
 
 func (c *nativeClient) reply(id, result json.RawMessage, err error) {
 	if err != nil {
-		c.send(mustJSON(map[string]any{"id": id, "error": map[string]any{"code": -32000, "message": "Modex backend request failed; refresh session before retrying"}}))
+		category, message := "request_rejected", "Modex backend request failed; refresh session before retrying"
+		var rejection *diagnostic.RPCError
+		if errors.As(err, &rejection) {
+			category = rejection.Category()
+			switch category {
+			case "active_writer":
+				message = "This session is open in another Codex backend (active writer). Close it in Codex Desktop or the standalone CLI, then reopen with modex; restarting the Modex service will not release that writer."
+			case "unauthorized":
+				message = "Codex backend authentication failed. Check credentials available to the host service; uncertain commands must not be replayed."
+			case "model_provider_mismatch":
+				message = "Codex backend rejected the model or provider. Check the host service configuration and session provider before retrying."
+			}
+		}
+		c.send(mustJSON(map[string]any{"id": id, "error": map[string]any{"code": -32000, "message": message, "data": map[string]string{"category": category}}}))
 		return
 	}
 	c.send(mustJSON(map[string]any{"id": id, "result": result}))

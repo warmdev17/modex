@@ -3,15 +3,55 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/warmdev/modex/internal/bridge"
+	"github.com/warmdev/modex/internal/diagnostic"
 )
+
+func TestNativeReplyReportsSafeResumeFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name, message, category, advice string
+	}{
+		{"writer", "thread already has an active writer; secret-key", "active_writer", "Close"},
+		{"auth", "authentication failed; secret-key", "unauthorized", "authentication"},
+		{"provider", "model provider unavailable; secret-key", "model_provider_mismatch", "provider"},
+		{"unknown", "secret-key", "request_rejected", "refresh"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream, _ := json.Marshal(map[string]any{"code": -32600, "message": tc.message})
+			client := &nativeClient{out: make(chan []byte, 1)}
+			client.reply(json.RawMessage(`42`), nil, fmt.Errorf("resume: %w", diagnostic.NewRPCError(upstream)))
+			raw := <-client.out
+			var reply struct {
+				ID    int `json:"id"`
+				Error struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+					Data    struct {
+						Category string `json:"category"`
+					} `json:"data"`
+				} `json:"error"`
+			}
+			if json.Unmarshal(raw, &reply) != nil || reply.ID != 42 || reply.Error.Code != -32000 || reply.Error.Data.Category != tc.category || !strings.Contains(reply.Error.Message, tc.advice) || strings.Contains(string(raw), "secret-key") {
+				t.Fatalf("unsafe or unhelpful reply: %s", raw)
+			}
+		})
+	}
+	client := &nativeClient{out: make(chan []byte, 1)}
+	client.reply(json.RawMessage(`43`), nil, errors.New("secret-key"))
+	if raw := <-client.out; strings.Contains(string(raw), "secret-key") {
+		t.Fatalf("raw error leaked: %s", raw)
+	}
+}
 
 func TestSharedCodexChild(t *testing.T) {
 	if os.Getenv("MODEX_SHARED_CHILD") != "1" {
