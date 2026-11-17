@@ -105,26 +105,27 @@ func (a *PlanActions) Respond(ctx context.Context, p map[string]any) (json.RawMe
 	if handled, err := a.Handled(thread, turn, item); err != nil || handled {
 		return nil, errors.New("plan already handled or unavailable; refresh before continuing")
 	}
-	raw, err := a.call(ctx, "thread/resume", map[string]any{"threadId": thread, "excludeTurns": true})
+	fetch := func(method string, params any) (json.RawMessage, error) { return a.call(ctx, method, params) }
+	raw, err := fetch("thread/read", map[string]any{"threadId": thread, "includeTurns": false})
 	if err != nil {
 		return nil, err
 	}
-	var session map[string]json.RawMessage
-	var origin struct {
-		ID        string  `json:"id"`
-		Cwd       string  `json:"cwd"`
-		ProjectID *string `json:"projectId"`
-		Status    struct {
-			Type string `json:"type"`
-		} `json:"status"`
+	var read struct {
+		Thread struct {
+			ID     string        `json:"id"`
+			Cwd    string        `json:"cwd"`
+			Status *threadStatus `json:"status"`
+		} `json:"thread"`
 	}
-	if json.Unmarshal(raw, &session) != nil || json.Unmarshal(session["thread"], &origin) != nil || origin.ID != thread || origin.Cwd != cwd {
+	if json.Unmarshal(raw, &read) != nil || read.Thread.ID != thread || read.Thread.Cwd != cwd {
 		return nil, errors.New("plan thread outside workspace")
 	}
-	if origin.Status.Type != "" && origin.Status.Type != "idle" {
-		return nil, errors.New("plan turn is active; refresh")
+	if read.Thread.Status == nil || (read.Thread.Status.Type != "idle" && read.Thread.Status.Type != "notLoaded") {
+		return nil, errors.New("plan turn is active or status unavailable; refresh")
 	}
-	source := append(json.RawMessage(nil), raw...)
+	if err := checkInactiveGoal(thread, fetch); err != nil {
+		return nil, err
+	}
 	page, err := a.call(ctx, "thread/turns/list", map[string]any{"threadId": thread, "limit": 1, "sortDirection": "desc", "itemsView": "full"})
 	if err != nil {
 		return nil, err
@@ -152,6 +153,26 @@ func (a *PlanActions) Respond(ctx context.Context, p map[string]any) (json.RawMe
 	if planID != item || strings.TrimSpace(markdown) == "" {
 		return nil, errors.New("completed plan is unavailable; refresh")
 	}
+	raw, err = fetch("thread/resume", map[string]any{"threadId": thread, "excludeTurns": true})
+	if err != nil {
+		return nil, err
+	}
+	var session map[string]json.RawMessage
+	var origin struct {
+		ID        string  `json:"id"`
+		Cwd       string  `json:"cwd"`
+		ProjectID *string `json:"projectId"`
+		Status    struct {
+			Type string `json:"type"`
+		} `json:"status"`
+	}
+	if json.Unmarshal(raw, &session) != nil || json.Unmarshal(session["thread"], &origin) != nil || origin.ID != thread || origin.Cwd != cwd {
+		return nil, errors.New("plan thread outside workspace")
+	}
+	if origin.Status.Type != "" && origin.Status.Type != "idle" {
+		return nil, errors.New("plan turn is active; refresh")
+	}
+	source := append(json.RawMessage(nil), raw...)
 	var model, effort string
 	_ = json.Unmarshal(session["model"], &model)
 	_ = json.Unmarshal(session["reasoningEffort"], &effort)

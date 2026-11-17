@@ -58,32 +58,10 @@ func forkThread(id, cwd string, origin Thread, fetch func(string, any) (json.Raw
 	if origin.Status == nil || (origin.Status.Type != "idle" && origin.Status.Type != "notLoaded") {
 		return nil, errors.New("source thread is active or status unavailable; refresh before forking")
 	}
-	// Resuming a persisted active goal can start a turn before the fork defers it.
-	raw, err := fetch("thread/goal/get", map[string]any{"threadId": id})
-	if err != nil {
+	if err := checkInactiveGoal(id, fetch); err != nil {
 		return nil, err
 	}
-	var goalState struct {
-		Goal json.RawMessage `json:"goal"`
-	}
-	if json.Unmarshal(raw, &goalState) != nil || len(goalState.Goal) == 0 {
-		return nil, errors.New("source goal unavailable; refresh before forking")
-	}
-	if strings.TrimSpace(string(goalState.Goal)) != "null" {
-		var goal struct {
-			ThreadID string `json:"threadId"`
-			Status   string `json:"status"`
-		}
-		if json.Unmarshal(goalState.Goal, &goal) != nil || goal.ThreadID != id {
-			return nil, errors.New("source goal unavailable; refresh before forking")
-		}
-		switch goal.Status {
-		case "paused", "blocked", "usageLimited", "budgetLimited", "complete":
-		default:
-			return nil, errors.New("source goal is active or unavailable; pause it before forking")
-		}
-	}
-	raw, err = fetch("thread/resume", map[string]any{"threadId": id, "excludeTurns": true})
+	raw, err := fetch("thread/resume", map[string]any{"threadId": id, "excludeTurns": true})
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +161,35 @@ func copyForkPermissions(session map[string]json.RawMessage, params map[string]a
 		params["config"] = map[string]any{"sandbox_workspace_write.writable_roots": sandbox.Roots, "sandbox_workspace_write.network_access": sandbox.Network, "sandbox_workspace_write.exclude_tmpdir_env_var": sandbox.ExcludeTmp, "sandbox_workspace_write.exclude_slash_tmp": sandbox.ExcludeSlashTmp}
 	default:
 		return errors.New("cannot copy source permissions safely")
+	}
+	return nil
+}
+
+func checkInactiveGoal(id string, fetch func(string, any) (json.RawMessage, error)) error {
+	// Resuming a persisted active goal can start a turn.
+	raw, err := fetch("thread/goal/get", map[string]any{"threadId": id})
+	if err != nil {
+		return err
+	}
+	var goalState struct {
+		Goal json.RawMessage `json:"goal"`
+	}
+	if json.Unmarshal(raw, &goalState) != nil || len(goalState.Goal) == 0 {
+		return errors.New("source goal unavailable; refresh before continuing")
+	}
+	if strings.TrimSpace(string(goalState.Goal)) != "null" {
+		var goal struct {
+			ThreadID string `json:"threadId"`
+			Status   string `json:"status"`
+		}
+		if json.Unmarshal(goalState.Goal, &goal) != nil || goal.ThreadID != id {
+			return errors.New("source goal unavailable; refresh before continuing")
+		}
+		switch goal.Status {
+		case "paused", "blocked", "usageLimited", "budgetLimited", "complete":
+		default:
+			return errors.New("source goal is active or unavailable; pause it before continuing")
+		}
 	}
 	return nil
 }

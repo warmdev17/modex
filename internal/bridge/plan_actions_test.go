@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -18,6 +19,10 @@ func planFixture(t *testing.T, fail bool) (Caller, *[]string) {
 		p := map[string]any{}
 		_ = json.Unmarshal(encoded, &p)
 		switch method {
+		case "thread/read":
+			return json.RawMessage(`{"thread":{"id":"source","cwd":"/work","status":{"type":"idle"}}}`), nil
+		case "thread/goal/get":
+			return json.RawMessage(`{"goal":null}`), nil
 		case "thread/resume":
 			return json.RawMessage(`{"thread":{"id":"source","cwd":"/work","modelProvider":"third-party","projectId":"project"},"model":"custom-model","modelProvider":"third-party","reasoningEffort":"high","approvalPolicy":"on-request","approvalsReviewer":"user","activePermissionProfile":{"id":":workspace"},"sandbox":{"type":"workspaceWrite","networkAccess":false,"writableRoots":[]}}`), nil
 		case "thread/turns/list":
@@ -119,12 +124,19 @@ func TestPlanActionRejectsStaleAndWrongWorkspaceBeforeMutation(t *testing.T) {
 			caller, calls := planFixture(t, false)
 			p := planParams("implement")
 			p[field] = "wrong"
-			_, err := NewPlanActions(filepath.Join(t.TempDir(), "receipts"), caller).Respond(context.Background(), p)
+			if field == "cwd" {
+				p[field] = "/other"
+			}
+			dir := filepath.Join(t.TempDir(), "receipts")
+			_, err := NewPlanActions(dir, caller).Respond(context.Background(), p)
 			if err == nil {
 				t.Fatal("accepted invalid plan")
 			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("receipt created: %v", err)
+			}
 			for _, m := range *calls {
-				if m == "turn/start" || m == "thread/start" {
+				if m == "thread/resume" || m == "turn/start" || m == "thread/start" {
 					t.Fatal("mutated stale plan")
 				}
 			}
@@ -169,7 +181,7 @@ func TestPlanActionPublicCommandAndHistoryProjection(t *testing.T) {
 		case "modex/plan/respond":
 			return actions.Respond(ctx, values)
 		case "thread/read":
-			return json.RawMessage(`{"thread":{"id":"source","cwd":"/work"}}`), nil
+			return json.RawMessage(`{"thread":{"id":"source","cwd":"/work","status":{"type":"idle"}}}`), nil
 		case "modex/plan/state":
 			handled, err := actions.Handled("source", "turn", "plan")
 			raw, _ := json.Marshal(map[string]bool{"handled": handled})
@@ -236,5 +248,64 @@ func TestFreshPlanCopiesLegacyReadOnlyWithoutProfile(t *testing.T) {
 	}
 	if _, err := NewPlanActions(filepath.Join(t.TempDir(), "receipts"), legacy).Respond(context.Background(), planParams("fresh")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPlanActionRejectsUnverifiedGoalBeforeResume(t *testing.T) {
+	for _, tc := range []struct {
+		name, goal string
+		fail       bool
+	}{
+		{"active", `{"goal":{"threadId":"source","status":"active"}}`, false},
+		{"missing", `{}`, false}, {"malformed", `{"goal":false}`, false},
+		{"wrong-thread", `{"goal":{"threadId":"other","status":"paused"}}`, false},
+		{"unknown-status", `{"goal":{"threadId":"source","status":"unknown"}}`, false},
+		{"unreadable", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			caller, calls := planFixture(t, false)
+			dir := filepath.Join(t.TempDir(), "receipts")
+			wrapped := func(ctx context.Context, method string, p any) (json.RawMessage, error) {
+				if method == "thread/goal/get" {
+					if tc.fail {
+						return nil, errors.New("unreadable")
+					}
+					return json.RawMessage(tc.goal), nil
+				}
+				return caller(ctx, method, p)
+			}
+			_, err := NewPlanActions(dir, wrapped).Respond(context.Background(), planParams("stay"))
+			if err == nil {
+				t.Fatal("accepted unsafe goal")
+			}
+			for _, method := range *calls {
+				if method == "thread/resume" || method == "thread/start" || method == "turn/start" {
+					t.Fatalf("mutated unsafe source: %v", *calls)
+				}
+			}
+			if _, err := os.Stat(dir); !os.IsNotExist(err) {
+				t.Fatalf("receipt created: %v", err)
+			}
+		})
+	}
+}
+
+func TestPlanActionRejectsUnverifiedSourceStatus(t *testing.T) {
+	for _, status := range []string{`null`, `{}`, `{"type":"active"}`} {
+		t.Run(status, func(t *testing.T) {
+			caller, calls := planFixture(t, false)
+			wrapped := func(ctx context.Context, method string, p any) (json.RawMessage, error) {
+				if method == "thread/read" {
+					return json.RawMessage(`{"thread":{"id":"source","cwd":"/work","status":` + status + `}}`), nil
+				}
+				return caller(ctx, method, p)
+			}
+			if _, err := NewPlanActions(filepath.Join(t.TempDir(), "receipts"), wrapped).Respond(context.Background(), planParams("stay")); err == nil {
+				t.Fatal("accepted unsafe status")
+			}
+			if len(*calls) != 0 {
+				t.Fatalf("called after unsafe read: %v", *calls)
+			}
+		})
 	}
 }
