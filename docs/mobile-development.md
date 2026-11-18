@@ -72,3 +72,23 @@ Connect opens the selected host without automatically resuming its previous conv
 Long-press a session in the sidebar to open its conversation actions. Ordinary tap opens the conversation; archived rows retain the long-press menu. Archive preserves history, and Archived offers Restore. Delete requires confirmation, uses the native Codex API and can refuse a conversation whose history is still referenced by a fork; archive it instead. Fork creates an ordinary new branch and opens it without automatically starting a turn. Busy sessions and pending decisions must be settled first. Do not resubmit an action whose delivery is uncertain: refresh and inspect the list.
 
 Turn notices distinguish response-stream interruption, retries, exhausted retries, access/model/quota failures and terminal outcomes. They use safe fixed messages, never raw credential-bearing provider errors. Partial output remains available when a turn is interrupted. Interrupted from a shared Modex terminal is synchronized through the same backend; an independent Codex process is a separate event source and must not be assumed to provide instant live notifications to Android.
+
+## Android slash actions
+
+Type `/` as the whole draft to see Android commands, then type more letters to filter. Tap a suggestion, or enter a complete supported command and press Send. These actions run locally in Modex; they are not submitted as model prompts. Close the suggestions or press Back to keep the draft. Opening the sidebar hides the keyboard; its Back action takes priority over suggestions behind it.
+
+| Command | Android action |
+| --- | --- |
+| `/help` | Show command help. |
+| `/model` | Choose model and reasoning for the next turn. |
+| `/new` | Open the new-conversation dialog. |
+| `/resume` | Open the session sidebar. |
+| `/fork` | Fork the selected idle conversation without starting a turn. |
+| `/archive` | Archive the selected conversation. |
+| `/delete` | Open the existing permanent-delete confirmation. |
+| `/skills` | Open skills/plugins selection and bind the chosen reference to the prompt. |
+| `/copy` | Copy the latest completed Codex reply. |
+
+Unavailable actions stay disabled for the current connection/session state. Switching sessions retains their separate drafts; slash actions do not automatically resend prompts or decisions. Ordinary prose, multiline drafts and paths containing another slash remain normal prompt text. An unknown slash word is labelled as a message, not a native command; partial supported commands cannot be sent accidentally.
+
+Terminal controls such as `/vim`, `/keymap`, `/raw`, `/tui`, `/title`, `/statusline` and `/theme` are omitted. Compact, review, plan, goal, current-session permission changes and full native status are not exposed until their backend behavior is implemented. CLI `/stop` controls background terminals and is not an alias for interrupting a Modex turn.

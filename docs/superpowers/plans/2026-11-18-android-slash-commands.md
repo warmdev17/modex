@@ -14,14 +14,14 @@ Match only a whole single-token leading slash query, case insensitive; do not tr
 
 Use existing enable/gating rules: connected/history loaded; `/model` requires selected idle session; lifecycle must target selected thread in current active list and preserve action/busy/pending-decision guards and delete confirmation; copy only when an eligible completed assistant reply exists. Hide/disable unavailable choices with honest labels; do not bypass guards by sending a command as text. `/skills` opens existing picker directly without injecting a fake reference. Normal messages retain existing Send behavior.
 
-## Task 1 — coder-fe
+## Task 1 — primary inline (coder-fe usage quota unavailable)
 
-Owned: new SlashCommands.kt + SlashCommandsTest.kt; minimal ChatWorkspace.kt and existing reference-picker integration as necessary; one focused instrumented slash preview and TransportSmoke selector. No ViewModel/Go/build config, release, state or Git writes. Dependency: primary first integrates menu-polish into this worktree, then dispatches implementation.
+Owned: new SlashCommands.kt + SlashCommandsTest.kt; minimal ChatWorkspace.kt and existing reference-picker integration as necessary; one focused instrumented slash preview and TransportSmoke selector. No ViewModel/Go/build config, release, state or Git writes. The pure matcher/catalog and its tests are independent and may be implemented first. Integration touching existing UI waits until primary integrates the frozen menu-polish commit. This avoids overlapping source ownership.
 
-- [ ] Write and run failing matcher/gating tests: bare slash/all, prefix/case, exact command, embedded slash/path/multiline/no match; meaningful context guards. Prefer plain pure matcher tests and runtime checks over a test-only duplicate dispatcher.
-- [ ] Implement minimal catalog/matcher and local action routing, reuse dialogs and picker. Include icons, descriptions, no unsupported commands, no prompt dispatch on exact/selected command.
-- [ ] Exercise real touch and text entry for `/`, filtering, keyboard layout, model/help/new/resume and cancel preserving draft, `/skills`, lifecycle delete cancel/confirmation and no accidental model request. Use synthetic in-memory callbacks only.
-- [ ] Run affected JVM/build/lint and instrumented preview; source freeze/report. Primary commits after independent review.
+- [x] Write and run failing matcher/gating tests: bare slash/all, prefix/case, exact command, embedded slash/path/multiline/no match; meaningful context guards. Prefer plain pure matcher tests and runtime checks over a test-only duplicate dispatcher.
+- [x] Implement minimal catalog/matcher and local action routing, reuse dialogs and picker. Include icons, descriptions, no unsupported commands, no prompt dispatch on exact/selected command.
+- [x] Exercise real touch and text entry for `/`, filtering, keyboard layout, model/help/new/resume and cancel preserving draft, `/skills`, lifecycle delete cancel/confirmation and no accidental model request. Use synthetic in-memory callbacks only.
+- [x] Run affected JVM/build/lint and instrumented preview; source freeze/report. Primary commits after independent review.
 
 ## Task 2 — primary delivery/integration
 
