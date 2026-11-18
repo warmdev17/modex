@@ -7,6 +7,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.BorderStroke
@@ -158,6 +159,12 @@ internal fun ChatWorkspace(
     var drafts by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val context = LocalContext.current
+    fun openSessions() {
+        keyboard?.hide()
+        scope.launch { drawer.open() }
+        if (connected) onRefresh()
+    }
     var editing by remember(selected) { mutableStateOf<String?>(null) }
     val prompt = drafts[selected].orEmpty()
     var referenceDrafts by rememberSaveable(host) { mutableStateOf(hashMapOf<String, String>()) }
@@ -189,12 +196,39 @@ internal fun ChatWorkspace(
     LaunchedEffect(newChat) { if (newChat) { model = hostModel; newEffort = defaultEffort(hostModel) } }
     var showModel by rememberSaveable { mutableStateOf(false) }
     var modelInput by rememberSaveable { mutableStateOf("") }
+    fun openModel() {
+        modelInput = sessionModel; effortInput = sessionEffort.ifBlank { defaultEffort(sessionModel) }; showModel = true
+    }
+    var commandHelp by remember(selected) { mutableStateOf(false) }
     val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
     val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" } }
     val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
     LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
+    val commandSessionReady = canSwitch && selected.isNotBlank() && !busy && selected !in runningThreads && selectedDecisions.isEmpty()
+    val copyText = messages.lastOrNull { it.role == "Codex" && it.status in listOf("", "completed") && it.text.isNotBlank() }?.text.orEmpty()
+    fun commandEnabled(command: AndroidSlashCommand): Boolean = when (command) {
+        AndroidSlashCommand.HELP -> true
+        AndroidSlashCommand.NEW, AndroidSlashCommand.RESUME -> canSwitch
+        AndroidSlashCommand.MODEL, AndroidSlashCommand.SKILLS -> commandSessionReady
+        AndroidSlashCommand.FORK, AndroidSlashCommand.ARCHIVE, AndroidSlashCommand.DELETE -> commandSessionReady && selected in threads && !archived && selected !in actionThreads
+        AndroidSlashCommand.COPY -> selected.isNotBlank() && !historyLoading && !busy && copyText.isNotBlank()
+    }
+    fun command(command: AndroidSlashCommand) {
+        keyboard?.hide()
+        when (command) {
+            AndroidSlashCommand.HELP -> commandHelp = true
+            AndroidSlashCommand.MODEL -> openModel()
+            AndroidSlashCommand.NEW -> openNewChat()
+            AndroidSlashCommand.RESUME -> openSessions()
+            AndroidSlashCommand.FORK -> sessionAction("fork", selected)
+            AndroidSlashCommand.ARCHIVE -> sessionAction("archive", selected)
+            AndroidSlashCommand.DELETE -> sessionAction("delete", selected)
+            AndroidSlashCommand.COPY -> copyMessage(context, copyText)
+            AndroidSlashCommand.SKILLS -> Unit // The composer owns the reference picker.
+        }
+    }
     val status = when { connecting -> "Connecting…"; !connected -> "Disconnected"; historyLoading -> "Loading history…"; busy -> "Working…"; else -> "Connected · SSH" }
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -264,7 +298,7 @@ internal fun ChatWorkspace(
     ) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = { scope.launch { drawer.open() }; if (connected) onRefresh() }) { ChatGlyph(ChatIcon.Menu,"Open sessions") }
+                IconButton(onClick = ::openSessions) { ChatGlyph(ChatIcon.Menu,"Open sessions") }
                 Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                     Text(if (selected.isBlank()) "modex" else titles[selected] ?: "Conversation", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                     Text(if (onHome != null) "$host · $status" else status, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = if (connected) Mocha.Blue else Mocha.Subtext)
@@ -405,7 +439,7 @@ internal fun ChatWorkspace(
             PromptComposer(
                 prompt, { updatePrompt(it) }, busy,
                 (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank(),
-                { modelInput = sessionModel; effortInput = sessionEffort.ifBlank { defaultEffort(sessionModel) }; showModel = true },
+                ::openModel,
                 connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking,
                 attachments, attachmentWorking, attachmentProgress, attachmentError,
                 connected && selected.isNotBlank() && !busy && !attachmentWorking,
@@ -414,12 +448,18 @@ internal fun ChatWorkspace(
                 focus = focus, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
                 referenceEnabled = connected && selected.isNotBlank() && !historyLoading, chosenReferences = chosenReferences,
-                onAddReference = ::addReference, onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences
+                onAddReference = ::addReference, onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
+                suggestionsEnabled = !drawer.isOpen, commandEnabled = ::commandEnabled, onCommand = ::command
             ) {
                 if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) }, chosenReferences)) updatePrompt("")
             }
         }
     }
+    if (commandHelp) AlertDialog(
+        onDismissRequest = { commandHelp = false }, title = { Text("Android commands") },
+        text = { Text(AndroidSlashCommand.entries.joinToString("\n\n") { "/${it.token}\n${it.description}" }, modifier = Modifier.verticalScroll(rememberScrollState())) },
+        confirmButton = { TextButton(onClick = { commandHelp = false }) { Text("Close") } }
+    )
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -492,27 +532,47 @@ private fun PromptComposer(
     modelColor: Color, focus: FocusRequester, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
     referenceEnabled: Boolean, chosenReferences: List<PromptReference>, onAddReference: (PromptReference) -> Unit,
-    onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit, onSend: () -> Unit
+    onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
+    suggestionsEnabled: Boolean, commandEnabled: (AndroidSlashCommand) -> Boolean, onCommand: (AndroidSlashCommand) -> Unit, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     var editor by remember(draftKey) { mutableStateOf(TextFieldValue(prompt, TextRange(prompt.length))) }
     var fieldFocused by remember { mutableStateOf(false) }
     var dismissedQuery by remember(draftKey) { mutableStateOf<Pair<String, Int>?>(null) }
+    var manualReferences by remember(draftKey) { mutableStateOf(false) }
+    var dismissedCommands by remember(draftKey) { mutableStateOf<String?>(null) }
     LaunchedEffect(prompt, draftKey) { if (editor.text != prompt) editor = TextFieldValue(prompt, TextRange(prompt.length)) }
     val query = referenceQuery(editor.text, editor.selection.start, editor.selection.end)
-    val showReferences = referenceEnabled && fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)
-    BackHandler(showReferences) { dismissedQuery = editor.text to editor.selection.start }
+    val showReferences = suggestionsEnabled && referenceEnabled && (manualReferences || (fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)))
+    fun closeReferences() { manualReferences = false; dismissedQuery = editor.text to editor.selection.start }
+    val commands = slashSuggestions(editor.text)
+    val showCommands = suggestionsEnabled && fieldFocused && commands != null && dismissedCommands != editor.text && !showReferences
+    BackHandler(showReferences || showCommands) {
+        if (showReferences) closeReferences() else dismissedCommands = editor.text
+    }
     fun changeEditor(value: TextFieldValue) {
-        if (value.text != editor.text || value.selection != editor.selection) dismissedQuery = null
+        if (value.text != editor.text || value.selection != editor.selection) { dismissedQuery = null; dismissedCommands = null }
         editor = value
         onChange(value.text)
     }
+    fun runCommand(command: AndroidSlashCommand) {
+        if (!commandEnabled(command)) return
+        changeEditor(TextFieldValue(""))
+        if (command == AndroidSlashCommand.SKILLS) {
+            manualReferences = true; onRefreshReferences(); focus.requestFocus()
+        } else onCommand(command)
+    }
+    val exactCommand = exactSlashCommand(editor.text)
+    val sendEnabled = if (exactCommand != null) commandEnabled(exactCommand) else enabled && commands.isNullOrEmpty() && (prompt.isNotBlank() || attachments.isNotEmpty())
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
-            if (showReferences && query != null) ReferencePicker(referenceCatalog, query.query, referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
-                onDismiss = { dismissedQuery = editor.text to editor.selection.start },
+            if (showCommands && commands != null) SlashCommandPicker(commands, commandEnabled, { dismissedCommands = editor.text }, ::runCommand)
+            if (showReferences) ReferencePicker(referenceCatalog, query?.query.orEmpty(), referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
+                onDismiss = ::closeReferences,
                 onSelect = { reference ->
-                    val (text, cursor) = insertReference(editor.text, query, reference)
+                    val range = query ?: ReferenceQuery(editor.selection.min, editor.selection.max, "")
+                    val (text, cursor) = insertReference(editor.text, range, reference)
+                    manualReferences = false
                     onAddReference(reference)
                     changeEditor(TextFieldValue(text, TextRange(cursor)))
                     focus.requestFocus()
@@ -563,7 +623,7 @@ private fun PromptComposer(
                         }
                     }
                 }
-                FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else enabled && (prompt.isNotBlank() || attachments.isNotEmpty()), shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
+                FilledIconButton(onClick = if (busy) onStop else ({ if (exactCommand != null) runCommand(exactCommand) else onSend() }), enabled = if (busy) stopEnabled && !stopping else sendEnabled, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (busy) Mocha.Red else Mocha.Blue, contentColor = Mocha.Base,
                         disabledContainerColor = if (busy) Mocha.Red else Mocha.Surface, disabledContentColor = Mocha.Base)) {
                     if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp, color = Mocha.Base) else if (busy) ChatGlyph(ChatIcon.Stop, "Stop response") else ChatGlyph(ChatIcon.Send,"Send message")

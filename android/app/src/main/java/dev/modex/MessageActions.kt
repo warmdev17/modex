@@ -22,6 +22,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.delay
 
+internal fun copyMessage(context: Context, text: String) {
+    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Message", text))
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content: @Composable () -> Unit) {
@@ -29,12 +33,11 @@ internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content:
     var selection by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
-    fun copy(value: String) { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Message", value)) }
     Box(Modifier.fillMaxWidth().combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = if (onEdit != null) null else LocalIndication.current, onClick = {}, onLongClickLabel = "Message actions", onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); menu = true })) {
         content()
         ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
             if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, leadingIcon = { ChatGlyph(ChatIcon.Edit) }, onClick = { menu = false; onEdit() })
-            DropdownMenuItem(text = { Text("Copy") }, leadingIcon = { ChatGlyph(ChatIcon.Copy) }, onClick = { copy(text); menu = false })
+            DropdownMenuItem(text = { Text("Copy") }, leadingIcon = { ChatGlyph(ChatIcon.Copy) }, onClick = { copyMessage(context, text); menu = false })
             DropdownMenuItem(text = { Text("Select text") }, leadingIcon = { ChatGlyph(ChatIcon.SelectText) }, onClick = { selection = text; menu = false })
         }
     }
@@ -45,7 +48,7 @@ internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content:
                     Row(Modifier.fillMaxWidth().padding(8.dp)) {
                         IconButton(onClick = { selection = null }) { ChatGlyph(ChatIcon.Close, "Close text selection") }
                         Text("Select text", modifier = Modifier.weight(1f).padding(12.dp), style = MaterialTheme.typography.titleMedium)
-                        TextButton(onClick = { copy(snapshot) }) { Text("Copy all") }
+                        TextButton(onClick = { copyMessage(context, snapshot) }) { Text("Copy all") }
                     }
                     HorizontalDivider(color = Mocha.Surface)
                     SelectionContainer { Text(snapshot, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp)) }
