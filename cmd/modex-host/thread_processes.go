@@ -7,8 +7,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/warmdev/modex/internal/bridge"
+	"github.com/warmdev/modex/internal/diagnostic"
 )
 
 type threadWorker struct {
@@ -17,6 +19,9 @@ type threadWorker struct {
 	key, turn string
 	fresh     bool
 	busy      bool
+	cacheMu   sync.Mutex
+	session   map[string]json.RawMessage
+	usage     json.RawMessage
 }
 
 // Each writer has its own process: closing an idle writer must not interrupt another turn.
@@ -61,6 +66,33 @@ func (s *threadProcesses) start(ctx context.Context) (*threadWorker, error) {
 	})
 	p.SetNotificationHandler(func(method string, params json.RawMessage) {
 		w.decisions.Resolve(method, params)
+		w.cacheMu.Lock()
+		if invalidatesSession(method, params) {
+			var event struct {
+				ThreadID string `json:"threadId"`
+			}
+			var thread struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(params, &event)
+			_ = json.Unmarshal(w.session["thread"], &thread)
+			if event.ThreadID != "" && event.ThreadID == thread.ID {
+				w.session = nil
+				w.usage = nil
+			}
+		}
+		if method == "thread/tokenUsage/updated" {
+			var v struct {
+				Usage json.RawMessage `json:"tokenUsage"`
+			}
+			if json.Unmarshal(params, &v) == nil {
+				w.usage = bridge.SafeUsage(v.Usage)
+			}
+		}
+		if method == "thread/settings/updated" {
+			updateSharedSettings(&sharedSession{settings: w.session}, params)
+		}
+		w.cacheMu.Unlock()
 		s.emit(method, params)
 		if method == "turn/completed" {
 			go s.complete(w, params)
@@ -143,6 +175,56 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 		}
 		return json.RawMessage(`{"updated":true}`), nil
 	}
+	if method == "modex/thread/status" || method == "modex/thread/mode" {
+		w := s.workers[id]
+		if w == nil {
+			return nil, bridge.ErrSessionNotOwned
+		}
+		w.cacheMu.Lock()
+		owned := w.session != nil
+		w.cacheMu.Unlock()
+		if !owned {
+			return nil, bridge.ErrSessionNotOwned
+		}
+		if method == "modex/thread/mode" {
+			if w.busy || len(w.decisions.List()) != 0 {
+				return nil, bridge.ErrSessionBusy
+			}
+			mode, _ := p["mode"].(string)
+			model, _ := p["model"].(string)
+			effort, _ := p["effort"].(string)
+			var nativeEffort any
+			if effort != "" {
+				nativeEffort = effort
+			}
+			requestCtx, cancel := modeRequestContext(ctx)
+			_, err := w.process.CallPersistent(requestCtx, "thread/settings/update", map[string]any{"threadId": id, "collaborationMode": map[string]any{"mode": mode, "settings": map[string]any{"model": model, "reasoning_effort": nativeEffort, "developer_instructions": nil}}})
+			cancel()
+			if err != nil {
+				w.cacheMu.Lock()
+				delete(w.session, "collaboration_mode")
+				w.cacheMu.Unlock()
+				return nil, err
+			}
+			w.cacheMu.Lock()
+			if w.session != nil {
+				w.session["collaboration_mode"], _ = json.Marshal(mode)
+				w.session["model"], _ = json.Marshal(model)
+				if effort != "" {
+					w.session["effort"], _ = json.Marshal(effort)
+				} else {
+					delete(w.session, "effort")
+				}
+			}
+			w.cacheMu.Unlock()
+		}
+		w.cacheMu.Lock()
+		defer w.cacheMu.Unlock()
+		if w.session == nil {
+			return nil, errors.New("session settings unavailable; reload session")
+		}
+		return json.Marshal(map[string]any{"session": w.session, "token_usage": w.usage})
+	}
 	if method == "turn/interrupt" {
 		turn, _ := p["turnId"].(string)
 		w := s.workers[id]
@@ -183,6 +265,7 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 				s.closeWorker(w, false)
 				return nil, errors.New("invalid reacquired session")
 			}
+			w.setSession(raw)
 			s.workers[id] = w
 		}
 	}
@@ -191,6 +274,10 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 	}
 	raw, err := w.process.Call(ctx, method, params)
 	if err != nil {
+		var rejection *diagnostic.RPCError
+		if method == "turn/start" && errors.As(err, &rejection) {
+			w.busy = false
+		}
 		// A turn/start error can be an uncertain dispatch; preserve its worker until shutdown.
 		if created && method != "turn/start" {
 			s.closeWorker(w, false)
@@ -223,6 +310,7 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 		}
 		return nil, errors.New("invalid session response")
 	}
+	w.setSession(raw)
 	s.workers[r.Thread.ID] = w
 	if method == "thread/start" {
 		w.fresh = true
@@ -244,4 +332,22 @@ func (s *threadProcesses) Close() {
 		s.closeWorker(w, false)
 		delete(s.workers, id)
 	}
+}
+
+func modeRequestContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, 20*time.Second)
+}
+
+func (w *threadWorker) setSession(raw json.RawMessage) {
+	safe, err := bridge.SafeSession(raw)
+	if err != nil {
+		return
+	}
+	var session map[string]json.RawMessage
+	if json.Unmarshal(safe, &session) != nil {
+		return
+	}
+	w.cacheMu.Lock()
+	w.session = session
+	w.cacheMu.Unlock()
 }

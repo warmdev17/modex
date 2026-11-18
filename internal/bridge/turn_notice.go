@@ -9,6 +9,36 @@ import (
 
 // This boundary is mobile-only: native TUI clients retain the original event.
 func mobileEventParams(method string, raw json.RawMessage) (json.RawMessage, error) {
+	if method == "thread/settings/updated" || method == "thread/tokenUsage/updated" || method == "account/rateLimits/updated" {
+		var event struct {
+			ThreadID string          `json:"threadId"`
+			TurnID   string          `json:"turnId"`
+			Settings json.RawMessage `json:"threadSettings"`
+			Usage    json.RawMessage `json:"tokenUsage"`
+			Limits   json.RawMessage `json:"rateLimits"`
+		}
+		if json.Unmarshal(raw, &event) != nil {
+			return nil, errors.New("invalid Codex event")
+		}
+		switch method {
+		case "thread/settings/updated":
+			var native struct {
+				Mode struct {
+					Mode string `json:"mode"`
+				} `json:"collaborationMode"`
+				Model  string  `json:"model"`
+				Effort *string `json:"effort"`
+			}
+			if json.Unmarshal(event.Settings, &native) != nil {
+				return nil, errors.New("invalid settings event")
+			}
+			return json.Marshal(map[string]any{"threadId": event.ThreadID, "threadSettings": map[string]any{"collaborationMode": map[string]string{"mode": native.Mode.Mode}, "model": native.Model, "effort": native.Effort}})
+		case "thread/tokenUsage/updated":
+			return json.Marshal(map[string]any{"threadId": event.ThreadID, "turnId": event.TurnID, "tokenUsage": SafeUsage(event.Usage)})
+		default:
+			return json.Marshal(map[string]any{"rateLimits": safeRateLimits(append(append([]byte(`{"rateLimits":`), event.Limits...), '}'))})
+		}
+	}
 	if method != "error" && method != "turn/completed" {
 		return raw, nil
 	}
