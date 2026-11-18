@@ -7,9 +7,16 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +46,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,7 +55,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Terminal, Settings, Activity }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color = LocalContentColor.current) {
@@ -74,11 +83,20 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color
             ChatIcon.Terminal -> { line(3f,4f,21f,4f); line(21f,4f,21f,20f); line(21f,20f,3f,20f); line(3f,20f,3f,4f); line(7f,8f,11f,12f); line(11f,12f,7f,16f); line(13f,16f,17f,16f) }
             ChatIcon.Settings -> { line(4f,6f,8f,6f); line(12f,6f,20f,6f); line(4f,12f,14f,12f); line(18f,12f,20f,12f); line(4f,18f,6f,18f); line(10f,18f,20f,18f); for ((x,y) in listOf(10f to 6f,16f to 12f,8f to 18f)) drawCircle(color, 2f*u, Offset(x*u,y*u), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8f*u)) }
             ChatIcon.Model -> Unit
+            ChatIcon.ModelChoice -> { line(6f,6f,18f,6f); line(18f,6f,18f,18f); line(18f,18f,6f,18f); line(6f,18f,6f,6f); for (v in listOf(9f,12f,15f)) { line(v,3f,v,6f); line(v,18f,v,21f); line(3f,v,6f,v); line(18f,v,21f,v) } }
             ChatIcon.Attach -> { line(5f,12f,19f,12f); line(12f,5f,12f,19f) }
             ChatIcon.File -> { line(5f,3f,14f,3f); line(14f,3f,19f,8f); line(19f,8f,19f,21f); line(19f,21f,5f,21f); line(5f,21f,5f,3f); line(14f,3f,14f,8f); line(14f,8f,19f,8f) }
             ChatIcon.Image -> { line(3f,4f,21f,4f); line(21f,4f,21f,20f); line(21f,20f,3f,20f); line(3f,20f,3f,4f); line(3f,17f,9f,11f); line(9f,11f,15f,17f); line(13f,15f,17f,11f); line(17f,11f,21f,15f); drawCircle(color,1.5f*u,Offset(16*u,8*u)) }
             ChatIcon.Phone -> { line(7f,3f,17f,3f); line(17f,3f,17f,21f); line(17f,21f,7f,21f); line(7f,21f,7f,3f); line(11f,18f,13f,18f) }
             ChatIcon.Computer -> { line(3f,4f,21f,4f); line(21f,4f,21f,16f); line(21f,16f,3f,16f); line(3f,16f,3f,4f); line(12f,16f,12f,21f); line(8f,21f,16f,21f) }
+            ChatIcon.Archive -> { line(4f,7f,20f,7f); line(5f,7f,6f,20f); line(6f,20f,18f,20f); line(18f,20f,19f,7f); line(3f,4f,21f,4f); line(10f,11f,14f,11f) }
+            ChatIcon.Restore -> { line(4f,7f,20f,7f); line(5f,7f,6f,20f); line(6f,20f,18f,20f); line(18f,20f,19f,7f); line(3f,4f,21f,4f); line(12f,16f,12f,10f); line(9f,13f,12f,10f); line(12f,10f,15f,13f) }
+            ChatIcon.Fork -> { line(7f,4f,7f,9f); line(17f,4f,17f,8f); line(17f,8f,12f,13f); line(12f,13f,12f,20f); line(7f,9f,12f,14f); drawCircle(color, 1.7f*u, Offset(7*u,4*u)); drawCircle(color, 1.7f*u, Offset(17*u,4*u)); drawCircle(color, 1.7f*u, Offset(12*u,20*u)) }
+            ChatIcon.Delete -> { line(5f,7f,19f,7f); line(8f,7f,8f,20f); line(8f,20f,16f,20f); line(16f,20f,16f,7f); line(9f,4f,15f,4f); line(11f,10f,11f,17f); line(13f,10f,13f,17f) }
+            ChatIcon.Edit -> { line(5f,19f,9f,18f); line(9f,18f,20f,7f); line(20f,7f,17f,4f); line(17f,4f,6f,15f); line(6f,15f,5f,19f); line(15f,6f,18f,9f) }
+            ChatIcon.Copy -> { line(8f,7f,20f,7f); line(20f,7f,20f,20f); line(20f,20f,8f,20f); line(8f,20f,8f,7f); line(4f,16f,4f,4f); line(4f,4f,16f,4f) }
+            ChatIcon.SelectText -> { line(5f,4f,5f,20f); line(5f,4f,8f,4f); line(5f,20f,8f,20f); line(19f,4f,19f,20f); line(16f,4f,19f,4f); line(16f,20f,19f,20f); line(9f,8f,15f,8f); line(9f,12f,15f,12f); line(9f,16f,15f,16f) }
+            ChatIcon.Disconnect -> { line(4f,4f,11f,4f); line(4f,4f,4f,20f); line(4f,20f,11f,20f); line(12f,12f,21f,12f); line(17f,8f,21f,12f); line(21f,12f,17f,16f) }
         }
     }
 }
@@ -253,11 +271,11 @@ internal fun ChatWorkspace(
                 }
                 Box {
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Session settings") }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true })
-                        if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, onClick = { menu = false; onHome() })
-                        DropdownMenuItem(text = { Text("Connection settings") }, onClick = { menu = false; onConnection() })
-                        if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, onClick = { menu = false; onDisconnect() })
+                    ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true })
+                        if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, onClick = { menu = false; onHome() })
+                        DropdownMenuItem(text = { Text("Connection settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, onClick = { menu = false; onConnection() })
+                        if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, leadingIcon = { ChatGlyph(ChatIcon.Disconnect) }, onClick = { menu = false; onDisconnect() })
                     }
                 }
             }
@@ -412,10 +430,10 @@ internal fun ChatWorkspace(
                     Text(registeredProjects.firstOrNull { it.id == newProjectId }?.name ?: newWorkspace.ifBlank { "Outside projects" }, Modifier.weight(1f).padding(horizontal = 8.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     ChatGlyph(ChatIcon.ChevronDown)
                 }
-                DropdownMenu(expanded = projectMenu, onDismissRequest = { projectMenu = false }) {
-                    DropdownMenuItem(text = { Text("Outside projects") }, onClick = { newWorkspace = ""; newProjectId = ""; projectMenu = false })
+                ModexDropdownMenu(expanded = projectMenu, onDismissRequest = { projectMenu = false }) {
+                    DropdownMenuItem(text = { Text("Outside projects") }, leadingIcon = { ChatGlyph(ChatIcon.Folder) }, onClick = { newWorkspace = ""; newProjectId = ""; projectMenu = false })
                     registeredProjects.forEach { project -> project.roots.forEach { root ->
-                        DropdownMenuItem(text = { Column { Text(project.name); Text(root, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) } }, onClick = { newWorkspace = root; newProjectId = project.id; projectMenu = false })
+                        DropdownMenuItem(text = { Column { Text(project.name); Text(root, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) } }, leadingIcon = { ChatGlyph(ChatIcon.Folder) }, onClick = { newWorkspace = root; newProjectId = project.id; projectMenu = false })
                     } }
                 }
             }
@@ -520,7 +538,7 @@ private fun PromptComposer(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { attachMenu = true }, enabled = attachEnabled) { ChatGlyph(ChatIcon.Attach, "Attach files") }
-                    DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                    ModexDropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                         DropdownMenuItem(text = { Text("From this phone") }, leadingIcon = { ChatGlyph(ChatIcon.Phone) }, enabled = attachEnabled, onClick = { attachMenu = false; onPhoneFiles() })
                         DropdownMenuItem(text = { Text("From connected computer") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, enabled = attachEnabled, onClick = { attachMenu = false; onRemoteFiles() })
                         DropdownMenuItem(text = { Text("Skills & plugins") }, leadingIcon = { ChatGlyph(ChatIcon.Skill) }, enabled = referenceEnabled, onClick = {
@@ -555,24 +573,33 @@ private fun PromptComposer(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, enabled: Boolean, running: Boolean, modifier: Modifier = Modifier,
     archived: Boolean = false, working: Boolean = false, canFork: Boolean = true, onAction: (String, String) -> Unit = { _, _ -> }, onClick: () -> Unit) {
     var menu by remember(id, archived) { mutableStateOf(false) }
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Surface(onClick = onClick, enabled = enabled && !archived && !working, color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f).semantics { this.selected = selected }) {
+    val haptic = LocalHapticFeedback.current
+    val openActions = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); menu = true }
+    val actionLabel = "Actions for ${title ?: id}"
+    val interaction = if (archived) {
+        Modifier.pointerInput(enabled, working, id) { if (enabled && !working) detectTapGestures(onLongPress = { openActions() }) }
+            .then(if (enabled && !working) Modifier.semantics { onLongClick(actionLabel) { openActions(); true } } else Modifier)
+    } else Modifier.combinedClickable(
+        interactionSource = remember { MutableInteractionSource() }, indication = LocalIndication.current,
+        enabled = enabled && !working, onClick = onClick,
+        onLongClickLabel = actionLabel, onLongClick = openActions,
+    )
+    Box(modifier.fillMaxWidth()) {
+        Surface(color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().then(interaction).semantics(mergeDescendants = true) { this.selected = selected }) {
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 if (running || working) CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = if (working) "Session action pending" else "Session running" }, strokeWidth = 2.dp, color = if (selected) Mocha.Base else Mocha.Blue)
             }
         }
-        Box {
-            IconButton(onClick = { menu = true }, enabled = enabled && !working) { ChatGlyph(ChatIcon.More, "Actions for ${title ?: id}") }
-            DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text(if (archived) "Restore" else "Archive") }, onClick = { menu = false; onAction(if (archived) "unarchive" else "archive", id) })
-                if (!archived) DropdownMenuItem(text = { Text("Fork") }, enabled = !running && canFork, onClick = { menu = false; onAction("fork", id) })
-                DropdownMenuItem(text = { Text("Delete", color = Mocha.Red) }, onClick = { menu = false; onAction("delete", id) })
-            }
+        ModexDropdownMenu(menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text(if (archived) "Restore" else "Archive") }, leadingIcon = { ChatGlyph(if (archived) ChatIcon.Restore else ChatIcon.Archive) }, onClick = { menu = false; onAction(if (archived) "unarchive" else "archive", id) })
+            if (!archived) DropdownMenuItem(text = { Text("Fork") }, leadingIcon = { ChatGlyph(ChatIcon.Fork) }, enabled = !running && canFork, onClick = { menu = false; onAction("fork", id) })
+            DropdownMenuItem(text = { Text("Delete", color = Mocha.Red) }, leadingIcon = { ChatGlyph(ChatIcon.Delete, color = Mocha.Red) }, onClick = { menu = false; onAction("delete", id) })
         }
     }
 }

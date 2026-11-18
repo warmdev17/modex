@@ -33,11 +33,11 @@ internal fun ModelPicker(models: List<ModelOption>, status: String, value: Strin
                 Text(models.firstOrNull { it.model == value }?.name ?: value.ifBlank { "Choose model" }, modifier = Modifier.weight(1f))
                 Text("▾")
             }
-            DropdownMenu(expanded, { expanded = false }, modifier = Modifier.heightIn(max = 280.dp)) {
+            ModexDropdownMenu(expanded, { expanded = false }, modifier = Modifier.heightIn(max = 280.dp)) {
                 models.forEach { model ->
-                    DropdownMenuItem(text = { Column { Text(model.name); if (model.name != model.model) Text(model.model, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) } }, onClick = { custom = false; onChange(model.model); expanded = false })
+                    DropdownMenuItem(text = { Column { Text(model.name); if (model.name != model.model) Text(model.model, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) } }, leadingIcon = { ChatGlyph(ChatIcon.ModelChoice) }, onClick = { custom = false; onChange(model.model); expanded = false })
                 }
-                DropdownMenuItem(text = { Text("Custom model ID…") }, onClick = { custom = true; expanded = false })
+                DropdownMenuItem(text = { Text("Custom model ID…") }, leadingIcon = { ChatGlyph(ChatIcon.Edit) }, onClick = { custom = true; expanded = false })
             }
         }
         if (status.isNotEmpty()) Text(status, style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)

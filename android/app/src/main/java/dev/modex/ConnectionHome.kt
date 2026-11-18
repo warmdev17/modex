@@ -129,9 +129,9 @@ internal fun ConnectionHome() {
                                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Box {
                                             IconButton(onClick = { actions = true }) { ChatGlyph(ChatIcon.More, "Manage ${host.name}") }
-                                            DropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
-                                                DropdownMenuItem(text = { Text("Edit host") }, onClick = { actions = false; opened = host.id; editor = true })
-                                                DropdownMenuItem(text = { Text("Remove host", color = Mocha.Red) }, onClick = { actions = false; delete = host.id })
+                                            ModexDropdownMenu(expanded = actions, onDismissRequest = { actions = false }) {
+                                                DropdownMenuItem(text = { Text("Edit host") }, leadingIcon = { ChatGlyph(ChatIcon.Edit) }, onClick = { actions = false; opened = host.id; editor = true })
+                                                DropdownMenuItem(text = { Text("Remove host", color = Mocha.Red) }, leadingIcon = { ChatGlyph(ChatIcon.Delete, color = Mocha.Red) }, onClick = { actions = false; delete = host.id })
                                             }
                                         }
                                         Spacer(Modifier.weight(1f))

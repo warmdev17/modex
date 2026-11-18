@@ -32,10 +32,10 @@ internal fun MessageActions(text: String, onEdit: (() -> Unit)? = null, content:
     fun copy(value: String) { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Message", value)) }
     Box(Modifier.fillMaxWidth().combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = if (onEdit != null) null else LocalIndication.current, onClick = {}, onLongClickLabel = "Message actions", onLongClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); menu = true })) {
         content()
-        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-            if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, onClick = { menu = false; onEdit() })
-            DropdownMenuItem(text = { Text("Copy") }, onClick = { copy(text); menu = false })
-            DropdownMenuItem(text = { Text("Select text") }, onClick = { selection = text; menu = false })
+        ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            if (onEdit != null) DropdownMenuItem(text = { Text("Edit") }, leadingIcon = { ChatGlyph(ChatIcon.Edit) }, onClick = { menu = false; onEdit() })
+            DropdownMenuItem(text = { Text("Copy") }, leadingIcon = { ChatGlyph(ChatIcon.Copy) }, onClick = { copy(text); menu = false })
+            DropdownMenuItem(text = { Text("Select text") }, leadingIcon = { ChatGlyph(ChatIcon.SelectText) }, onClick = { selection = text; menu = false })
         }
     }
     selection?.let { snapshot ->
