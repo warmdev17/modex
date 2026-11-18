@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import org.json.JSONObject
 
 internal enum class ChatIcon { Menu, New, Send, More, Close, Model, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
@@ -360,6 +361,12 @@ internal fun ChatWorkspace(
                 if (olderHistoryLoading || requestingOlder) return@LaunchedEffect
                 // Observe rendered growth too: streaming text keeps expanding after its data arrives.
                 snapshotFlow { Triple(scroll.layoutInfo, followLatest, scroll.isScrollInProgress) }
+                    // Forced remeasure replaces layoutInfo even when a collapsed viewport cannot scroll.
+                    .distinctUntilChangedBy { (layout, following, scrolling) ->
+                        Triple(layout.totalItemsCount to layout.viewportSize,
+                            layout.visibleItemsInfo.map { Triple(it.index, it.offset, it.size) },
+                            following to scrolling)
+                    }
                     .collect { (layout, following, scrolling) ->
                         if ((openAtLatest || following) && !scrolling && layout.totalItemsCount > 0 &&
                             (openAtLatest || scroll.canScrollForward)) {
@@ -566,8 +573,11 @@ private fun PromptComposer(
     val sendEnabled = if (exactCommand != null) commandEnabled(exactCommand) else enabled && commands.isNullOrEmpty() && (prompt.isNotBlank() || attachments.isNotEmpty())
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
-            if (showCommands && commands != null) SlashCommandPicker(commands, commandEnabled, { dismissedCommands = editor.text }, ::runCommand)
-            if (showReferences) ReferencePicker(referenceCatalog, query?.query.orEmpty(), referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
+            if (showCommands && commands != null) Box(Modifier.weight(1f, fill = false)) {
+                SlashCommandPicker(commands, commandEnabled, { dismissedCommands = editor.text }, ::runCommand)
+            }
+            if (showReferences) Box(Modifier.weight(1f, fill = false)) {
+                ReferencePicker(referenceCatalog, query?.query.orEmpty(), referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
                 onDismiss = ::closeReferences,
                 onSelect = { reference ->
                     val range = query ?: ReferenceQuery(editor.selection.min, editor.selection.max, "")
@@ -577,6 +587,7 @@ private fun PromptComposer(
                     changeEditor(TextFieldValue(text, TextRange(cursor)))
                     focus.requestFocus()
                 })
+            }
             if (chosenReferences.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 chosenReferences.forEach { reference ->
                     InputChip(selected = true, colors = InputChipDefaults.inputChipColors(selectedContainerColor = Mocha.Surface, selectedLabelColor = Mocha.Blue, selectedLeadingIconColor = Mocha.Blue, selectedTrailingIconColor = Mocha.Subtext), shape = RoundedCornerShape(6.dp), onClick = { onRemoveReference(reference) }, label = { Text(reference.marker, maxLines = 1, overflow = TextOverflow.Ellipsis) },
