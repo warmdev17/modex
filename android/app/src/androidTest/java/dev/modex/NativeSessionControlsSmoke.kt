@@ -77,16 +77,32 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
             val image = uiAutomation.takeScreenshot() ?: error("No screenshot")
             File(targetContext.filesDir, name).outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; image.recycle()
         }
+        type("Fixture draft")
         await("Default")
         await("Context 12% · 1,200 / 10,000")
         touch("Default"); await("Changing mode…")
         check(modeChanges == listOf("plan")) { "Single tap did not request Plan: $modeChanges" }
         check(nodes("Plan").isEmpty()) { "Mode changed before host acknowledgement" }
         runOnMainSync { status = status.copy(mode = "plan"); changing = false }
-        await("Plan"); shot("native-controls-plan.png")
+        await("Plan"); waitForIdleSync(); Thread.sleep(200)
+        val sendRect = Rect().also(await("Send message")::getBoundsInScreen)
+        val pixels = uiAutomation.takeScreenshot() ?: error("No screenshot")
+        val sendColor = pixels.getPixel(sendRect.left + sendRect.width() / 8, sendRect.centerY()) and 0xffffff
+        pixels.recycle()
+        check(sendColor == 0xf5c2e7) { "Plan Send is not Catppuccin pink: ${sendColor.toString(16)}" }
+        val modeRect = Rect().also(await("Plan")::getBoundsInScreen)
+        val composerRect = Rect().also(await("Message input container")::getBoundsInScreen)
+        check(modeRect.bottom <= composerRect.top) { "Mode label remains inside composer border" }
+        shot("native-controls-plan.png")
         touch("Plan"); await("Changing mode…")
         check(modeChanges == listOf("plan", "default")) { "Second tap did not request Default" }
         runOnMainSync { status = status.copy(mode = "default"); changing = false }
+        await("Default"); waitForIdleSync(); Thread.sleep(200)
+        val defaultRect = Rect().also(await("Send message")::getBoundsInScreen)
+        val defaultPixels = uiAutomation.takeScreenshot() ?: error("No screenshot")
+        val defaultColor = defaultPixels.getPixel(defaultRect.left + defaultRect.width() / 8, defaultRect.centerY()) and 0xffffff
+        defaultPixels.recycle()
+        check(defaultColor == 0x89b4fa) { "Default Send is not Mocha blue: ${defaultColor.toString(16)}" }
         touch("Open session status"); await("Session status"); await("Mode: Default")
         await("Context: 1,200 / 10,000 tokens"); shot("native-controls-status.png")
         check(statusRefreshes == 1 && sent.isEmpty() && modeChanges.size == 2) { "Status performed a write" }

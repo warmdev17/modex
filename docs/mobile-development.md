@@ -75,7 +75,7 @@ Turn notices distinguish response-stream interruption, retries, exhausted retrie
 
 ## Plan mode and session status
 
-Use the compact mode button above the message editor to switch between native Default and Plan mode. The label follows the host acknowledgement; a pending request disables repeat taps. A fresh session whose mode is not reported offers Enable Plan. Mode changes do not start a turn or change permissions and require an idle loaded conversation without pending decisions. If delivery is uncertain, refresh status or reload the session before retrying; Modex never retries automatically.
+Use the small mode label above and outside the message editor border to switch between native Default and Plan mode. Default uses Mocha blue; Plan uses Catppuccin pink (#f5c2e7). The enabled Send button follows the acknowledged mode color, while Stop remains red. The label follows the host acknowledgement; a pending request disables repeat taps. A fresh session whose mode is not reported offers Enable Plan. Mode changes do not start a turn or change permissions and require an idle loaded conversation without pending decisions. If delivery is uncertain, refresh status or reload the session before retrying; Modex never retries automatically.
 
 The context indicator below the chat title opens session status. It shows reported mode, model, reasoning, workspace, permissions, context/token usage and available account limits. Refresh explicitly for a new report. Context uses the latest reported native token breakdown; cumulative usage is separate. Missing provider data is unavailable, never assumed to be zero. Status is read only and remains available during a running turn. Both the updated APK and host are required.
 
