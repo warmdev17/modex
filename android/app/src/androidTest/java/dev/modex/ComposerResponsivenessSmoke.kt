@@ -75,7 +75,8 @@ internal fun Instrumentation.composerResponsivenessSmoke(args: Bundle) {
         screenshot("composer-keyboard.png")
         check(editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, args.getString("token") ?: "/") }))
         Thread.sleep(600); heartbeat("suggestions with attachment/history")
-        check(node(if (args.getString("token") == "@") "Prompt references" else "Android commands") != null) { "Suggestions were not opened" }
+        if (args.getString("token") == "@") check(node("Prompt references") != null) { "Reference suggestions were not opened" }
+        else check(node("Android commands") == null) { "Slash must remain plain text" }
         screenshot("composer-suggestions.png")
         val send = node("Send message") ?: error("Send control missing behind suggestions")
         val sendBounds = Rect().also(send::getBoundsInScreen)
@@ -88,7 +89,7 @@ internal fun Instrumentation.composerResponsivenessSmoke(args: Bundle) {
         check(editor.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "") }))
         Thread.sleep(600); heartbeat("suggestions closed")
         check(node("RESPONSIVENESS_END")?.isVisibleToUser == true) { "Auto-follow did not recover after closing suggestions" }
-        result.putString("result", "PASS: history + image + IME + ${args.getString("token")} suggestions remain responsive; auto-follow recovers")
+        result.putString("result", "PASS: history + image + IME + ${args.getString("token")} input remains responsive; slash is plain text and @ suggestions bounded; auto-follow recovers")
         finish(-1, result)
     } catch (failure: Throwable) {
         result.putString("result", "FAIL: ${failure.javaClass.simpleName}: ${failure.message}"); finish(0, result)

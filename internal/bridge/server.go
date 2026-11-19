@@ -59,6 +59,14 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "threads/mode", "threads/status":
+		allowed["workspace"] = true
+		allowed["thread_id"] = true
+		if cmd.Method == "threads/mode" {
+			for _, key := range []string{"mode", "model", "effort"} {
+				allowed[key] = true
+			}
+		}
 	case "plans/respond":
 		for _, key := range []string{"workspace", "thread_id", "turn_id", "item_id", "action", "model", "effort"} {
 			allowed[key] = true
@@ -136,6 +144,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	fetch := func(method string, params any) (json.RawMessage, error) {
 		r, err := call(ctx, method, params, emit)
 		if err != nil {
+			if errors.Is(err, ErrSessionNotOwned) || errors.Is(err, ErrSessionBusy) {
+				return nil, err
+			}
 			var rejection *diagnostic.RPCError
 			if errors.As(err, &rejection) {
 				return nil, errors.New("Codex request failed: " + rejection.Category())
@@ -255,6 +266,67 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, errors.New("thread outside workspace")
 		}
 		return result, nil
+	case "threads/mode", "threads/status":
+		var id string
+		if json.Unmarshal(p["thread_id"], &id) != nil || id == "" {
+			return nil, errors.New("thread_id is required")
+		}
+		params := map[string]any{"threadId": id}
+		if cmd.Method == "threads/mode" {
+			var mode, model, effort string
+			if json.Unmarshal(p["mode"], &mode) != nil || (mode != "plan" && mode != "default") {
+				return nil, errors.New("invalid collaboration mode")
+			}
+			if json.Unmarshal(p["model"], &model) != nil || strings.TrimSpace(model) == "" || len(model) > 256 || strings.ContainsAny(model, "\r\n\x00") {
+				return nil, errors.New("invalid model")
+			}
+			if raw, ok := p["effort"]; ok {
+				if json.Unmarshal(raw, &effort) != nil || strings.TrimSpace(effort) == "" || len(effort) > 64 || strings.ContainsAny(effort, "\r\n\x00") {
+					return nil, errors.New("invalid reasoning effort")
+				}
+			}
+			params["mode"], params["model"], params["effort"] = mode, model, effort
+		}
+		metadata, err := fetch("thread/read", map[string]any{"threadId": id, "includeTurns": false})
+		if err != nil {
+			return nil, err
+		}
+		var source struct {
+			Thread Thread `json:"thread"`
+		}
+		if json.Unmarshal(metadata, &source) != nil || source.Thread.ID != id {
+			return nil, errors.New("invalid thread response")
+		}
+		if source.Thread.Cwd != cwd {
+			return nil, errors.New("thread outside workspace")
+		}
+		if source.Thread.Status != nil && source.Thread.Status.Type == "notLoaded" {
+			return nil, ErrSessionNotOwned
+		}
+		method := "modex/thread/status"
+		if cmd.Method == "threads/mode" {
+			method = "modex/thread/mode"
+		}
+		raw, err := fetch(method, params)
+		if err != nil {
+			return nil, err
+		}
+		var result struct {
+			Session    sessionResult   `json:"session"`
+			TokenUsage json.RawMessage `json:"token_usage"`
+		}
+		if json.Unmarshal(raw, &result) != nil || result.Session.Thread.ID != id {
+			return nil, errors.New("invalid session response")
+		}
+		result.Session.Thread = source.Thread
+		if cmd.Method == "threads/mode" {
+			return result.Session, nil
+		}
+		var limits any
+		if raw, err := fetch("account/rateLimits/read", map[string]any{}); err == nil {
+			limits = safeRateLimits(raw)
+		}
+		return map[string]any{"session": result.Session, "token_usage": result.TokenUsage, "rate_limits": limits}, nil
 	case "status":
 		raw, err := fetch("config/read", map[string]any{"cwd": cwd, "includeLayers": false})
 		if err != nil {

@@ -18,7 +18,15 @@ import (
 
 // One backend owns all managed sessions. Native TUI connections are views of it,
 // not process owners; losing a view must never cancel a dispatched turn.
+type sharedSession struct {
+	settings map[string]json.RawMessage
+	usage    json.RawMessage
+	busy     bool
+}
+
 type sharedBackend struct {
+	dispatchMu     sync.Mutex
+	sessions       map[string]*sharedSession
 	plans          *bridge.PlanActions
 	home           string
 	ctx            context.Context
@@ -43,7 +51,7 @@ type nativeClient struct {
 }
 
 func newSharedBackend(ctx context.Context, p *bridge.Process, emit func(string, json.RawMessage)) (*sharedBackend, error) {
-	s := &sharedBackend{ctx: ctx, p: p, clients: map[*nativeClient]bool{}, pending: map[string]bridge.Decision{}, nativeParams: map[string]json.RawMessage{}, emit: emit}
+	s := &sharedBackend{ctx: ctx, p: p, clients: map[*nativeClient]bool{}, pending: map[string]bridge.Decision{}, sessions: map[string]*sharedSession{}, nativeParams: map[string]json.RawMessage{}, emit: emit}
 	s.plans = bridge.NewPlanActions(os.Getenv("MODEX_PLAN_STATE_DIR"), func(ctx context.Context, method string, params any) (json.RawMessage, error) {
 		return s.call(ctx, method, params, nil)
 	})
@@ -100,6 +108,26 @@ func newSharedBackend(ctx context.Context, p *bridge.Process, emit func(string, 
 		}
 		_ = json.Unmarshal(params, &meta)
 		s.mu.Lock()
+		if invalidatesSession(method, params) {
+			delete(s.sessions, meta.ThreadID)
+		}
+		if state := s.sessions[meta.ThreadID]; state != nil {
+			switch method {
+			case "turn/started":
+				state.busy = true
+			case "turn/completed":
+				state.busy = false
+			case "thread/tokenUsage/updated":
+				var v struct {
+					Usage json.RawMessage `json:"tokenUsage"`
+				}
+				if json.Unmarshal(params, &v) == nil {
+					state.usage = bridge.SafeUsage(v.Usage)
+				}
+			case "thread/settings/updated":
+				updateSharedSettings(state, params)
+			}
+		}
 		resolved := []string{}
 		for key, d := range s.pending {
 			if d.ThreadID == meta.ThreadID && ((method == "turn/completed" && d.TurnID == meta.Turn.ID) || (method == "serverRequest/resolved" && key == string(meta.RequestID))) {
@@ -146,6 +174,71 @@ func (s *sharedBackend) call(ctx context.Context, method string, params any, emi
 		s.mu.Unlock()
 	}
 	values, _ := params.(map[string]any)
+	id, _ := values["threadId"].(string)
+	if method == "modex/thread/mode" || method == "turn/start" || method == "thread/settings/update" || method == "thread/start" || method == "thread/resume" || method == "thread/fork" {
+		s.dispatchMu.Lock()
+		defer s.dispatchMu.Unlock()
+	}
+	if method == "modex/thread/status" || method == "modex/thread/mode" {
+		s.mu.Lock()
+		state := s.sessions[id]
+		if state == nil {
+			s.mu.Unlock()
+			return nil, bridge.ErrSessionNotOwned
+		}
+		if method == "modex/thread/mode" {
+			pending := false
+			for _, d := range s.pending {
+				if d.ThreadID == id {
+					pending = true
+					break
+				}
+			}
+			if state.busy || pending {
+				s.mu.Unlock()
+				return nil, bridge.ErrSessionBusy
+			}
+			mode, _ := values["mode"].(string)
+			model, _ := values["model"].(string)
+			effort, _ := values["effort"].(string)
+			s.mu.Unlock()
+			var nativeEffort any
+			if effort != "" {
+				nativeEffort = effort
+			}
+			requestCtx, cancel := modeRequestContext(ctx)
+			_, err := s.p.CallPersistent(requestCtx, "thread/settings/update", map[string]any{"threadId": id, "collaborationMode": map[string]any{"mode": mode, "settings": map[string]any{"model": model, "reasoning_effort": nativeEffort, "developer_instructions": nil}}})
+			cancel()
+			s.mu.Lock()
+			state = s.sessions[id]
+			if state == nil {
+				s.mu.Unlock()
+				return nil, bridge.ErrSessionNotOwned
+			}
+			if err != nil {
+				delete(state.settings, "collaboration_mode")
+				s.mu.Unlock()
+				return nil, err
+			}
+			state.settings["collaboration_mode"], _ = json.Marshal(mode)
+			state.settings["model"], _ = json.Marshal(model)
+			if effort != "" {
+				state.settings["effort"], _ = json.Marshal(effort)
+			} else {
+				delete(state.settings, "effort")
+			}
+		}
+		raw, err := json.Marshal(map[string]any{"session": state.settings, "token_usage": state.usage})
+		s.mu.Unlock()
+		return raw, err
+	}
+	if method == "turn/start" {
+		s.mu.Lock()
+		if state := s.sessions[id]; state != nil {
+			state.busy = true
+		}
+		s.mu.Unlock()
+	}
 	if method == "modex/plan/state" {
 		handled, err := s.plans.Handled(stringValue(values, "threadId"), stringValue(values, "turnId"), stringValue(values, "itemId"))
 		if err != nil {
@@ -192,6 +285,17 @@ func (s *sharedBackend) call(ctx context.Context, method string, params any, emi
 	requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	raw, err := s.p.CallPersistent(requestCtx, method, params)
+	if method == "turn/start" && err != nil {
+		var rejected *diagnostic.RPCError
+		if errors.As(err, &rejected) {
+			s.mu.Lock()
+			if state := s.sessions[id]; state != nil {
+				state.busy = false
+			}
+			s.mu.Unlock()
+		}
+	}
+
 	var rejection *diagnostic.RPCError
 	if errors.As(err, &rejection) && rejection.Category() == "history_pagination_unsupported" {
 		if method == "thread/resume" {
@@ -203,10 +307,33 @@ func (s *sharedBackend) call(ctx context.Context, method string, params any, emi
 					copy[k] = v
 				}
 			}
-			return s.p.CallPersistent(requestCtx, method, copy)
+			raw, err = s.p.CallPersistent(requestCtx, method, copy)
 		}
 		if method == "thread/turns/list" {
 			return s.legacyHistory(requestCtx, values)
+		}
+	}
+	if err == nil && (method == "thread/start" || method == "thread/resume" || method == "thread/fork") {
+		safe, e := bridge.SafeSession(raw)
+		var session map[string]json.RawMessage
+		var meta struct {
+			Thread struct {
+				ID     string `json:"id"`
+				Status struct {
+					Type string `json:"type"`
+				} `json:"status"`
+			} `json:"thread"`
+		}
+		if e == nil && json.Unmarshal(safe, &session) == nil && json.Unmarshal(raw, &meta) == nil && meta.Thread.ID != "" {
+			s.mu.Lock()
+			state := s.sessions[meta.Thread.ID]
+			if state == nil {
+				state = &sharedSession{}
+				s.sessions[meta.Thread.ID] = state
+			}
+			state.settings = session
+			state.busy = meta.Thread.Status.Type != "idle"
+			s.mu.Unlock()
 		}
 	}
 	return raw, err
@@ -573,4 +700,55 @@ func (s *sharedBackend) listen(socket string) (func(), error) {
 func stringValue(values map[string]any, key string) string {
 	value, _ := values[key].(string)
 	return value
+}
+
+// updateSharedSettings retains only the existing public permission and mode labels.
+func updateSharedSettings(state *sharedSession, raw json.RawMessage) {
+	var event struct {
+		Settings struct {
+			Mode struct {
+				Mode string `json:"mode"`
+			} `json:"collaborationMode"`
+			Model    string          `json:"model"`
+			Effort   string          `json:"effort"`
+			Approval json.RawMessage `json:"approvalPolicy"`
+			Reviewer string          `json:"approvalsReviewer"`
+			Sandbox  json.RawMessage `json:"sandboxPolicy"`
+		} `json:"threadSettings"`
+	}
+	if state.settings == nil || json.Unmarshal(raw, &event) != nil {
+		return
+	}
+	native, _ := json.Marshal(map[string]any{"collaborationMode": event.Settings.Mode, "model": event.Settings.Model, "reasoningEffort": event.Settings.Effort, "approvalPolicy": event.Settings.Approval, "approvalsReviewer": event.Settings.Reviewer, "sandbox": event.Settings.Sandbox})
+	safe, err := bridge.SafeSession(native)
+	if err != nil {
+		return
+	}
+	var update map[string]json.RawMessage
+	if json.Unmarshal(safe, &update) != nil {
+		return
+	}
+	for _, key := range []string{"collaboration_mode", "effort", "approval_policy", "approvals_reviewer", "sandbox"} {
+		delete(state.settings, key)
+	}
+	for k, v := range update {
+		if k != "thread" {
+			state.settings[k] = v
+		}
+	}
+}
+
+func invalidatesSession(method string, raw json.RawMessage) bool {
+	if method == "thread/closed" || method == "thread/archived" {
+		return true
+	}
+	if method != "thread/status/changed" {
+		return false
+	}
+	var v struct {
+		Status struct {
+			Type string `json:"type"`
+		} `json:"status"`
+	}
+	return json.Unmarshal(raw, &v) == nil && v.Status.Type == "notLoaded"
 }
