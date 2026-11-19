@@ -79,4 +79,6 @@ Use the small mode label above and outside the message editor border to switch b
 
 The context indicator below the chat title opens session status. It shows reported mode, model, reasoning, workspace, permissions, context/token usage and available account limits. Refresh explicitly for a new report. Context uses the latest reported native token breakdown; cumulative usage is separate. Missing provider data is unavailable, never assumed to be zero. Status is read only and remains available during a running turn. Both the updated APK and host are required.
 
+While the keyboard is open, attachments use compact filename chips; tap one to preview or use its remove button. Attachment previews temporarily hide while choosing an @ reference and return when suggestions close; the files remain attached.
+
 Slash commands have been removed entirely, including help. Typing `/` is ordinary prompt text and opens no menu. Conversation actions and model selection remain in their existing UI; skills/plugins remain available through @ and the attachment menu. Compact/review and terminal commands are not implemented.

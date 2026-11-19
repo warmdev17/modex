@@ -8,6 +8,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.BorderStroke
@@ -587,6 +588,7 @@ private fun PromptComposer(
         onChange(value.text)
     }
     val sendEnabled = enabled && (prompt.isNotBlank() || attachments.isNotEmpty())
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val control = modeControl(mode, modeUncertain, modeChanging)
     val modeColor = if (mode == "plan") Mocha.Pink else Mocha.Blue
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
@@ -624,8 +626,16 @@ private fun PromptComposer(
                         modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp).semantics { contentDescription = "Remove ${reference.kind} ${reference.name}" })
                 }
             }
-            if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                attachments.forEach { file -> AttachmentTile(file, loadAttachment, { onPreview(file) }, if (!busy && !attachmentWorking) ({ onRemove(file.path) }) else null) }
+            if (attachments.isNotEmpty() && !showReferences) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                attachments.forEach { file ->
+                    if (keyboardVisible) InputChip(
+                        selected = false, onClick = { onPreview(file) },
+                        label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = { ChatGlyph(if (file.kind == "image") ChatIcon.Image else ChatIcon.File) },
+                        trailingIcon = { if (!busy && !attachmentWorking) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
+                        modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp), shape = RoundedCornerShape(6.dp)
+                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (!busy && !attachmentWorking) ({ onRemove(file.path) }) else null)
+                }
             }
             if (attachmentWorking) Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
