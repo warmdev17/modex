@@ -15,6 +15,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -123,6 +124,8 @@ internal fun ChatWorkspace(
     referenceCatalog: ReferenceCatalog = ReferenceCatalog(), referencesLoading: Boolean = false,
     referenceStatus: String = "", onRefreshReferences: () -> Unit = {},
     sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
+    sessionStatus: SessionStatus? = null, sessionStatusLoading: Boolean = false, sessionStatusError: String = "", modeChanging: Boolean = false, modeUncertain: Boolean = false,
+    onSessionStatus: () -> Unit = {}, onSessionMode: (String) -> Unit = {},
     threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
     registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = "",
     attachments: List<Attachment> = emptyList(), attachmentWorking: Boolean = false,
@@ -200,36 +203,15 @@ internal fun ChatWorkspace(
     fun openModel() {
         modelInput = sessionModel; effortInput = sessionEffort.ifBlank { defaultEffort(sessionModel) }; showModel = true
     }
-    var commandHelp by remember(selected) { mutableStateOf(false) }
+    var showSessionStatus by remember(selected) { mutableStateOf(false) }
     val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
     val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" } }
     val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
     LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
-    val commandSessionReady = canSwitch && selected.isNotBlank() && !busy && selected !in runningThreads && selectedDecisions.isEmpty()
-    val copyText = messages.lastOrNull { it.role == "Codex" && it.status in listOf("", "completed") && it.text.isNotBlank() }?.text.orEmpty()
-    fun commandEnabled(command: AndroidSlashCommand): Boolean = when (command) {
-        AndroidSlashCommand.HELP -> true
-        AndroidSlashCommand.NEW, AndroidSlashCommand.RESUME -> canSwitch
-        AndroidSlashCommand.MODEL, AndroidSlashCommand.SKILLS -> commandSessionReady
-        AndroidSlashCommand.FORK, AndroidSlashCommand.ARCHIVE, AndroidSlashCommand.DELETE -> commandSessionReady && selected in threads && !archived && selected !in actionThreads
-        AndroidSlashCommand.COPY -> selected.isNotBlank() && !historyLoading && !busy && copyText.isNotBlank()
-    }
-    fun command(command: AndroidSlashCommand) {
-        keyboard?.hide()
-        when (command) {
-            AndroidSlashCommand.HELP -> commandHelp = true
-            AndroidSlashCommand.MODEL -> openModel()
-            AndroidSlashCommand.NEW -> openNewChat()
-            AndroidSlashCommand.RESUME -> openSessions()
-            AndroidSlashCommand.FORK -> sessionAction("fork", selected)
-            AndroidSlashCommand.ARCHIVE -> sessionAction("archive", selected)
-            AndroidSlashCommand.DELETE -> sessionAction("delete", selected)
-            AndroidSlashCommand.COPY -> copyMessage(context, copyText)
-            AndroidSlashCommand.SKILLS -> Unit // The composer owns the reference picker.
-        }
-    }
+    val modeActionEnabled = canSwitch && selected.isNotBlank() && selectedDecisions.isEmpty() && !modeChanging && !sessionStatusLoading && (!busy || modeUncertain)
+    fun openStatus() { if (selected.isNotBlank()) { showSessionStatus = true; onSessionStatus() } }
     val status = when { connecting -> "Connecting…"; !connected -> "Disconnected"; historyLoading -> "Loading history…"; busy -> "Working…"; else -> "Connected · SSH" }
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -300,9 +282,10 @@ internal fun ChatWorkspace(
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = ::openSessions) { ChatGlyph(ChatIcon.Menu,"Open sessions") }
-                Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
+                Column(Modifier.weight(1f).padding(horizontal = 8.dp).clickable(enabled = selected.isNotBlank(), onClick = ::openStatus).semantics { if (selected.isNotBlank()) contentDescription = "Open session status" }) {
                     Text(if (selected.isBlank()) "modex" else titles[selected] ?: "Conversation", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                     Text(if (onHome != null) "$host · $status" else status, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = if (connected) Mocha.Blue else Mocha.Subtext)
+                    if (selected.isNotBlank()) Text(contextSummary(sessionStatus), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = if (sessionStatus?.contextTokens != null) Mocha.Text else Mocha.Subtext)
                 }
                 Box {
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
@@ -447,7 +430,7 @@ internal fun ChatWorkspace(
                 prompt, { updatePrompt(it) }, busy,
                 (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank(),
                 ::openModel,
-                connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking,
+                connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking && !modeChanging,
                 attachments, attachmentWorking, attachmentProgress, attachmentError,
                 connected && selected.isNotBlank() && !busy && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
@@ -456,17 +439,15 @@ internal fun ChatWorkspace(
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
                 referenceEnabled = connected && selected.isNotBlank() && !historyLoading, chosenReferences = chosenReferences,
                 onAddReference = ::addReference, onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
-                suggestionsEnabled = !drawer.isOpen, commandEnabled = ::commandEnabled, onCommand = ::command
+                suggestionsEnabled = !drawer.isOpen,
+                mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain, modeEnabled = modeActionEnabled,
+                onMode = onSessionMode, onModeRefresh = onSessionStatus,
             ) {
                 if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) }, chosenReferences)) updatePrompt("")
             }
         }
     }
-    if (commandHelp) AlertDialog(
-        onDismissRequest = { commandHelp = false }, title = { Text("Android commands") },
-        text = { Text(AndroidSlashCommand.entries.joinToString("\n\n") { "/${it.token}\n${it.description}" }, modifier = Modifier.verticalScroll(rememberScrollState())) },
-        confirmButton = { TextButton(onClick = { commandHelp = false }) { Text("Close") } }
-    )
+    if (showSessionStatus) SessionStatusDialog(sessionStatus, sessionStatusLoading, sessionStatusError, onSessionStatus) { showSessionStatus = false }
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -532,6 +513,53 @@ internal fun ChatWorkspace(
 }
 
 @Composable
+private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error: String, refresh: () -> Unit, close: () -> Unit) {
+    fun known(value: String) = value.ifBlank { "Unavailable" }
+    fun number(value: Long?) = value?.let(java.text.NumberFormat.getIntegerInstance()::format) ?: "Unavailable"
+    fun sandbox(value: String) = when (value) {
+        "readOnly" -> "Read-only"
+        "workspaceWrite" -> "Workspace write"
+        "dangerFullAccess" -> "Full access"
+        "externalSandbox" -> "External sandbox"
+        else -> known(value)
+    }
+    fun limit(label: String, value: RateLimitWindow?) = if (value == null) "$label: Unavailable" else buildString {
+        append("$label: ")
+        append(value.usedPercent?.let { "${java.text.NumberFormat.getNumberInstance().format(it)}% used" } ?: "usage unavailable")
+        value.windowDurationMins?.let { append(" · $it min") }
+        value.resetsAt?.let { append(" · resets ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it * 1000))}") }
+    }
+    AlertDialog(
+        onDismissRequest = close, title = { Row(verticalAlignment = Alignment.CenterVertically) { ChatGlyph(ChatIcon.Activity); Spacer(Modifier.width(8.dp)); Text("Session status") } },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (loading) Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Refreshing session status" }, strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp)); Text("Refreshing…", color = Mocha.Subtext)
+            }
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            if (status == null) Text("No status has been reported for this session.", color = Mocha.Subtext)
+            else SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Mode: ${if (status.mode == "plan") "Plan" else if (status.mode == "default") "Default" else "Unavailable"}")
+                Text("Model: ${known(status.model)}")
+                Text("Reasoning: ${known(status.effort)}")
+                Text("Workspace: ${known(status.workspace)}")
+                Text("Provider: ${known(status.provider)}")
+                Text("Sandbox: ${sandbox(status.sandbox)}")
+                Text("Approvals: ${known(status.approvalPolicy)}")
+                Text("Reviewer: ${known(status.approvalsReviewer)}")
+                Text("Context: ${if (status.contextTokens != null && status.contextWindow != null) "${number(status.contextTokens)} / ${number(status.contextWindow)} tokens" else "Unavailable"}")
+                Text("Session total: ${if (status.totalTokens != null) "${number(status.totalTokens)} tokens" else "Unavailable"}")
+                Text("Limits: ${listOf(status.limitName, status.planType).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Unavailable" }}")
+                Text(limit("Primary", status.primaryLimit))
+                Text(limit("Secondary", status.secondaryLimit))
+            } }
+        } },
+        confirmButton = { TextButton(onClick = close) { Text("Close") } },
+        dismissButton = { TextButton(enabled = !loading, onClick = refresh) { Text("Refresh") } }
+    )
+}
+
+@Composable
 private fun PromptComposer(
     prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
@@ -540,42 +568,27 @@ private fun PromptComposer(
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
     referenceEnabled: Boolean, chosenReferences: List<PromptReference>, onAddReference: (PromptReference) -> Unit,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
-    suggestionsEnabled: Boolean, commandEnabled: (AndroidSlashCommand) -> Boolean, onCommand: (AndroidSlashCommand) -> Unit, onSend: () -> Unit
+    suggestionsEnabled: Boolean, mode: String, modeChanging: Boolean, modeUncertain: Boolean, modeEnabled: Boolean,
+    onMode: (String) -> Unit, onModeRefresh: () -> Unit, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     var editor by remember(draftKey) { mutableStateOf(TextFieldValue(prompt, TextRange(prompt.length))) }
     var fieldFocused by remember { mutableStateOf(false) }
     var dismissedQuery by remember(draftKey) { mutableStateOf<Pair<String, Int>?>(null) }
     var manualReferences by remember(draftKey) { mutableStateOf(false) }
-    var dismissedCommands by remember(draftKey) { mutableStateOf<String?>(null) }
     LaunchedEffect(prompt, draftKey) { if (editor.text != prompt) editor = TextFieldValue(prompt, TextRange(prompt.length)) }
     val query = referenceQuery(editor.text, editor.selection.start, editor.selection.end)
     val showReferences = suggestionsEnabled && referenceEnabled && (manualReferences || (fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)))
     fun closeReferences() { manualReferences = false; dismissedQuery = editor.text to editor.selection.start }
-    val commands = slashSuggestions(editor.text)
-    val showCommands = suggestionsEnabled && fieldFocused && commands != null && dismissedCommands != editor.text && !showReferences
-    BackHandler(showReferences || showCommands) {
-        if (showReferences) closeReferences() else dismissedCommands = editor.text
-    }
+    BackHandler(showReferences) { closeReferences() }
     fun changeEditor(value: TextFieldValue) {
-        if (value.text != editor.text || value.selection != editor.selection) { dismissedQuery = null; dismissedCommands = null }
+        if (value.text != editor.text || value.selection != editor.selection) dismissedQuery = null
         editor = value
         onChange(value.text)
     }
-    fun runCommand(command: AndroidSlashCommand) {
-        if (!commandEnabled(command)) return
-        changeEditor(TextFieldValue(""))
-        if (command == AndroidSlashCommand.SKILLS) {
-            manualReferences = true; onRefreshReferences(); focus.requestFocus()
-        } else onCommand(command)
-    }
-    val exactCommand = exactSlashCommand(editor.text)
-    val sendEnabled = if (exactCommand != null) commandEnabled(exactCommand) else enabled && commands.isNullOrEmpty() && (prompt.isNotBlank() || attachments.isNotEmpty())
+    val sendEnabled = enabled && (prompt.isNotBlank() || attachments.isNotEmpty())
     Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
         Column(Modifier.padding(12.dp)) {
-            if (showCommands && commands != null) Box(Modifier.weight(1f, fill = false)) {
-                SlashCommandPicker(commands, commandEnabled, { dismissedCommands = editor.text }, ::runCommand)
-            }
             if (showReferences) Box(Modifier.weight(1f, fill = false)) {
                 ReferencePicker(referenceCatalog, query?.query.orEmpty(), referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
                 onDismiss = ::closeReferences,
@@ -603,6 +616,22 @@ private fun PromptComposer(
                 Text(attachmentProgress, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
+            val control = modeControl(mode, modeUncertain, modeChanging)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                if (control.accented) FilledTonalButton(
+                    onClick = { onMode(control.target) }, enabled = modeEnabled && control.enabled,
+                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.heightIn(min = 48.dp).semantics { stateDescription = "Plan mode enabled" }
+                ) { ChatGlyph(ChatIcon.Skill); Spacer(Modifier.width(6.dp)); Text(control.label) }
+                else OutlinedButton(
+                    onClick = { if (control.refresh) onModeRefresh() else onMode(control.target) }, enabled = modeEnabled && control.enabled,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (control.refresh) Mocha.Red else Mocha.Text), shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    if (modeChanging) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Mocha.Subtext) else ChatGlyph(if (control.refresh) ChatIcon.Activity else ChatIcon.Skill)
+                    Spacer(Modifier.width(6.dp)); Text(control.label)
+                }
+            }
             BasicTextField(editor, { changeEditor(it) }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
                 decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
@@ -634,7 +663,7 @@ private fun PromptComposer(
                         }
                     }
                 }
-                FilledIconButton(onClick = if (busy) onStop else ({ if (exactCommand != null) runCommand(exactCommand) else onSend() }), enabled = if (busy) stopEnabled && !stopping else sendEnabled, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
+                FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else sendEnabled, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
                     colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (busy) Mocha.Red else Mocha.Blue, contentColor = Mocha.Base,
                         disabledContainerColor = if (busy) Mocha.Red else Mocha.Surface, disabledContentColor = Mocha.Base)) {
                     if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp, color = Mocha.Base) else if (busy) ChatGlyph(ChatIcon.Stop, "Stop response") else ChatGlyph(ChatIcon.Send,"Send message")

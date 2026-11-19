@@ -47,10 +47,13 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private data class HistoryRequest(val thread: String, val cursor: String, val activity: Long, val before: List<ChatEntry>)
     private val historyRequests = mutableMapOf<Long, HistoryRequest>()
     private data class LifecycleRequest(val target: String, val generation: Long, val selection: Long, val activity: Long)
+    private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long)
     private var listGeneration = 0L
     private var selectionGeneration = 0L
     private val listRequests = mutableMapOf<Long, Long>()
     private val lifecycleRequests = mutableMapOf<Long, LifecycleRequest>()
+    private val sessionRequests = mutableMapOf<Long, SessionRequest>()
+    private var settingsRevision = 0L
     private val observationRequests = mutableMapOf<Long, Pair<String, Long>>()
     private val observationAgain = mutableSetOf<String>()
     var archived by mutableStateOf(false); private set
@@ -92,6 +95,11 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     val busy: Boolean get() = sessions.busy
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
+    internal var sessionStatus by mutableStateOf<SessionStatus?>(null); private set
+    var sessionStatusLoading by mutableStateOf(false); private set
+    var sessionStatusError by mutableStateOf(""); private set
+    var modeChanging by mutableStateOf(false); private set
+    var modeUncertain by mutableStateOf(false); private set
     internal var hostChoice by mutableStateOf(ModelChoice()); private set
     internal var modelChoices by mutableStateOf(emptyMap<String,ModelChoice>()); private set
     private fun choiceFor(id: String = selected) = resolveModelChoice(modelChoices[id], null, hostChoice, models)
@@ -153,6 +161,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     val r = requests.getJSONObject(i); pending[r.getLong("id")] = r.getString("method") to r.getString("tag")
                     if (r.getString("method") == "plans/respond") handledPlans += r.getString("tag")
                     if (r.getString("method") == "decision/respond") answeringDecisionIds += r.getString("tag")
+                    if (r.getString("method") == "threads/mode") modeChanging = true
                 }
             }
         } catch (_: Exception) { error = "Saved host could not be unlocked. Forget it and import the SSH key again." }
@@ -207,13 +216,15 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     fun loadOlderHistory() = loadHistory(true)
     private fun leaveSession() {
         selectionGeneration++
+        settingsRevision++
         handledPlans += pending.values.filter { it.first == "plans/respond" }.map { it.second }
         planSending = false
         references.clear()
         if (selected.isNotBlank()) lastThread = selected
         ownedThread = ""
         sessions.clearSelection()
-        sessionSettings = ""; takeoverThread = ""
+        sessionSettings = ""; sessionStatus = null; sessionStatusLoading = false; sessionStatusError = ""; modeChanging = false; modeUncertain = false; takeoverThread = ""
+        sessionRequests.clear()
         historyLoading = false; olderHistoryLoading = false; hasOlderHistory = false
         visibleHistory = null; selectionRequests.clear(); historyRequests.clear()
     }
@@ -369,7 +380,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
-        if (!connected || busy || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
+        if (!connected || busy || modeChanging || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
         val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace), selected)
         if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
@@ -379,6 +390,21 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (!connected || historyLoading || switching()) return
         val target = sessions.requestStop() ?: return
         request("turn/interrupt", withWorkspace(target, selectedWorkspace), target.toString())
+    }
+    fun refreshSessionStatus() {
+        if (!connected || selected.isBlank() || ownedThread != selected || sessionStatusLoading || modeChanging) return
+        sessionStatusLoading = true; sessionStatusError = ""
+        request("threads/status", withWorkspace(JSONObject().put("thread_id", selected), selectedWorkspace), selected)?.let {
+            sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision)
+        } ?: run { sessionStatusLoading = false }
+    }
+    fun changeSessionMode(mode: String) {
+        if (!connected || selected.isBlank() || ownedThread != selected || busy || modeChanging || modeUncertain || sessionStatusLoading || historyLoading || switching() ||
+            decisions.any { it.optString("thread_id") == selected } || mode !in listOf("default", "plan")) return
+        val params = runCatching { threadModeParams(selected, selectedWorkspace, mode, sessionModel, sessionEffort) }.getOrNull() ?: return
+        modeChanging = true; sessionStatusError = ""
+        request("threads/mode", params, selected)?.let { sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision) }
+            ?: run { modeChanging = false }
     }
     internal fun respondPlan(plan: ChatEntry, action: String) {
         if (!connected || busy || historyLoading || switching() || ownedThread != selected || planResponding ||
@@ -446,10 +472,29 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 return
             }
             val historyRequest = historyRequests.remove(id)
+            val sessionRequest = sessionRequests.remove(id)
+            if (operation.first in listOf("threads/mode", "threads/status") &&
+                (sessionRequest == null || !connected || sessionRequest.thread != selected || sessionRequest.generation != selectionGeneration || ownedThread != selected)) {
+                modeChanging = sessionRequests.any { (request, value) -> pending[request]?.first == "threads/mode" && value.thread == selected && value.generation == selectionGeneration }
+                sessionStatusLoading = sessionRequests.any { (request, value) -> pending[request]?.first == "threads/status" && value.thread == selected && value.generation == selectionGeneration }
+                return
+            }
             if (operation.first in listOf("threads/start", "threads/resume", "threads/takeover") && (!selectionRequests.remove(id) || !connected)) return
             if (operation.first == "threads/read" && (historyRequest == null || !connected || historyRequest.thread != selected || ownedThread != selected)) return
             if (operation.first == "plans/respond") planSending = pending.values.any { it.first == "plans/respond" && it.second !in handledPlans }
             if (frame.has("error")) {
+                if (operation.first == "threads/mode") {
+                    modeChanging = false
+                    modeUncertain = true
+                    sessionStatus = sessionStatus?.copy(mode = "")
+                    sessionStatusError = "Mode change was not confirmed. Reload status before trying again."
+                    return
+                }
+                if (operation.first == "threads/status") {
+                    sessionStatusLoading = false
+                    sessionStatusError = "Session status is unavailable. Check the connection and update modex-host if needed."
+                    return
+                }
                 if (operation.first == "plans/respond") {
                     handledPlans += operation.second
                     error = "Plan action was not confirmed. Refresh the session and inspect it before continuing; do not resend an uncertain action. Update modex-host if needed."
@@ -491,6 +536,21 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 }
                 "status" -> {
                     hostChoice = readModelChoice(result.optJSONObject("config")) ?: ModelChoice()
+                }
+                "threads/status" -> {
+                    sessionStatusLoading = false; sessionStatusError = ""; modeUncertain = false
+                    val reported = readSessionStatus(result)
+                    val current = sessionStatus
+                    sessionStatus = if (sessionRequest?.settingsRevision == settingsRevision || current == null) reported
+                    else reported.copy(mode = current.mode, model = current.model, effort = current.effort)
+                }
+                "threads/mode" -> {
+                    modeChanging = false; modeUncertain = false; sessionStatusError = ""
+                    val reported = readSessionStatus(result, sessionStatus)
+                    val current = sessionStatus
+                    sessionStatus = if (sessionRequest?.settingsRevision == settingsRevision || current == null) reported
+                    else reported.copy(mode = current.mode, model = current.model, effort = current.effort)
+                    if (sessionRequest?.settingsRevision == settingsRevision) sessionSettings = sessionSettingsLabel(result)
                 }
                 "projects/create" -> {
                     val project = result.optJSONObject("project")
@@ -537,6 +597,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     takeoverThread = ""
                     error = ""
                     sessionSettings = sessionSettingsLabel(result)
+                    sessionStatus = readSessionStatus(result)
+                    modeUncertain = false
                     sessions.open(result.getJSONObject("thread").getString("id"))
                     ownedThread = selected; lastThread = selected
                     visibleHistory = historyCache.get(selected)
@@ -556,6 +618,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         // Codex cannot read persisted turns until a new thread has its first turn.
                         historyLoading = false
                     } else loadHistory()
+                    refreshSessionStatus()
                 }
                 "threads/read" -> {
                     val request = historyRequest ?: return
@@ -613,6 +676,19 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             params.optString("plan_key").takeIf { it.isNotBlank() }?.let { handledPlans += it }
         }
         val event = frame.optString("event")
+        if (event == "thread/settings/updated" && params.optString("threadId") == selected && ownedThread == selected) {
+            val settings = params.optJSONObject("threadSettings") ?: return
+            val previous = sessionStatus ?: SessionStatus(workspace = selectedWorkspace)
+            val reportedMode = settings.optJSONObject("collaborationMode")?.optString("mode").orEmpty()
+            sessionStatus = previous.copy(
+                mode = reportedMode.takeIf { it == "default" || it == "plan" } ?: previous.mode,
+                model = if (settings.has("model") && !settings.isNull("model")) settings.optString("model") else previous.model,
+                effort = if (settings.has("effort")) if (settings.isNull("effort")) "" else settings.optString("effort") else previous.effort,
+            )
+            settingsRevision++
+            if (reportedMode == "default" || reportedMode == "plan") modeUncertain = false
+            sessionStatusError = ""
+        }
         sessions.event(event, params)
         if (selected.isNotBlank()) {
             val page = visibleHistory ?: CachedHistory(emptyList(), "", "")
@@ -623,7 +699,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         }
         decisions = updatePendingDecisions(decisions, frame.optString("event"), params)
         if (event == "turn/completed") {
-            if (params.optString("threadId") != selected) observe(params.optString("threadId"))
+            if (params.optString("threadId") != selected) observe(params.optString("threadId")) else refreshSessionStatus()
             decisions = decisions.filterNot { it.optString("thread_id") == params.optString("threadId") && it.optString("turn_id") == params.optJSONObject("turn")?.optString("id") }
         }
     }

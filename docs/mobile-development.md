@@ -73,22 +73,10 @@ Long-press a session in the sidebar to open its conversation actions. Ordinary t
 
 Turn notices distinguish response-stream interruption, retries, exhausted retries, access/model/quota failures and terminal outcomes. They use safe fixed messages, never raw credential-bearing provider errors. Partial output remains available when a turn is interrupted. Interrupted from a shared Modex terminal is synchronized through the same backend; an independent Codex process is a separate event source and must not be assumed to provide instant live notifications to Android.
 
-## Android slash actions
+## Plan mode and session status
 
-Type `/` as the whole draft to see Android commands, then type more letters to filter. Tap a suggestion, or enter a complete supported command and press Send. These actions run locally in Modex; they are not submitted as model prompts. Close the suggestions or press Back to keep the draft. Opening the sidebar hides the keyboard; its Back action takes priority over suggestions behind it.
+Use the compact mode button above the message editor to switch between native Default and Plan mode. The label follows the host acknowledgement; a pending request disables repeat taps. A fresh session whose mode is not reported offers Enable Plan. Mode changes do not start a turn or change permissions and require an idle loaded conversation without pending decisions. If delivery is uncertain, refresh status or reload the session before retrying; Modex never retries automatically.
 
-| Command | Android action |
-| --- | --- |
-| `/help` | Show command help. |
-| `/model` | Choose model and reasoning for the next turn. |
-| `/new` | Open the new-conversation dialog. |
-| `/resume` | Open the session sidebar. |
-| `/fork` | Fork the selected idle conversation without starting a turn. |
-| `/archive` | Archive the selected conversation. |
-| `/delete` | Open the existing permanent-delete confirmation. |
-| `/skills` | Open skills/plugins selection and bind the chosen reference to the prompt. |
-| `/copy` | Copy the latest completed Codex reply. |
+The context indicator below the chat title opens session status. It shows reported mode, model, reasoning, workspace, permissions, context/token usage and available account limits. Refresh explicitly for a new report. Context uses the latest reported native token breakdown; cumulative usage is separate. Missing provider data is unavailable, never assumed to be zero. Status is read only and remains available during a running turn. Both the updated APK and host are required.
 
-Unavailable actions stay disabled for the current connection/session state. Switching sessions retains their separate drafts; slash actions do not automatically resend prompts or decisions. Ordinary prose, multiline drafts and paths containing another slash remain normal prompt text. An unknown slash word is labelled as a message, not a native command; partial supported commands cannot be sent accidentally.
-
-Terminal controls such as `/vim`, `/keymap`, `/raw`, `/tui`, `/title`, `/statusline` and `/theme` are omitted. Compact, review, plan, goal, current-session permission changes and full native status are not exposed until their backend behavior is implemented. CLI `/stop` controls background terminals and is not an alias for interrupting a Modex turn.
+Slash commands have been removed entirely, including help. Typing `/` is ordinary prompt text and opens no menu. Conversation actions and model selection remain in their existing UI; skills/plugins remain available through @ and the attachment menu. Compact/review and terminal commands are not implemented.

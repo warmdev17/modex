@@ -11,7 +11,7 @@ class TransportSmoke : Instrumentation() {
     override fun onCreate(arguments: Bundle) { super.onCreate(arguments); args = arguments; start() }
     override fun onStart() {
         if (args.getString("preview") == "composer-responsiveness") { composerResponsivenessSmoke(args); return }
-        if (args.getString("preview") == "slash-commands") { slashCommandsSmoke(); return }
+        if (args.getString("preview") == "native-session-controls") { nativeSessionControlsSmoke(); return }
         if (args.getString("preview") == "session-management") { sessionManagementSmoke(); return }
         if (args.getString("preview") == "plan-review") { planReviewSmoke(); return }
         if (args.getString("preview") == "activity-navigation") { activityNavigationSmoke(); return }
