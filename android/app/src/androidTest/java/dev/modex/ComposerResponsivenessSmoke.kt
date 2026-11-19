@@ -77,10 +77,19 @@ internal fun Instrumentation.composerResponsivenessSmoke(args: Bundle) {
         Thread.sleep(600); heartbeat("suggestions with attachment/history")
         if (args.getString("token") == "@") check(node("Prompt references") != null) { "Reference suggestions were not opened" }
         else check(node("Android commands") == null) { "Slash must remain plain text" }
+        if (args.getString("token") == "@") {
+            val first = node("Select skill fixture0") ?: error("Reference choices have no room")
+            first.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            Thread.sleep(300); heartbeat("reference choice visible")
+            val choice = node("Select skill fixture0") ?: error("Reference choice disappeared")
+            val choiceBounds = Rect().also(choice::getBoundsInScreen)
+            check(choice.isVisibleToUser && choiceBounds.height() >= (48 * activity.resources.displayMetrics.density).toInt() - 1) { "Reference choice has no usable touch area: $choiceBounds" }
+        }
         screenshot("composer-suggestions.png")
-        val send = node("Send message") ?: error("Send control missing behind suggestions")
+        var send = node("Send message") ?: error("Send control missing behind suggestions")
+        while (!send.isClickable) send = send.parent ?: error("Send button has no action owner")
         val sendBounds = Rect().also(send::getBoundsInScreen)
-        check(send.isVisibleToUser && sendBounds.height() > 0) { "Send control obscured by suggestions" }
+        check(send.isVisibleToUser && sendBounds.height() >= (48 * activity.resources.displayMetrics.density).toInt() - 1) { "Send control obscured by suggestions" }
         if (Build.VERSION.SDK_INT >= 30) {
             val keyboard = activity.window.decorView.rootWindowInsets.getInsets(WindowInsets.Type.ime()).bottom
             check(sendBounds.bottom <= activity.window.decorView.height - keyboard) { "Send control is behind the keyboard" }

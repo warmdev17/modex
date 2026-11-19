@@ -14,6 +14,7 @@ internal object Mocha {
     val Text = Color(0xFFCDD6F4)
     val Subtext = Color(0xFFBAC2DE)
     val Blue = Color(0xFF89B4FA)
+    val Pink = Color(0xFFF5C2E7)
     val Red = Color(0xFFF38BA8)
 }
 

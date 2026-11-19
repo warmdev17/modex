@@ -8,6 +8,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.foundation.BorderStroke
@@ -587,7 +588,24 @@ private fun PromptComposer(
         onChange(value.text)
     }
     val sendEnabled = enabled && (prompt.isNotBlank() || attachments.isNotEmpty())
-    Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val control = modeControl(mode, modeUncertain, modeChanging)
+    val modeColor = if (mode == "plan") Mocha.Pink else Mocha.Blue
+    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
+        TextButton(
+            onClick = { if (control.refresh) onModeRefresh() else onMode(control.target) },
+            enabled = modeEnabled && control.enabled,
+            colors = ButtonDefaults.textButtonColors(contentColor = if (control.refresh) Mocha.Red else modeColor, disabledContentColor = Mocha.Subtext),
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), shape = RoundedCornerShape(6.dp),
+            modifier = Modifier.heightIn(min = 48.dp).semantics { stateDescription = if (mode == "plan") "Plan mode enabled" else if (mode == "default") "Default mode enabled" else "Mode unavailable" }
+        ) {
+            if (modeChanging) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Mocha.Subtext)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(control.label, style = MaterialTheme.typography.labelMedium)
+        }
+        Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Message input container" }) {
         Column(Modifier.padding(12.dp)) {
             if (showReferences) Box(Modifier.weight(1f, fill = false)) {
                 ReferencePicker(referenceCatalog, query?.query.orEmpty(), referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
@@ -608,30 +626,22 @@ private fun PromptComposer(
                         modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp).semantics { contentDescription = "Remove ${reference.kind} ${reference.name}" })
                 }
             }
-            if (attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                attachments.forEach { file -> AttachmentTile(file, loadAttachment, { onPreview(file) }, if (!busy && !attachmentWorking) ({ onRemove(file.path) }) else null) }
+            if (attachments.isNotEmpty() && !showReferences) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                attachments.forEach { file ->
+                    if (keyboardVisible) InputChip(
+                        selected = false, onClick = { onPreview(file) },
+                        label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingIcon = { ChatGlyph(if (file.kind == "image") ChatIcon.Image else ChatIcon.File) },
+                        trailingIcon = { if (!busy && !attachmentWorking) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
+                        modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp), shape = RoundedCornerShape(6.dp)
+                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (!busy && !attachmentWorking) ({ onRemove(file.path) }) else null)
+                }
             }
             if (attachmentWorking) Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                 Text(attachmentProgress, Modifier.padding(start = 8.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
-            val control = modeControl(mode, modeUncertain, modeChanging)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                if (control.accented) FilledTonalButton(
-                    onClick = { onMode(control.target) }, enabled = modeEnabled && control.enabled,
-                    colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.heightIn(min = 48.dp).semantics { stateDescription = "Plan mode enabled" }
-                ) { ChatGlyph(ChatIcon.Skill); Spacer(Modifier.width(6.dp)); Text(control.label) }
-                else OutlinedButton(
-                    onClick = { if (control.refresh) onModeRefresh() else onMode(control.target) }, enabled = modeEnabled && control.enabled,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (control.refresh) Mocha.Red else Mocha.Text), shape = RoundedCornerShape(8.dp),
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    if (modeChanging) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Mocha.Subtext) else ChatGlyph(if (control.refresh) ChatIcon.Activity else ChatIcon.Skill)
-                    Spacer(Modifier.width(6.dp)); Text(control.label)
-                }
-            }
             BasicTextField(editor, { changeEditor(it) }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
                 decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
@@ -664,13 +674,14 @@ private fun PromptComposer(
                     }
                 }
                 FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else sendEnabled, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (busy) Mocha.Red else Mocha.Blue, contentColor = Mocha.Base,
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (busy) Mocha.Red else modeColor, contentColor = Mocha.Base,
                         disabledContainerColor = if (busy) Mocha.Red else Mocha.Surface, disabledContentColor = Mocha.Base)) {
                     if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp, color = Mocha.Base) else if (busy) ChatGlyph(ChatIcon.Stop, "Stop response") else ChatGlyph(ChatIcon.Send,"Send message")
                 }
             }
         }
     }
+}
 }
 
 @OptIn(ExperimentalFoundationApi::class)
