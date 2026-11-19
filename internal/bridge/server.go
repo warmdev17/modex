@@ -766,7 +766,7 @@ func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, c
 		result, err := HandleEvents(ctx, cwd, cmd, call, emit)
 		respond(cmd, result, err)
 	}
-	// Keep ordinary commands ordered while accepting decisions during a pending RPC.
+	// Stop and decision replies must reach Codex even while an ordinary RPC is pending.
 	commands := make(chan Command, 16)
 	done := make(chan struct{})
 	go func() {
@@ -781,7 +781,7 @@ func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, c
 			respond(cmd, nil, err)
 			continue
 		}
-		if cmd.Method == "decision/respond" {
+		if cmd.Method == "decision/respond" || cmd.Method == "turn/interrupt" {
 			handle(cmd)
 			continue
 		}
