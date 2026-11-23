@@ -248,10 +248,14 @@ fun Instrumentation.historyScrollSmoke() {
 fun Instrumentation.commandTimelineSmoke() {
     val output = Bundle()
     try {
+        val command = "/usr/bin/bash -lc \"go test ./...\""
+        val jsonOutput = "{\"ok\": true, \"count\": 42}"
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var messages by mutableStateOf(listOf(ChatEntry("a", "Codex", "Checking the workspace.")))
         runOnMainSync {
-            messages = updateChat(messages, "item/started", org.json.JSONObject("""{"item":{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"inProgress"}}"""))
+            messages = updateChat(messages, "item/started", org.json.JSONObject().put("item",
+                org.json.JSONObject().put("id", "c").put("type", "commandExecution").put("command", command)
+                    .put("cwd", "/work").put("status", "inProgress")))
             messages = updateChat(messages, "item/commandExecution/outputDelta", org.json.JSONObject("""{"itemId":"c","delta":"TOOL_OUTPUT_MARKER"}"""))
             activity.setContent { ModexTheme { Surface { ChatWorkspace(
                 "fixture", true, false, "tools", listOf("tools"), emptyMap(), messages,
@@ -280,10 +284,11 @@ fun Instrumentation.commandTimelineSmoke() {
             File(targetContext.filesDir, name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
             bmp.recycle()
         }
-        await("Terminal activity"); await("Running"); await("go test ./...")
+        await("Running"); await("Running go test ./...…")
         check(node("TOOL_OUTPUT_MARKER") == null) { "Output exposed while collapsed" }
         shot("command-collapsed.png")
         click("Expand command")
+        await(command)
         await("TOOL_OUTPUT_MARKER")
         shot("command-expanded.png")
         click("Collapse command")
@@ -291,10 +296,18 @@ fun Instrumentation.commandTimelineSmoke() {
         while (node("TOOL_OUTPUT_MARKER") != null && System.currentTimeMillis() < collapseDeadline) Thread.sleep(100)
         shot("command-recollapsed.png")
         check(node("TOOL_OUTPUT_MARKER") == null) { "Output still exposed after collapse" }
-        runOnMainSync { messages = updateChat(messages, "item/completed", org.json.JSONObject("""{"item":{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"completed","aggregatedOutput":"TOOL_OUTPUT_MARKER","exitCode":1}}""")) }
+        runOnMainSync { messages = listOf(messages.last().copy(status = "completed", exitCode = 0, text = jsonOutput)) }
+        await("Ran go test ./...")
+        await("Completed · exit 0")
+        click("Expand command"); await(jsonOutput)
+        shot("command-highlighted.png")
+        click("Collapse command")
+        runOnMainSync { messages = listOf(messages.last().copy(status = "failed", exitCode = 1)) }
         await("Failed · exit 1")
-        click("Expand command"); await("TOOL_OUTPUT_MARKER")
-        output.putString("result", "PASS: running card, hidden output, expand/collapse, failed exit status and retained output")
+        runOnMainSync { messages = listOf(messages.last().copy(status = "interrupted", exitCode = 130)) }
+        await("Interrupted · exit 130")
+        click("Expand command"); await(jsonOutput)
+        output.putString("result", "PASS: command summary, expand/collapse, running/completed/failed/interrupted states and retained output")
         finish(-1, output)
     } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
 }
