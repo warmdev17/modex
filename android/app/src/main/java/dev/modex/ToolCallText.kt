@@ -8,12 +8,16 @@ import androidx.compose.ui.text.buildAnnotatedString
 private const val HIGHLIGHT_LIMIT = 16_384
 private val shellWrapper = Regex("""^(?:(?:/[\w.-]+)*/)?(?:bash|sh|zsh)[ \t]+-(?:lc|c)[ \t]+""")
 
-internal fun commandSummary(command: String, running: Boolean): String {
+internal fun commandSummary(command: String, running: Boolean): AnnotatedString = buildAnnotatedString {
     val display = if (command.length <= HIGHLIGHT_LIMIT) unwrapShell(command) ?: command else command
     val firstLine = display.lineSequence().firstOrNull().orEmpty().trim()
     val preview = firstLine.take(240).trimEnd { it.isHighSurrogate() }.ifBlank { "shell command" }
     val more = running || firstLine.length > preview.length && firstLine.isNotBlank() || '\n' in display || '\r' in display
-    return (if (running) "Running " else "Ran ") + preview + if (more) "…" else ""
+    append(if (running) "Running " else "Ran ")
+    val commandStart = length
+    append(preview)
+    if (firstLine.isNotBlank()) highlight(preview, commandStart, ToolLanguage.Shell)
+    if (more) append("…")
 }
 
 private fun unwrapShell(command: String): String? {

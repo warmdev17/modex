@@ -5,14 +5,22 @@ import org.junit.Test
 
 class ToolCallTextTest {
     @Test fun summaryShowsCommandAndKeepsUnexpectedWrappers() {
-        assertEquals("Ran git status", commandSummary("/usr/bin/bash -lc 'git status'", false))
-        assertEquals("Running echo \"hello\"…", commandSummary("/bin/bash -lc \"echo \\\"hello\\\"\nls\"", true))
-        assertEquals("Ran printf '%s' hi", commandSummary("printf '%s' hi", false))
+        assertEquals("Ran git status", commandSummary("/usr/bin/bash -lc 'git status'", false).text)
+        assertEquals("Running echo \"hello\"…", commandSummary("/bin/bash -lc \"echo \\\"hello\\\"\nls\"", true).text)
+        assertEquals("Ran printf '%s' hi", commandSummary("printf '%s' hi", false).text)
         val malformed = "/bin/bash -lc 'git status"
-        assertEquals("Ran $malformed", commandSummary(malformed, false))
+        assertEquals("Ran $malformed", commandSummary(malformed, false).text)
         val arguments = "/bin/bash -lc 'echo \$0' argument"
-        assertEquals("Ran $arguments", commandSummary(arguments, false))
-        assertEquals("Ran shell command", commandSummary("", false))
+        assertEquals("Ran $arguments", commandSummary(arguments, false).text)
+        assertEquals("Ran shell command", commandSummary("", false).text)
+    }
+
+    @Test fun collapsedSummaryColorsCommandAndLeavesStatusLabelPlain() {
+        for (running in listOf(false, true)) {
+            val summary = commandSummary("/bin/bash -lc \"printf '%s' 42\"", running)
+            val styledTokens = summary.spanStyles.map { summary.text.substring(it.start, it.end) }
+            assertEquals(listOf("printf", "'%s'", "42"), styledTokens)
+        }
     }
 
     @Test fun commandUsesShellAndEmbeddedLanguageColorsWithoutRewritingText() {

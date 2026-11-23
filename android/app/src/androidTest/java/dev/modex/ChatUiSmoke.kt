@@ -299,6 +299,7 @@ fun Instrumentation.commandTimelineSmoke() {
         runOnMainSync { messages = listOf(messages.last().copy(status = "completed", exitCode = 0, text = jsonOutput)) }
         await("Ran go test ./...")
         await("Completed · exit 0")
+        shot("command-ran.png")
         click("Expand command"); await(jsonOutput)
         shot("command-highlighted.png")
         click("Collapse command")
