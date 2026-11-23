@@ -23,16 +23,14 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
             check(manager.profiles.all { it.name in listOf("Fixture laptop", "Fixture VPS") }) { "This fixture requires a disposable emulator with no user hosts" }
             runOnMainSync { manager.profiles.toList().forEach { manager.remove(it.id) } }
             manager.reconnectOnOpen(false)
-            val first = manager.add("Fixture laptop")!!
-            val second = manager.add("Fixture VPS")!!
             val bytes = args.getString("keyPath")?.let(::readSshFixtureKey) ?: File(targetContext.filesDir, "smoke-key").readBytes()
             try {
                 runOnMainSync {
-                    for ((id, state) in listOf(first to args.getString("state")!!, second to args.getString("state2")!!)) {
-                        val vm = manager.controller(id)
-                        vm.importKey(bytes.copyOf())
-                        vm.connect(Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,
-                            args.getString("pin")!!, args.getString("binary")!!, state))
+                    for ((name, state) in listOf("Fixture laptop" to args.getString("state")!!, "Fixture VPS" to args.getString("state2")!!)) {
+                        val connection = Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,
+                            args.getString("pin")!!, args.getString("binary")!!, state)
+                        val id = manager.add(name, connection, bytes).getOrThrow()
+                        manager.controller(id).connect(connection)
                     }
                 }
             } finally { bytes.fill(0) }

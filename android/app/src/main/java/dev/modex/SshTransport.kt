@@ -12,8 +12,34 @@ import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import org.json.JSONObject
 
-// Connection details are intentionally memory-only in this first slice.
 data class Connection(val host: String, val port: Int, val user: String, val pin: String, val binary: String, val state: String)
+
+internal const val INVALID_CONNECTION = "Check the address, port, fingerprint and any custom paths."
+
+internal fun Connection.isValid(): Boolean =
+    host.isNotBlank() && user.isNotBlank() && port in 1..65535 &&
+        pin.matches(Regex("SHA256:[A-Za-z0-9+/]{43}")) &&
+        runCatching { remoteCommand(binary, state, 0, null) }.isSuccess
+
+private fun JSch.loadIdentity(key: ByteArray) {
+    addIdentity("modex-memory-key", key, null, null)
+    require(identityRepository.identities.any { !it.isEncrypted })
+}
+
+internal fun isUnencryptedSshKey(key: ByteArray): Boolean {
+    if (key.size !in 1..(256 * 1024)) return false
+    val copy = key.copyOf()
+    val jsch = JSch()
+    return try {
+        jsch.loadIdentity(copy)
+        true
+    } catch (_: Exception) {
+        false
+    } finally {
+        copy.fill(0)
+        jsch.removeAllIdentity()
+    }
+}
 
 class SshTransport {
     @Volatile private var session: Session? = null
@@ -49,11 +75,8 @@ class SshTransport {
                 override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
             })
             stage = "key"
-            jsch.addIdentity("modex-memory-key", key, null, null)
-            if (jsch.identityRepository.identities.any { it.isEncrypted }) {
-                jsch.removeAllIdentity()
-                throw connectionFailure("key", IllegalArgumentException())
-            }
+            try { jsch.loadIdentity(key) }
+            catch (failure: Exception) { jsch.removeAllIdentity(); throw failure }
             val ssh = jsch.getSession(config.user, config.host, config.port)
             session = ssh
             try {

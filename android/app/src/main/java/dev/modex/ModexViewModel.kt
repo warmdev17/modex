@@ -186,7 +186,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 cachedPages.removeAll { it.first == selected }
                 cachedPages += selected to (visibleHistory ?: CachedHistory(emptyList(), "", "")).copy(entries = messages, revision = "")
             }
-            val snapshot = JSONObject().put("connection", JSONObject().put("host", c.host).put("port", c.port).put("user", c.user).put("pin", c.pin).put("binary", c.binary).put("state", c.state))
+            val snapshot = JSONObject().put("connection", c.toJson())
                 .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
                 .put("model_choices", modelChoicesJson(modelChoices)).put("host_choice", hostChoice.toJson()).put("selected_workspace", selectedWorkspace).put("attachment_directories", attachments.directoriesJson())
                 .put("active_turns", sessions.activityJson()).put("last_thread", lastThread)
@@ -286,11 +286,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         error = ""
     }
     fun configure(value: Connection): Boolean {
-        if (value.host.isBlank() || value.user.isBlank() || value.port !in 1..65535 ||
-            !value.pin.matches(Regex("SHA256:[A-Za-z0-9+/]{43}")) ||
-            runCatching { remoteCommand(value.binary, value.state, 0, null) }.isFailure) {
-            error = "Check the address, port, fingerprint and any custom paths."; return false
-        }
+        if (!value.isValid()) { error = INVALID_CONNECTION; return false }
         if (!keyLoaded) { error = "Import an unencrypted SSH private key first."; return false }
         val previous = config
         if (previous != value && (connected || connecting)) disconnect()

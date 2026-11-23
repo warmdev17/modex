@@ -222,8 +222,16 @@ internal fun Instrumentation.sessionManagementSmoke() {
         runOnMainSync { vm.disconnect() }
         await("Saved Hosts reached")
         lateinit var menuHostId: String
+        val keyPair = com.jcraft.jsch.KeyPair.genKeyPair(com.jcraft.jsch.JSch(), com.jcraft.jsch.KeyPair.RSA, 1024)
+        val key = try {
+            java.io.ByteArrayOutputStream().also { keyPair.writePrivateKey(it) }.toByteArray()
+        } finally {
+            keyPair.dispose()
+        }
         runOnMainSync {
-            menuHostId = app.connections.add("Menu preview fixture host")!!
+            val connection = Connection("fixture.invalid", 22, "fixture", "SHA256:" + "A".repeat(43), "", "")
+            menuHostId = app.connections.add("Menu preview fixture host", connection, key).getOrThrow()
+            key.fill(0)
             activity.setContent { ModexTheme { ConnectionHome() } }
         }
         touch("Manage Menu preview fixture host"); await("Edit host"); screenshot("menu-host.png")

@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
 
@@ -29,7 +30,6 @@ internal fun ConnectionHome() {
     var targetThread by rememberSaveable { mutableStateOf("") }
     var editor by rememberSaveable { mutableStateOf(false) }
     var create by rememberSaveable { mutableStateOf(false) }
-    var newName by rememberSaveable { mutableStateOf("") }
     var delete by rememberSaveable { mutableStateOf("") }
     var issueHost by remember { mutableStateOf("") }
     val owner = LocalLifecycleOwner.current
@@ -45,7 +45,32 @@ internal fun ConnectionHome() {
     val connectedHosts = manager.profiles.filter { manager.controller(it.id).connected }.map { it.id }.toSet()
     val liveWaiting = activities.filter { it.hostId in connectedHosts }.sumOf { it.waiting }
     val profile = manager.profiles.firstOrNull { it.id == opened }
-    if (profile != null) {
+    if (create) {
+        val draft: NewHostDraft = viewModel()
+        val close = { draft.replaceKey(null); create = false }
+        HostSettings(
+            hostName = "", saved = null, keyLoaded = draft.key != null, newHost = true,
+            onImportKey = draft::replaceKey, onBack = close, onHome = close,
+            onSubmit = { name, connection, connect ->
+                draft.key?.let { bytes ->
+                    manager.add(name, connection, bytes).fold(
+                        onSuccess = { id ->
+                            close()
+                            if (connect) {
+                                val vm = manager.controller(id)
+                                vm.connect(connection)
+                                editor = !vm.connecting && !vm.connected
+                                targetThread = ""
+                                opened = id
+                            }
+                            null
+                        },
+                        onFailure = { it.message },
+                    )
+                }
+            },
+        )
+    } else if (profile != null) {
         val vm = manager.controller(profile.id)
         BackHandler { opened = ""; targetThread = "" }
         LaunchedEffect(profile.id, targetThread, vm.connected, vm.historyLoading) {
@@ -74,7 +99,7 @@ internal fun ConnectionHome() {
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth().height(56.dp).semantics { contentDescription = "Navigation toolbar" }, verticalAlignment = Alignment.CenterVertically) {
                 Text(page, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                if (page == "Hosts") FilledTonalButton(shape = RoundedCornerShape(10.dp), onClick = { newName = ""; create = true },
+                if (page == "Hosts") FilledTonalButton(shape = RoundedCornerShape(10.dp), onClick = { create = true },
                     colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base)) {
                     ChatGlyph(ChatIcon.Attach); Spacer(Modifier.width(6.dp)); Text("Add host")
                 }
@@ -160,11 +185,6 @@ internal fun ConnectionHome() {
             dismissButton = { TextButton(onClick = { issueHost = "" }) { Text("Close") } },
         )
     }
-    if (create) AlertDialog(onDismissRequest = { create = false }, title = { Text("Add host") },
-        text = { OutlinedTextField(newName, { newName = it.take(80) }, label = { Text("Name") }, placeholder = { Text("Laptop or VPS") }, singleLine = true) },
-        confirmButton = { TextButton(enabled = newName.isNotBlank(), onClick = {
-            manager.add(newName)?.let { opened = it; editor = true; create = false }
-        }) { Text("Continue") } }, dismissButton = { TextButton(onClick = { create = false }) { Text("Cancel") } })
     if (delete.isNotBlank()) AlertDialog(onDismissRequest = { delete = "" }, title = { Text("Remove saved host?") },
         text = { Text("Disconnect this host and remove its saved key and session state from this device. Remote files and conversations are kept.") },
         confirmButton = { TextButton(onClick = { manager.remove(delete); if (opened == delete) opened = ""; delete = "" }) { Text("Remove", color = Mocha.Red) } },
