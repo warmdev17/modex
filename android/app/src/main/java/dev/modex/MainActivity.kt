@@ -26,6 +26,11 @@ class MainActivity : ComponentActivity() {
             ModexTheme { Surface(Modifier.fillMaxSize()) { ConnectionHome() } }
         }
     }
+
+    override fun onStop() {
+        (application as ModexApplication).sessions.values.forEach { it.flushDrafts() }
+        super.onStop()
+    }
 }
 
 @Composable
@@ -108,7 +113,8 @@ internal fun HostWorkspace(
             threadWorkspaces = vm.threadWorkspaces, threadListLoading = vm.threadListLoading,
             registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus,
             attachments = vm.attachments.drafts[vm.selected].orEmpty(), attachmentWorking = vm.attachments.working,
-            attachmentProgress = vm.attachments.progress, attachmentError = vm.attachments.error,
+            attachmentProgress = vm.attachments.progress, attachmentError = vm.attachments.error.ifBlank { vm.promptDrafts.error },
+            promptDrafts = vm.promptDrafts,
             loadAttachment = vm::attachmentFile,
             onPhoneFiles = { phoneThread = vm.selected; phoneGeneration = vm.attachments.generation; phoneTarget = vm.savedConnection.toString(); documentPicker.launch(arrayOf("*/*")) },
             onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.attachments.directoryFor(remoteThread), remoteThread) },

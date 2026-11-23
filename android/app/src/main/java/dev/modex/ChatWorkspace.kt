@@ -142,7 +142,8 @@ internal fun ChatWorkspace(
     loadAttachment: suspend (Attachment) -> java.io.File = { error("Reconnect to open attachment") },
     onNewProject: () -> Unit = {},
     onCreateInProject: (String, String, String, String, String) -> Unit = { model, mode, effort, _, _ -> onCreate(model, mode, effort) },
-    onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {}
+    onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {},
+    promptDrafts: PromptDrafts? = null,
 ) {
     var deleting by remember(host, archived) { mutableStateOf("") }
     if (deleting.isNotBlank()) AlertDialog(
@@ -169,7 +170,7 @@ internal fun ChatWorkspace(
     BackHandler(drawer.isOpen) { scope.launch { drawer.close() } }
     var collapsedProjects by rememberSaveable { mutableStateOf(arrayListOf<String>()) }
     var search by rememberSaveable { mutableStateOf("") }
-    var drafts by rememberSaveable { mutableStateOf(hashMapOf<String,String>()) }
+    val localDrafts = remember(host) { mutableStateMapOf<String, PromptDraft>() }
     val focus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
     val context = LocalContext.current
@@ -179,16 +180,17 @@ internal fun ChatWorkspace(
         if (connected) onRefresh()
     }
     var editing by remember(selected) { mutableStateOf<String?>(null) }
-    val prompt = drafts[selected].orEmpty()
-    var referenceDrafts by rememberSaveable(host) { mutableStateOf(hashMapOf<String, String>()) }
-    val chosenReferences = referencesInText(prompt, readReferenceDraft(referenceDrafts[selected].orEmpty()))
-    fun updatePrompt(value: String) {
-        drafts = HashMap(drafts).apply { put(selected, value) }
-        referenceDrafts = HashMap(referenceDrafts).apply { put(selected, referenceDraftJson(referencesInText(value, readReferenceDraft(get(selected).orEmpty())))) }
-    }
-    fun addReference(reference: PromptReference) {
-        val values = readReferenceDraft(referenceDrafts[selected].orEmpty()).filterNot { it.kind == reference.kind && it.name == reference.name } + reference
-        referenceDrafts = HashMap(referenceDrafts).apply { put(selected, referenceDraftJson(values.take(8))) }
+    val draft = (promptDrafts?.get(selected) ?: localDrafts[selected]) ?: PromptDraft()
+    val prompt = draft.text
+    val chosenReferences = draft.references
+    fun updatePrompt(text: String, added: PromptReference? = null) {
+        val current = (promptDrafts?.get(selected) ?: localDrafts[selected])?.references.orEmpty()
+        val references = if (added == null) current else {
+            current.filterNot { it.kind == added.kind && it.name == added.name } + added
+        }
+        val next = PromptDraft(text, referencesInText(text, references.take(8)))
+        if (promptDrafts != null) promptDrafts.update(selected, next)
+        else if (text.isEmpty()) localDrafts.remove(selected) else localDrafts[selected] = next
     }
     fun applyEdit(text: String) { updatePrompt(text); scope.launch { focus.requestFocus(); keyboard?.show() } }
     editing?.let { text -> AlertDialog(onDismissRequest = { editing = null }, title = { Text("Replace draft?") }, text = { Text("Your current draft will be replaced. The message will be sent as a new turn only when you press Send.") }, confirmButton = { TextButton(onClick = { applyEdit(text); editing = null }) { Text("Replace") } }, dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } }) }
@@ -445,7 +447,7 @@ internal fun ChatWorkspace(
             }
             val work = if (running) activeWork ?: ChatEntry(role = "You", status = "inProgress") else completedWork
             PromptComposer(
-                prompt, { updatePrompt(it) }, busy,
+                prompt, ::updatePrompt, busy,
                 (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank(),
                 ::openModel,
                 connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking && !modeChanging,
@@ -456,7 +458,7 @@ internal fun ChatWorkspace(
                 focus = focus, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
                 referenceEnabled = connected && selected.isNotBlank() && !historyLoading, chosenReferences = chosenReferences,
-                onAddReference = ::addReference, onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
+                onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
                 suggestionsEnabled = !drawer.isOpen,
                 mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain, modeEnabled = modeActionEnabled,
                 onMode = onSessionMode, onModeRefresh = onSessionStatus, work = work, workAction = workAction,
@@ -609,12 +611,12 @@ private fun SessionUsageRow(label: String, remaining: Int?, detail: String?, sho
 
 @Composable
 private fun PromptComposer(
-    prompt: String, onChange: (String) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
+    prompt: String, onChange: (String, PromptReference?) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
     attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
     modelColor: Color, focus: FocusRequester, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
-    referenceEnabled: Boolean, chosenReferences: List<PromptReference>, onAddReference: (PromptReference) -> Unit,
+    referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
     suggestionsEnabled: Boolean, mode: String, modeChanging: Boolean, modeUncertain: Boolean, modeEnabled: Boolean,
     onMode: (String) -> Unit, onModeRefresh: () -> Unit, work: ChatEntry?, workAction: String?, onSend: () -> Unit
@@ -629,10 +631,10 @@ private fun PromptComposer(
     val showReferences = suggestionsEnabled && referenceEnabled && (manualReferences || (fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)))
     fun closeReferences() { manualReferences = false; dismissedQuery = editor.text to editor.selection.start }
     BackHandler(showReferences) { closeReferences() }
-    fun changeEditor(value: TextFieldValue) {
+    fun changeEditor(value: TextFieldValue, reference: PromptReference? = null) {
         if (value.text != editor.text || value.selection != editor.selection) dismissedQuery = null
         editor = value
-        onChange(value.text)
+        onChange(value.text, reference)
     }
     val sendEnabled = enabled && (prompt.isNotBlank() || attachments.isNotEmpty())
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
@@ -669,8 +671,7 @@ private fun PromptComposer(
                     val range = query ?: ReferenceQuery(editor.selection.min, editor.selection.max, "")
                     val (text, cursor) = insertReference(editor.text, range, reference)
                     manualReferences = false
-                    onAddReference(reference)
-                    changeEditor(TextFieldValue(text, TextRange(cursor)))
+                    changeEditor(TextFieldValue(text, TextRange(cursor)), reference)
                     focus.requestFocus()
                 })
             }

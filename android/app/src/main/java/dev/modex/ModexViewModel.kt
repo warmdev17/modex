@@ -45,6 +45,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private val saved = SavedHost(application, storageName)
     private val sessions = SessionState()
     private val historyCache = HistoryCache()
+    private val draftCache = lazy { PromptDrafts(SavedHost(application, "$storageName-prompts"), viewModelScope) }
+    internal val promptDrafts by draftCache
+    internal fun flushDrafts() { if (draftCache.isInitialized()) promptDrafts.flush() }
     private data class HistoryRequest(val thread: String, val cursor: String, val activity: Long, val before: List<ChatEntry>)
     private val historyRequests = mutableMapOf<Long, HistoryRequest>()
     private data class LifecycleRequest(val target: String, val generation: Long, val selection: Long, val activity: Long)
@@ -228,6 +231,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (reconnectAllowed && !connected && !connecting) savedConnection?.let { connect(it) }
     }
     fun forget() {
+        promptDrafts.clear()
         attachments.clear(); sentAttachmentPaths.clear(); modelChoices = emptyMap(); hostChoice = ModelChoice()
         sessionSettings = ""
         disconnect(); transport = null; connected = false; connecting = false; projectCreating = false; reconnectAllowed = false; saveJob?.cancel()
@@ -293,6 +297,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (previous != value && (connected || connecting)) disconnect()
         if (previous != null && (previous.pin != value.pin || previous.user != value.user || previous.state != value.state)) {
             clearJournalState(); handledPlans = emptySet(); planSending = false; historyCache.clear(); lastThread = ""; modelChoices = emptyMap(); hostChoice = ModelChoice()
+            promptDrafts.clear()
             attachments.clear(); projects = emptyList(); projectMembership = emptyMap()
         }
         config = value; savedConnection = value; error = ""; persist()
@@ -457,7 +462,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (!connected || busy || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
         val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace), selected)
-        if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
+        if (id == null) return false
+        sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         return true
     }
     fun stop() {
@@ -640,6 +646,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     if (operation.first != "threads/unarchive" && target == selected) leaveSession()
                     if (operation.first == "threads/delete") {
                         historyCache.remove(target); sessions.remove(target)
+                        promptDrafts.update(target, PromptDraft())
                         decisions = decisions.filterNot { it.optString("thread_id") == target }
                         modelChoices -= target; threadWorkspaces -= target; titles -= target; projectMembership -= target
                     }
