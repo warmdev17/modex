@@ -1,8 +1,26 @@
 # Modex project state
 
-## Current integrated state
+## Release train dev.18–dev.30
 
-Updated: 2026-11-23 Asia/Ho_Chi_Minh. Active branch `main`, merged source `be1fc9554789b2cc0abbd44172b1054bb2bf1cbf` (PR #30). Android [dev.17](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.17), versionCode 18, source `170ab6a05d799ae718df8e2321d185c0bd3b2258`, is the latest delivered client. The installed host remains dev.15/source `15bef480cf621c807fe9ad4d6684ca8c98c3166f`; dev.16 and dev.17 were Android-only and did not restart it. No active feature implementation remains.
+Updated 2026-11-24T00:05:03+07:00. Integration branch `integration/dev18-dev30`. Latest Android prerelease [dev.30](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.30), versionCode 31, source `ae21f3653a0912825b636330443ec20526f2d13c`. The source commits are retained in order. Release tags identify the original build revisions.
+
+| Releases | Source | What shipped |
+| --- | --- | --- |
+| dev.18–20 | `c8e1e99`, `97aba9b`, `ed91ee6` | Compact tool-call summaries, code highlighting and shell wrapper cleanup |
+| dev.21 | `9c9b2a0` | Session context and remaining usage |
+| dev.22 | `1bd22f8` | Markdown tables fitted to the chat viewport |
+| dev.23 | `bcdb218` | Session permission profiles and quota warnings |
+| dev.24 | `491a17f` | Native exploration, web activity and file diffs |
+| dev.25 | `efe1e37` | Stale-journal recovery and editing saved hosts |
+| dev.26–28 | `c964aee`, `247caa1`, `5e91848` | Add Host drafts, stable aligned status and immediate connection-error dialogs |
+| dev.29 | `1e4cfd0` | Transparent compact composer row with work timer |
+| dev.30 | `ae21f36` | Full-width, one-tap plan review actions |
+
+Tagged releases carry their verification and checksum artifacts. The latest Android release passed 132 tests, release lint, approval and plan UI checks, and the signed dev.29→dev.30 emulator upgrade with encrypted synthetic state. APK SHA-256 `84bb05ff57f9fbf6a1511f87dc71d3fdcc2c147e0f51f29e574491d539b7205c`. Physical phone, TalkBack and live plan execution remain unverified. Integrating source does not deploy or restart the host.
+
+## Earlier integration through dev.17
+
+Updated: 2026-11-23 Asia/Ho_Chi_Minh. Active branch `main`, merged source `be1fc9554789b2cc0abbd44172b1054bb2bf1cbf` (PR #30). Android [dev.17](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.17), versionCode 18, source `170ab6a05d799ae718df8e2321d185c0bd3b2258`, was the latest delivered client at that point. The host at that point was dev.15/source `15bef480cf621c807fe9ad4d6684ca8c98c3166f`; dev.16 and dev.17 were Android-only and did not restart it. No active feature implementation remains.
 
 Latest verified fix: streaming no longer serializes/encrypts the full history on every delta and no longer replays a redundant 20 ms typewriter. On the owned emulator, 80 deltas with 1,500 history items improved from 8,445 ms to 68 ms; a 500-character mixed-Markdown burst improved from 2,324 ms to 190 ms. Exact text, encrypted snapshot/cursor, Forget cancellation, auto-follow/manual viewport, Stop, native mode/status and @/image/history/real-IME regressions passed. The signed dev.16/code17 to dev.17/code18 in-place upgrade passed without uninstall or data clearing. PR #30 preserved the source commit, all five hosted jobs passed, and every public asset was anonymously downloaded and hash-verified. APK SHA256: `b13781b096aa789b44b430cdaa8dd4e1404afa477b94a826b344c71ad9494fdf`.
 
