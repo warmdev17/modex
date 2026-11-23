@@ -86,6 +86,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private var saveJob: kotlinx.coroutines.Job? = null
     var connected by mutableStateOf(false); private set
     var connecting by mutableStateOf(false); private set
+    internal var connectFailure by mutableStateOf(""); private set
     var error by mutableStateOf(""); private set
     var threads by mutableStateOf(listOf<String>()); private set
     val selected: String get() = sessions.selected
@@ -299,13 +300,22 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     fun connect(value: Connection) {
         if (connected || connecting) return
-        if (key == null) { error = "Import an unencrypted SSH private key first."; return }
-        if (!configure(value)) return
+        connectFailure = ""
+        if (key == null) {
+            error = "Import an unencrypted SSH private key first."
+            connectFailure = error
+            return
+        }
+        if (!configure(value)) { connectFailure = error; return }
         invalidateSessionRequests()
         leaveSession()
         config = value; savedConnection = value; reconnectAllowed = true; error = ""; connecting = true
         try { getApplication<Application>().startForegroundService(Intent(getApplication(), ConnectionService::class.java)) }
-        catch (_: Exception) { connecting = false; error = "Android could not start the connection service. Open Modex and connect again."; return }
+        catch (_: Exception) {
+            error = "Android could not start the connection service. Open Modex and connect again."
+            connectFailure = error; connecting = false
+            return
+        }
         persist()
         val current = SshTransport(); transport = current
         val copy = key!!.copyOf()
@@ -343,7 +353,12 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     attach(JournalState(), recovering = true)
                 }
             } catch (failure: Exception) {
-                withContext(Dispatchers.Main) { if (transport === current && reconnectAllowed) error = (failure as? ConnectionFailure)?.message ?: "Connection stopped while applying session data. Reconnect to observe; do not resend uncertain prompts." }
+                withContext(Dispatchers.Main) {
+                    if (transport === current && reconnectAllowed) {
+                        error = (failure as? ConnectionFailure)?.message ?: "Connection stopped while applying session data. Reconnect to observe; do not resend uncertain prompts."
+                        if (connecting) connectFailure = error
+                    }
+                }
             } finally {
                 copy.fill(0)
                 withContext(Dispatchers.Main) { if (transport === current) {
@@ -356,6 +371,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     fun disconnect() {
         reconnectAllowed = false
+        connectFailure = ""
         val current = transport; transport = null; connected = false; connecting = false; projectCreating = false
         invalidateSessionRequests(); leaveSession(); current?.close(); persist()
         getApplication<ModexApplication>().stopConnectionServiceIfIdle()

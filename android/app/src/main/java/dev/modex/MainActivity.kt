@@ -29,12 +29,18 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditing: Boolean, onHome: () -> Unit, onName: (String) -> Unit) {
+internal fun HostWorkspace(
+    vm: ModexViewModel,
+    hostName: String,
+    initiallyEditing: Boolean,
+    onHome: () -> Unit,
+    onName: (String) -> Unit,
+    onConnect: (Connection) -> Unit = vm::connect,
+) {
     val context = LocalContext.current
     var wasConnected by remember { mutableStateOf(vm.connected) }
-    var wasConnecting by remember { mutableStateOf(vm.connecting) }
     LaunchedEffect(vm.connected, vm.connecting) {
-        if (wasConnected && !vm.connected && !vm.connecting) onHome()
+        if (wasConnected && !vm.connected && !vm.connecting && vm.connectFailure.isBlank()) onHome()
         if (vm.connected) wasConnected = true
     }
     val settingsState = rememberSaveableStateHolder()
@@ -44,11 +50,7 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
     var openAfterConnect by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(vm.connected, vm.connecting) {
         if (vm.connected && openAfterConnect) connectionSettings = false
-        if (!vm.connecting) {
-            if (wasConnecting && !vm.connected && !connectionSettings && vm.error.isNotBlank()) onHome()
-            openAfterConnect = false
-        }
-        wasConnecting = vm.connecting
+        if (!vm.connecting) openAfterConnect = false
     }
     var phoneThread by rememberSaveable { mutableStateOf("") }
     var phoneGeneration by rememberSaveable { mutableStateOf(0) }
@@ -122,7 +124,7 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
                 if (vm.configure(connection)) {
                     onName(name)
                     if (connect) {
-                        vm.connect(connection)
+                        onConnect(connection)
                         if (vm.connected) connectionSettings = false
                         else if (vm.connecting) openAfterConnect = true
                     } else onHome()

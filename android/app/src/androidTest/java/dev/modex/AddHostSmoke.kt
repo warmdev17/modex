@@ -41,8 +41,8 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             check(stored.getInt("cursor") == 105 && stored.getString("key") == fixtureKey &&
                 stored.getJSONObject("host_choice").getString("model") == "fixture-model")
             val manager = app.connections
-            val issueLayout = args.getString("stage") == "issue-layout"
-            check(if (issueLayout) manager.profiles.containsAll(existing) else manager.profiles == existing)
+            val stage = args.getString("stage")
+            check(if (stage != null) manager.profiles.containsAll(existing) else manager.profiles == existing)
             val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
             fun find(label: String): AccessibilityNodeInfo? {
@@ -82,15 +82,91 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             }
             fun back() = sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
 
+            fun importKey() {
+                val key = KeyPair.genKeyPair(JSch(), KeyPair.RSA, 1024)
+                val file = File.createTempFile("add-host-key", ".fixture", app.cacheDir)
+                try {
+                    file.outputStream().use(key::writePrivateKey)
+                    val picked = Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(Uri.fromFile(file)))
+                    val filter = IntentFilter(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        addDataType("*/*")
+                    }
+                    val monitor = addMonitor(filter, picked, true)
+                    try {
+                        tap("Import SSH key")
+                        node("Replace SSH key")
+                        check(monitor.hits == 1)
+                    } finally {
+                        removeMonitor(monitor)
+                    }
+                } finally {
+                    key.dispose()
+                    file.delete()
+                }
+            }
+            fun fill(address: String) {
+                tap("Add host")
+                set("Hostname or IP", address)
+                set("SSH username", "fixture")
+                set("SSH fingerprint", pin)
+                importKey()
+            }
+            fun connectUnavailableHost() {
+                fill("127.0.0.1")
+                set("Port", "1")
+                tap("Connect")
+                node("SSH connection failed. Check the current host IP, port, network, sshd and SSH algorithm compatibility.")
+                tap("Close")
+                node("Navigation toolbar")
+            }
+
             node("Navigation toolbar")
-            if (issueLayout) {
+            if (stage == "add-connect") {
+                val before = manager.profiles.size
+                connectUnavailableHost()
+                val added = manager.profiles.last()
+                check(manager.profiles.size == before + 1 && added.name == "127.0.0.1")
+                check(SavedHost(app, added.id).load()?.getJSONObject("connection")?.getInt("port") == 1)
+                runOnMainSync { manager.remove(added.id) }
+                output.putString("result", "PASS: Add host Connect opens SSH error on Hosts and retains the saved profile")
+                finish(-1, output)
+                return
+            }
+            if (stage == "connect-issue") {
+                val error = "SSH key could not be loaded. Import a supported unencrypted private key."
+                tap("Connect")
+                node(error)
+                tap("Close")
+                node("Navigation toolbar")
+                node("Issue")
+                tap("Manage Configured fixture")
+                tap("Edit host")
+                node("Host settings")
+                tap("Connect")
+                node(error)
+                tap("Close")
+                node("Navigation toolbar")
+                runOnMainSync {
+                    val controller = manager.controller(saved.id)
+                    controller.connect(controller.savedConnection!!)
+                }
+                node("Issue")
+                check(find("Close") == null) { "A background connection opened a dialog" }
+                output.putString("result", "PASS: manual Connect from Hosts and Edit host opens the error on Hosts, background failure stays on the card")
+                finish(-1, output)
+                return
+            }
+            if (stage == "issue-layout") {
                 val manage = "Manage ${saved.name}"
                 val before = Rect().also(node(manage)::getBoundsInScreen)
+                val offline = Rect().also(node("Offline")::getBoundsInScreen)
                 runOnMainSync {
                     val controller = manager.controller(saved.id)
                     check(!controller.configure(controller.savedConnection!!.copy(port = 0)))
                 }
-                node("Issue")
+                val issue = Rect().also(node("Issue")::getBoundsInScreen)
+                check(issue.right == offline.right) { "Issue ends at ${issue.right}, Offline at ${offline.right}" }
                 val after = Rect().also(node(manage)::getBoundsInScreen)
                 check(before == after) { "Issue moved the host controls from $before to $after" }
                 tap("Issue")
@@ -150,29 +226,6 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             tap("Discard draft")
             node("Navigation toolbar")
 
-            fun importKey() {
-                val key = KeyPair.genKeyPair(JSch(), KeyPair.RSA, 1024)
-                val file = File.createTempFile("add-host-key", ".fixture", app.cacheDir)
-                try {
-                    file.outputStream().use(key::writePrivateKey)
-                    val picked = Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(Uri.fromFile(file)))
-                    val filter = IntentFilter(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        addDataType("*/*")
-                    }
-                    val monitor = addMonitor(filter, picked, true)
-                    try {
-                        tap("Import SSH key")
-                        node("Replace SSH key")
-                        check(monitor.hits == 1)
-                    } finally {
-                        removeMonitor(monitor)
-                    }
-                } finally {
-                    key.dispose()
-                    file.delete()
-                }
-            }
             fun screenshot(name: String) {
                 val bitmap = uiAutomation.takeScreenshot() ?: error("Could not capture $name")
                 File(targetContext.filesDir, name).outputStream().use {
@@ -195,13 +248,6 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             node("Navigation toolbar")
             check(manager.profiles == existing)
 
-            fun fill(address: String) {
-                tap("Add host")
-                set("Hostname or IP", address)
-                set("SSH username", "fixture")
-                set("SSH fingerprint", pin)
-                importKey()
-            }
             fill("fixture.invalid")
             set("Port", "0")
             tap("Save host")
@@ -232,10 +278,7 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             val details = SavedHost(app, added.id).load() ?: error("Saved host has no encrypted credentials")
             check(details.getJSONObject("connection").getString("host") == "fixture.invalid" && details.getString("key").isNotBlank())
 
-            fill("127.0.0.1")
-            set("Port", "1")
-            tap("Connect")
-            node("Navigation toolbar")
+            connectUnavailableHost()
             node("Issue")
             check(manager.profiles.size == existing.size + 2)
             val failed = manager.profiles.single { it.name == "127.0.0.1" }
