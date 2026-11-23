@@ -11,6 +11,7 @@ type sessionResult struct {
 	Approval string `json:"approval_policy,omitempty"`
 	Reviewer string `json:"approvals_reviewer,omitempty"`
 	Sandbox  string `json:"sandbox,omitempty"`
+	Profile  string `json:"permission_profile,omitempty"`
 }
 
 func projectSession(raw json.RawMessage) (sessionResult, error) {
@@ -23,7 +24,10 @@ func projectSession(raw json.RawMessage) (sessionResult, error) {
 		Effort   string          `json:"reasoningEffort"`
 		Approval json.RawMessage `json:"approvalPolicy"`
 		Reviewer string          `json:"approvalsReviewer"`
-		Sandbox  struct {
+		Profile  struct {
+			ID string `json:"id"`
+		} `json:"activePermissionProfile"`
+		Sandbox struct {
 			Type string `json:"type"`
 		} `json:"sandbox"`
 	}
@@ -31,6 +35,9 @@ func projectSession(raw json.RawMessage) (sessionResult, error) {
 		return sessionResult{}, err
 	}
 	result := sessionResult{Mode: source.Mode.Mode, Thread: source.Thread, Model: source.Model, Effort: source.Effort}
+	if validPermissionID(source.Profile.ID) {
+		result.Profile = source.Profile.ID
+	}
 	if result.Effort == "" {
 		result.Effort = source.Thread.Effort
 	}

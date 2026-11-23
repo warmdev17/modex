@@ -17,6 +17,7 @@ func TestStructuredAndLegacySafeTurnGuidance(t *testing.T) {
 		{`{"codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":999}},"message":"secret-key"}`, "stream_disconnected", 0},
 		{`{"message":"stream closed before completed: secret-key https://secret.invalid"}`, "stream_disconnected", 0},
 		{`{"message":"opaque secret-key https://secret.invalid"}`, "turn_failed", 0},
+		{`{"message":"You've hit your usage limit. Try again at 3:00 PM. secret-key"}`, "usage_limit_exceeded", 0},
 		{`{"codexErrorInfo":{"unknownSecret":{"httpStatusCode":401}},"message":"secret-key"}`, "turn_failed", 0},
 	} {
 		notice := Notice(json.RawMessage(tc.raw), false)

@@ -480,6 +480,29 @@ func TestIsolatedSharedModeAndStatus(t *testing.T) {
 	if !strings.Contains(string(raw), `"token_usage":null`) || !strings.Contains(string(raw), `"rate_limits":null`) {
 		t.Fatalf("status: %s", raw)
 	}
+	catalog, err := bridge.HandleEvents(ctx, root, bridge.Command{Method: "threads/permissions",
+		Params: mustJSON(map[string]string{"thread_id": id})}, s.call, nil)
+	if err != nil || !strings.Contains(string(mustJSON(catalog)), `":workspace"`) {
+		t.Fatalf("permission catalog: %s %v", mustJSON(catalog), err)
+	}
+	for _, profile := range []string{":workspace", ":read-only"} {
+		_, err = bridge.HandleEvents(ctx, root, bridge.Command{Method: "threads/permissions",
+			Params: mustJSON(map[string]string{"thread_id": id, "profile": profile})}, s.call, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			raw, err = s.call(ctx, "modex/thread/status", map[string]any{"threadId": id}, nil)
+			if err == nil && strings.Contains(string(raw), `"permission_profile":"`+profile+`"`) && strings.Contains(string(raw), `"collaboration_mode":"plan"`) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("profile %s not confirmed: %s %v", profile, raw, err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }
 
 func TestLegacyResumeRegistersSession(t *testing.T) {

@@ -82,3 +82,7 @@ The context indicator below the chat title opens session status. It shows report
 While the keyboard is open, attachments use compact filename chips; tap one to preview or use its remove button. Attachment previews temporarily hide while choosing an @ reference and return when suggestions close; the files remain attached.
 
 Slash commands have been removed entirely, including help. Typing `/` is ordinary prompt text and opens no menu. Conversation actions and model selection remain in their existing UI; skills/plugins remain available through @ and the attachment menu. Compact/review and terminal commands are not implemented.
+
+Open the chat menu → **Session settings** to change permissions for the loaded conversation. Android lists built-in and custom profiles reported by the host and disables profiles restricted by policy. Select a profile and tap **Apply** while the session is idle. The picker requests user review with on-request approvals for ordinary profiles and no approval prompts for the built-in Full access profile. Codex reports the active profile and effective approvals. The change applies to subsequent turns in the same conversation and requires the updated host. If the result is uncertain, reload permissions before trying again.
+
+When Codex reports exhausted quota or rejects a turn for a usage limit, Android shows a warning below the chat header. Tap it to open Session Status. Reset times are shown when reported by Codex.

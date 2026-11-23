@@ -70,6 +70,9 @@ func Notice(raw json.RawMessage, retrying bool) TurnNotice {
 		// Older servers omit structured codes; only recognize fixed diagnostic phrases.
 		message := strings.ToLower(detail.Message)
 		switch {
+		case isUsageLimitMessage(message):
+			notice.Category = "usage_limit_exceeded"
+			notice.Message = "Codex usage or quota limit reached. Check Session Status for available reset times."
 		case strings.Contains(message, "stream disconnected before completion"), strings.Contains(message, "stream closed before completion"), strings.Contains(message, "stream closed before completed"):
 			notice.Category = "stream_disconnected"
 			notice.Message = "The response stream disconnected before this turn finished."
@@ -93,4 +96,10 @@ func Notice(raw json.RawMessage, retrying bool) TurnNotice {
 		notice.Message += " Codex is retrying."
 	}
 	return notice
+}
+
+func isUsageLimitMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "hit your usage limit") || strings.Contains(message, "usage limit reached") ||
+		strings.Contains(message, "usage limit exceeded") || strings.Contains(message, "insufficient_quota")
 }

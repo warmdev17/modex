@@ -25,6 +25,8 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         var changing by mutableStateOf(false)
         var uncertain by mutableStateOf(false)
         var working by mutableStateOf(false)
+        var usageWarning by mutableStateOf("")
+        val permissionRequests = mutableListOf<String>()
         var status by mutableStateOf(SessionStatus(
             mode = "default", model = "fixture-model", effort = "medium", workspace = "/fixture",
             provider = "fixture", sandbox = "workspaceWrite", approvalPolicy = "on-request", approvalsReviewer = "user",
@@ -40,6 +42,8 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
             decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> },
             onSend = { text, _, _, _ -> sent += text; false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {},
             sessionStatus = status, modeChanging = changing, modeUncertain = uncertain, onSessionStatus = { statusRefreshes++ }, onSessionMode = { mode -> modeChanges += mode; changing = true },
+            permissionProfiles = listOf(SessionPermissionProfile(":workspace", "", true), SessionPermissionProfile("team-policy", "Project policy", true)),
+            onSessionPermissions = { permissionRequests += it }, usageWarning = usageWarning,
             models = listOf(ModelOption("fixture-model", "Fixture model", "medium", listOf("medium" to "Balanced")))
         ) } } } }
         fun nodes(label: String): List<AccessibilityNodeInfo> {
@@ -136,6 +140,18 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         touch("Open session status"); await("Session status")
         check(statusRefreshes == 3) { "Read-only status unavailable during running turn" }
         touch("Close"); shot("native-controls-final.png")
+        runOnMainSync { working = false }
+        touch("Connection menu"); touch("Session settings"); await("Current: Workspace write")
+        touch("team-policy"); touch("Apply")
+        check(permissionRequests == listOf("", "team-policy")) { "Profile selection did not use Session settings" }
+        runOnMainSync { status = status.copy(permissionProfile = "team-policy") }
+        await("Current: team-policy")
+        shot("session-permissions.png")
+        touch("Close")
+        runOnMainSync { usageWarning = "Codex 5-hour usage limit reached." }
+        await("Codex 5-hour usage limit reached.")
+        shot("usage-limit.png")
+        touch("Codex 5-hour usage limit reached."); await("Session status")
         output.putString("result", "PASS: one-tap native mode with ACK/pending/fresh/uncertain/busy states, tappable read-only context/status, all slash drafts are plain messages")
         finish(-1, output)
     } catch (failure: Throwable) {

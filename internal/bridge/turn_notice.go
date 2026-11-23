@@ -26,13 +26,22 @@ func mobileEventParams(method string, raw json.RawMessage) (json.RawMessage, err
 				Mode struct {
 					Mode string `json:"mode"`
 				} `json:"collaborationMode"`
-				Model  string  `json:"model"`
-				Effort *string `json:"effort"`
+				Model    string          `json:"model"`
+				Effort   *string         `json:"effort"`
+				Approval json.RawMessage `json:"approvalPolicy"`
+				Reviewer string          `json:"approvalsReviewer"`
+				Sandbox  json.RawMessage `json:"sandboxPolicy"`
+				Profile  json.RawMessage `json:"activePermissionProfile"`
 			}
 			if json.Unmarshal(event.Settings, &native) != nil {
 				return nil, errors.New("invalid settings event")
 			}
-			return json.Marshal(map[string]any{"threadId": event.ThreadID, "threadSettings": map[string]any{"collaborationMode": map[string]string{"mode": native.Mode.Mode}, "model": native.Model, "effort": native.Effort}})
+			raw, _ := json.Marshal(map[string]any{"approvalPolicy": native.Approval, "approvalsReviewer": native.Reviewer, "sandbox": native.Sandbox, "activePermissionProfile": native.Profile})
+			safe, err := projectSession(raw)
+			if err != nil {
+				return nil, err
+			}
+			return json.Marshal(map[string]any{"threadId": event.ThreadID, "threadSettings": map[string]any{"collaborationMode": map[string]string{"mode": native.Mode.Mode}, "model": native.Model, "effort": native.Effort, "permission_profile": safe.Profile, "sandbox": safe.Sandbox, "approval_policy": safe.Approval, "approvals_reviewer": safe.Reviewer}})
 		case "thread/tokenUsage/updated":
 			return json.Marshal(map[string]any{"threadId": event.ThreadID, "turnId": event.TurnID, "tokenUsage": SafeUsage(event.Usage)})
 		default:

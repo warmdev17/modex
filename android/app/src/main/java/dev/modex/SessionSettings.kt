@@ -2,6 +2,15 @@ package dev.modex
 
 import org.json.JSONObject
 
+internal data class SessionPermissionProfile(val id: String, val description: String, val allowed: Boolean) {
+    val label get() = when (id) {
+        ":read-only" -> "Read-only"
+        ":workspace" -> "Workspace write"
+        ":danger-full-access" -> "Full access"
+        else -> id
+    }
+}
+
 internal val permissionModes = linkedMapOf(
     "host-default" to "Host default",
     "read-only" to "Read-only",

@@ -32,6 +32,7 @@ type rateLimits struct {
 	Plan      *string     `json:"planType"`
 	Primary   *rateWindow `json:"primary"`
 	Secondary *rateWindow `json:"secondary"`
+	Reached   string      `json:"rateLimitReachedType,omitempty"`
 }
 
 func safeRateLimits(raw json.RawMessage) any {
@@ -40,6 +41,14 @@ func safeRateLimits(raw json.RawMessage) any {
 	}
 	if json.Unmarshal(raw, &v) != nil {
 		return nil
+	}
+	if v.Limits != nil {
+		switch v.Limits.Reached {
+		case "rate_limit_reached", "workspace_owner_credits_depleted", "workspace_member_credits_depleted",
+			"workspace_owner_usage_limit_reached", "workspace_member_usage_limit_reached":
+		default:
+			v.Limits.Reached = ""
+		}
 	}
 	return v.Limits
 }

@@ -127,6 +127,9 @@ internal fun ChatWorkspace(
     sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
     sessionStatus: SessionStatus? = null, sessionStatusLoading: Boolean = false, sessionStatusError: String = "", modeChanging: Boolean = false, modeUncertain: Boolean = false,
     onSessionStatus: () -> Unit = {}, onSessionMode: (String) -> Unit = {},
+    permissionProfiles: List<SessionPermissionProfile> = emptyList(), permissionsWorking: Boolean = false,
+    permissionsMessage: String = "", onSessionPermissions: (String) -> Unit = {},
+    usageWarning: String = "",
     threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
     registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = "",
     attachments: List<Attachment> = emptyList(), attachmentWorking: Boolean = false,
@@ -291,7 +294,7 @@ internal fun ChatWorkspace(
                 Box {
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
                     ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true })
+                        DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true; onSessionPermissions("") })
                         if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, onClick = { menu = false; onHome() })
                         DropdownMenuItem(text = { Text("Connection settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, onClick = { menu = false; onConnection() })
                         if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, leadingIcon = { ChatGlyph(ChatIcon.Disconnect) }, onClick = { menu = false; onDisconnect() })
@@ -302,6 +305,12 @@ internal fun ChatWorkspace(
                 Column(Modifier.padding(12.dp)) {
                     SelectionContainer { Text(error, style = MaterialTheme.typography.bodySmall) }
                     if (takeoverSession.isNotBlank()) TextButton(onClick = { showTakeover = true }, enabled = connected && !historyLoading) { Text("Take over on phone") }
+                }
+            }
+            if (usageWarning.isNotBlank() && selected.isNotBlank()) {
+                Surface(color = Mocha.Mantle, shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = ::openStatus)) {
+                    Text(usageWarning, Modifier.padding(12.dp), color = Mocha.Red, style = MaterialTheme.typography.bodyMedium)
                 }
             }
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
@@ -486,14 +495,14 @@ internal fun ChatWorkspace(
         confirmButton = { TextButton(enabled = canSwitch && model.isNotBlank() && validModelId(model), onClick = { onCreateInProject(model.trim(), permissionMode, newEffort, newWorkspace, newProjectId); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
         dismissButton = { TextButton(onClick = { newChat = false }) { Text("Cancel") } }
     )
-    if (showSettings) AlertDialog(
-        onDismissRequest = { showSettings = false }, title = { Text("Session settings") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SelectionContainer { Text(sessionSettings.ifBlank { "No permission report saved for this session." }) }
-            Text(if (sessionSettings.isBlank()) "Reload while connected and the session is idle to read its settings." else "Last reported when this session was opened. Host policy and individual tool approvals also apply.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
-        } },
-        confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Close") } },
-        dismissButton = { TextButton(enabled = connected && !busy && !historyLoading, onClick = { showSettings = false; onSelect(selected) }) { Text("Reload settings") } }
+    if (showSettings) SessionPermissionsDialog(
+        status = sessionStatus,
+        profiles = permissionProfiles,
+        working = permissionsWorking,
+        message = permissionsMessage,
+        canApply = connected && !busy && !historyLoading && !modeChanging && selectedDecisions.isEmpty() && !planResponding,
+        onRequest = onSessionPermissions,
+        onClose = { showSettings = false },
     )
     if (showModel) AlertDialog(
         onDismissRequest = { showModel = false },

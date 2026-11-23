@@ -31,6 +31,7 @@ internal fun explainHostRejection(method: String, detail: String): String {
         detail.contains("takeover_unavailable") -> "The registered CLI is no longer available. Refresh the session before retrying."
         detail.contains("takeover_uncertain") -> "Takeover result is uncertain. Do not retry takeover; refresh and inspect the session first."
         method == "turn/start" && detail.contains("reference", true) -> "A selected skill or plugin is unavailable. Refresh references and review the prompt before sending a new turn."
+        method == "turn/start" && detail.contains("usage_limit_exceeded") -> "Codex usage limit reached. Open Session Status to check reset times."
         method == "turn/start" && (detail.contains("attachment", true) || detail.contains("select PNG")) -> "An attachment could not be read. Check the file still exists, is at most 20 MiB, and images are PNG, JPEG, GIF or WebP."
         detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
         detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
@@ -47,13 +48,17 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private data class HistoryRequest(val thread: String, val cursor: String, val activity: Long, val before: List<ChatEntry>)
     private val historyRequests = mutableMapOf<Long, HistoryRequest>()
     private data class LifecycleRequest(val target: String, val generation: Long, val selection: Long, val activity: Long)
-    private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long)
+    private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long, val quotaRevision: Long = 0)
     private var listGeneration = 0L
     private var selectionGeneration = 0L
     private val listRequests = mutableMapOf<Long, Long>()
     private val lifecycleRequests = mutableMapOf<Long, LifecycleRequest>()
     private val sessionRequests = mutableMapOf<Long, SessionRequest>()
     private var settingsRevision = 0L
+    private var quotaRevision = 0L
+    private var quotaSnapshot by mutableStateOf<JSONObject?>(null)
+    private var quotaFailure by mutableStateOf("")
+    val usageWarning: String get() = usageLimitWarning(quotaSnapshot).ifBlank { quotaFailure }
     private val observationRequests = mutableMapOf<Long, Pair<String, Long>>()
     private val observationAgain = mutableSetOf<String>()
     var archived by mutableStateOf(false); private set
@@ -99,6 +104,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var sessionStatusLoading by mutableStateOf(false); private set
     var sessionStatusError by mutableStateOf(""); private set
     var modeChanging by mutableStateOf(false); private set
+    internal var permissionProfiles by mutableStateOf(emptyList<SessionPermissionProfile>()); private set
+    var permissionsWorking by mutableStateOf(false); private set
+    var permissionsMessage by mutableStateOf(""); private set
     var modeUncertain by mutableStateOf(false); private set
     internal var hostChoice by mutableStateOf(ModelChoice()); private set
     internal var modelChoices by mutableStateOf(emptyMap<String,ModelChoice>()); private set
@@ -249,6 +257,12 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         sessions.clearSelection()
         sessionSettings = ""; sessionStatus = null; sessionStatusLoading = false; sessionStatusError = ""; modeChanging = false; modeUncertain = false; takeoverThread = ""
         sessionRequests.clear()
+        permissionProfiles = emptyList()
+        permissionsWorking = false
+        permissionsMessage = ""
+        quotaSnapshot = null
+        quotaFailure = ""
+        quotaRevision++
         historyLoading = false; olderHistoryLoading = false; hasOlderHistory = false
         visibleHistory = null; selectionRequests.clear(); historyRequests.clear()
     }
@@ -404,7 +418,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
-        if (!connected || busy || modeChanging || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
+        if (!connected || busy || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
         val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace), selected)
         if (id != null) sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
@@ -419,8 +433,20 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (!connected || selected.isBlank() || ownedThread != selected || sessionStatusLoading || modeChanging) return
         sessionStatusLoading = true; sessionStatusError = ""
         request("threads/status", withWorkspace(JSONObject().put("thread_id", selected), selectedWorkspace), selected)?.let {
-            sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision)
+            sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision, quotaRevision)
         } ?: run { sessionStatusLoading = false }
+    }
+    fun sessionPermissions(profile: String = "") {
+        if (!connected || selected.isBlank() || ownedThread != selected || permissionsWorking || historyLoading || switching()) return
+        if (profile.isNotEmpty() && (busy || modeChanging || planResponding ||
+                decisions.any { it.optString("thread_id") == selected } ||
+                permissionProfiles.none { it.id == profile && it.allowed })) return
+        val params = withWorkspace(JSONObject().put("thread_id", selected), selectedWorkspace)
+        if (profile.isNotEmpty()) params.put("profile", profile)
+        permissionsMessage = ""
+        permissionsWorking = true
+        request("threads/permissions", params, profile)?.let { sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision) }
+            ?: run { permissionsWorking = false }
     }
     fun changeSessionMode(mode: String) {
         if (!connected || selected.isBlank() || ownedThread != selected || busy || modeChanging || modeUncertain || sessionStatusLoading || historyLoading || switching() ||
@@ -497,6 +523,27 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             }
             val historyRequest = historyRequests.remove(id)
             val sessionRequest = sessionRequests.remove(id)
+            if (operation.first == "threads/permissions") {
+                if (sessionRequest == null || !connected || sessionRequest.thread != selected ||
+                    sessionRequest.generation != selectionGeneration || ownedThread != selected) return
+                permissionsWorking = false
+                val result = frame.optJSONObject("result")
+                if (result == null) {
+                    permissionProfiles = emptyList()
+                    permissionsMessage = if (operation.second.isEmpty()) "Permissions unavailable. Check host support and reload."
+                    else "Change not confirmed. Reload permissions to check the active profile."
+                } else if (operation.second.isEmpty()) {
+                    val entries = result.optJSONArray("profiles") ?: JSONArray()
+                    permissionProfiles = (0 until entries.length()).mapNotNull { index ->
+                        val item = entries.optJSONObject(index) ?: return@mapNotNull null
+                        val profile = item.optString("id")
+                        if (profile.isBlank()) null else SessionPermissionProfile(profile, item.optString("description"), item.optBoolean("allowed"))
+                    }
+                    if (permissionProfiles.isEmpty()) permissionsMessage = "No profiles reported by Codex."
+                }
+                refreshSessionStatus()
+                return
+            }
             if (operation.first in listOf("threads/mode", "threads/status") &&
                 (sessionRequest == null || !connected || sessionRequest.thread != selected || sessionRequest.generation != selectionGeneration || ownedThread != selected)) {
                 modeChanging = sessionRequests.any { (request, value) -> pending[request]?.first == "threads/mode" && value.thread == selected && value.generation == selectionGeneration }
@@ -540,6 +587,11 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 if (operation.first == "threads/list") threadListLoading = false
                 if (operation.first == "decision/respond") answeringDecisionIds -= operation.second
                 val detail = frame.optJSONObject("error")?.optString("message").orEmpty()
+                if (operation.first == "turn/start" && detail.contains("usage_limit_exceeded")) {
+                    quotaFailure = explainHostRejection(operation.first, detail)
+                    refreshSessionStatus()
+                    return
+                }
                 if (operation.first == "threads/resume" || operation.first == "threads/takeover")
                     takeoverThread = takeoverTarget(operation.first, detail, operation.second)
                 error = explainHostRejection(operation.first, detail); return
@@ -563,10 +615,15 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 }
                 "threads/status" -> {
                     sessionStatusLoading = false; sessionStatusError = ""; modeUncertain = false
+                    if (sessionRequest?.quotaRevision == quotaRevision) {
+                        result.optJSONObject("rate_limits")?.let { quotaSnapshot = it }
+                    }
                     val reported = readSessionStatus(result)
                     val current = sessionStatus
                     sessionStatus = if (sessionRequest?.settingsRevision == settingsRevision || current == null) reported
-                    else reported.copy(mode = current.mode, model = current.model, effort = current.effort)
+                    else reported.copy(mode = current.mode, model = current.model, effort = current.effort,
+                        permissionProfile = current.permissionProfile, sandbox = current.sandbox,
+                        approvalPolicy = current.approvalPolicy, approvalsReviewer = current.approvalsReviewer)
                 }
                 "threads/mode" -> {
                     modeChanging = false; modeUncertain = false; sessionStatusError = ""
@@ -700,6 +757,23 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             params.optString("plan_key").takeIf { it.isNotBlank() }?.let { handledPlans += it }
         }
         val event = frame.optString("event")
+        if (event == "account/rateLimits/updated") {
+            params.optJSONObject("rateLimits")?.let { limits ->
+                if (limits.optString("limitId").let { it.isBlank() || it == "codex" } || usageLimitWarning(limits).isNotBlank()) {
+                    quotaRevision++
+                    quotaSnapshot = limits
+                }
+            }
+        }
+        if ((event == "error" || event == "turn/completed") &&
+            (params.optString("threadId") == selected || (event == "error" && params.optString("threadId").isBlank()))) {
+            val notice = eventTurnNotice(params)
+            if (notice != null && !notice.retrying && notice.category in listOf("usage_limit_exceeded", "rate_limit_exceeded", "session_budget_exceeded")) {
+                quotaFailure = notice.message
+            } else if (event == "turn/completed" && params.optJSONObject("turn")?.optString("status") == "completed") {
+                quotaFailure = ""
+            }
+        }
         if (event == "thread/settings/updated" && params.optString("threadId") == selected && ownedThread == selected) {
             val settings = params.optJSONObject("threadSettings") ?: return
             val previous = sessionStatus ?: SessionStatus(workspace = selectedWorkspace)
@@ -708,6 +782,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 mode = reportedMode.takeIf { it == "default" || it == "plan" } ?: previous.mode,
                 model = if (settings.has("model") && !settings.isNull("model")) settings.optString("model") else previous.model,
                 effort = if (settings.has("effort")) if (settings.isNull("effort")) "" else settings.optString("effort") else previous.effort,
+                permissionProfile = settings.optString("permission_profile", previous.permissionProfile),
+                sandbox = settings.optString("sandbox", previous.sandbox),
+                approvalPolicy = settings.optString("approval_policy", previous.approvalPolicy),
+                approvalsReviewer = settings.optString("approvals_reviewer", previous.approvalsReviewer),
             )
             settingsRevision++
             if (reportedMode == "default" || reportedMode == "plan") modeUncertain = false

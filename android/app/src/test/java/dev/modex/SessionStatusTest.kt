@@ -5,6 +5,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SessionStatusTest {
+    @Test fun exhaustedUsageIsReportedUntilItsReset() {
+        val limit = JSONObject("""{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1700000030}}""")
+        assertTrue(usageLimitWarning(limit, 1700000000).startsWith("Codex 5-hour usage limit reached. Resets"))
+        assertEquals("", usageLimitWarning(limit, 1700000030))
+        limit.getJSONObject("primary").put("usedPercent", 99.9)
+        assertEquals("", usageLimitWarning(limit, 1700000000))
+        limit.put("rateLimitReachedType", "workspace_member_usage_limit_reached")
+        assertEquals("Codex workspace usage limit reached.", usageLimitWarning(limit, 1700000000))
+    }
     @Test fun contextRemainingUsesCurrentTokensAndKeepsMissingDataUnavailable() {
         assertEquals(88, contextRemaining(SessionStatus(contextTokens = 1200, contextWindow = 10000)))
         assertEquals(0, contextRemaining(SessionStatus(contextTokens = 12000, contextWindow = 10000)))

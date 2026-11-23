@@ -5,6 +5,33 @@ import kotlin.math.roundToInt
 
 internal data class RateLimitWindow(val usedPercent: Double?, val windowDurationMins: Long?, val resetsAt: Long?)
 
+internal fun usageLimitWarning(limits: JSONObject?, nowSeconds: Long = System.currentTimeMillis() / 1000): String {
+    if (limits == null) return ""
+    val reached = limits.optString("rateLimitReachedType")
+    when (reached) {
+        "workspace_owner_credits_depleted", "workspace_member_credits_depleted" -> return "Codex workspace credits are depleted."
+        "workspace_owner_usage_limit_reached", "workspace_member_usage_limit_reached" -> return "Codex workspace usage limit reached."
+    }
+    val windows = listOfNotNull(limits.optJSONObject("primary"), limits.optJSONObject("secondary"))
+    val exhausted = windows.filter {
+        (it.opt("usedPercent") as? Number)?.toDouble()?.let { percent -> percent.isFinite() && percent >= 100 } == true &&
+            ((it.opt("resetsAt") as? Number)?.toLong()?.takeIf { reset -> reset > 0 }?.let { reset -> reset > nowSeconds } ?: true)
+    }
+    if (exhausted.isEmpty()) {
+        return if (reached == "rate_limit_reached" && windows.isEmpty()) "Codex usage limit reached." else ""
+    }
+    val label = if (exhausted.size > 1) "Codex usage limits reached." else when (exhausted.single().optInt("windowDurationMins")) {
+        300 -> "Codex 5-hour usage limit reached."
+        10080 -> "Codex weekly usage limit reached."
+        else -> "Codex usage limit reached."
+    }
+    val resets = exhausted.mapNotNull { (it.opt("resetsAt") as? Number)?.toLong()?.takeIf { reset -> reset in 1..Long.MAX_VALUE / 1000 } }
+    if (resets.size != exhausted.size) return label
+    val formatted = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+        .format(java.util.Date(resets.max() * 1000))
+    return "$label Resets $formatted."
+}
+
 internal data class SessionStatus(
     val mode: String = "",
     val model: String = "",
@@ -14,6 +41,7 @@ internal data class SessionStatus(
     val sandbox: String = "",
     val approvalPolicy: String = "",
     val approvalsReviewer: String = "",
+    val permissionProfile: String = "",
     val contextTokens: Long? = null,
     val totalTokens: Long? = null,
     val contextWindow: Long? = null,
@@ -74,6 +102,7 @@ internal fun readSessionStatus(result: JSONObject, previous: SessionStatus? = nu
         sandbox = session.optString("sandbox"),
         approvalPolicy = session.optString("approval_policy"),
         approvalsReviewer = session.optString("approvals_reviewer"),
+        permissionProfile = session.optString("permission_profile"),
         contextTokens = if (preserveMetrics) previous?.contextTokens else number(usage?.optJSONObject("last"), "totalTokens"),
         totalTokens = if (preserveMetrics) previous?.totalTokens else number(usage?.optJSONObject("total"), "totalTokens"),
         contextWindow = if (preserveMetrics) previous?.contextWindow else number(usage, "modelContextWindow"),
