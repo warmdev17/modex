@@ -88,3 +88,7 @@ Open the chat menu → **Session settings** to change permissions for the loaded
 When Codex reports exhausted quota or rejects a turn for a usage limit, Android shows a warning below the chat header. Tap it to open Session Status. Reset times are shown when reported by Codex.
 
 The chat timeline shows Codex exploration actions, web searches and file changes as they occur and when reopening saved history. Expand a file change to inspect its reported diff. This displays the patch associated with the Codex item, which can differ from the current working tree. Large diffs are truncated on Android. Update the host along with the APK to load these activities from saved history.
+
+## Following subagents
+
+The **Agents** button above the message field opens the current chat’s subagent timeline. Its count shows agents reported as running. The timeline keeps the last reported outcome and the activity milestones from loaded chat history. If the button is absent in an older conversation, scroll back to load the turns that contain agent activity. Agent names depend on the names Codex supplies. Install the updated APK and host to see these events.

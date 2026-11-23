@@ -7,10 +7,10 @@ internal data class ChatEntry(
     val id: String = "", val role: String, val text: String = "", val command: String = "",
     val status: String = "", val exitCode: Int? = null, val cwd: String = "", val attachments: List<Attachment> = emptyList(),
     val turnId: String = "", val startedAtMs: Long? = null, val durationMs: Long? = null, val summaryParts: List<String> = emptyList(), val planHandled: Boolean = false, val notice: TurnNotice? = null,
-    val activity: String = "",
+    val activity: String = "", val agentActivity: AgentActivity? = null,
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("role", when (role) { "You" -> "user"; "Codex" -> "assistant"; else -> role })
-        .put("turn_notice", notice?.toJson() ?: JSONObject.NULL).put("turn_id", turnId).put("started_at_ms", startedAtMs ?: JSONObject.NULL).put("duration_ms", durationMs ?: JSONObject.NULL).put("activity", activity)
+        .put("activity_item", agentActivity?.toJson()).put("turn_notice", notice?.toJson() ?: JSONObject.NULL).put("turn_id", turnId).put("started_at_ms", startedAtMs ?: JSONObject.NULL).put("duration_ms", durationMs ?: JSONObject.NULL).put("activity", activity)
         .put("plan_handled", planHandled).put("summary_parts", JSONArray(summaryParts)).put("attachments", JSONArray().apply { attachments.forEach { put(it.toJson().put("name", it.name).put("size", it.size)) } }).put("text", text).put("command", command).put("status", status).put("cwd", cwd).put("exit_code", exitCode ?: JSONObject.NULL)
 }
 
@@ -37,7 +37,11 @@ internal fun readChat(list: JSONArray, now: Long = System.currentTimeMillis()): 
         if (m.isNull("duration_ms")) null else m.optLong("duration_ms").takeIf { it >= 0 },
         m.optJSONArray("summary_parts")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty(), m.optBoolean("plan_handled"), readTurnNotice(m.optJSONObject("turn_notice")), m.optString("activity"))
     val activityItem = m.optJSONObject("activity_item")
-    if (activityItem != null) entry.withToolActivity(activityItem) else entry
+    when {
+        role == "agent_activity" -> entry.copy(agentActivity = AgentActivity.read(activityItem))
+        activityItem != null -> entry.withToolActivity(activityItem)
+        else -> entry
+    }
 }
 
 private fun JSONObject.activityText(key: String): String =
@@ -137,6 +141,11 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
                 boundedOutput(if (item.has("aggregatedOutput") && !item.isNull("aggregatedOutput")) item.getString("aggregatedOutput") else previous?.text.orEmpty()),
                 item.optString("command", previous?.command.orEmpty()), item.optString("status", if (event == "item/started") "inProgress" else "completed"),
                 if (item.isNull("exitCode")) previous?.exitCode else item.optInt("exitCode"), item.optString("cwd", previous?.cwd.orEmpty()), turnId = turnId, activity = previous?.activity.orEmpty()).withToolActivity(item)
+            "agentActivity" -> {
+                if (turnId.isBlank() || (event == "item/started" && previous != null)) return entries
+                val activity = AgentActivity.read(item) ?: return entries
+                ChatEntry(id, "agent_activity", turnId = turnId, agentActivity = activity.copy(live = true))
+            }
             "webSearch" -> ChatEntry(id, "web", status = if (event == "item/started") "inProgress" else "completed", turnId = turnId).withToolActivity(item)
             "fileChange" -> (previous ?: ChatEntry(id, "file_change", turnId = turnId))
                 .copy(status = item.optString("status", if (event == "item/started") "inProgress" else "completed")).withToolActivity(item)

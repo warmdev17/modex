@@ -28,27 +28,37 @@ type toolActivity struct {
 
 func mobileActivityParams(method string, raw json.RawMessage) (json.RawMessage, error) {
 	var event struct {
-		ThreadID string `json:"threadId"`
-		TurnID   string `json:"turnId"`
-		ItemID   string `json:"itemId"`
-		Item     struct {
-			toolActivity
-			ID     string `json:"id"`
-			Type   string `json:"type"`
-			Status string `json:"status,omitempty"`
-		} `json:"item"`
+		ThreadID string          `json:"threadId"`
+		TurnID   string          `json:"turnId"`
+		ItemID   string          `json:"itemId"`
+		Item     json.RawMessage `json:"item"`
 		toolActivity
 	}
-	if json.Unmarshal(raw, &event) != nil {
+	var item struct {
+		toolActivity
+		ID     string `json:"id"`
+		Type   string `json:"type"`
+		Status string `json:"status,omitempty"`
+	}
+	eventErr := json.Unmarshal(raw, &event)
+	itemErr := json.Unmarshal(event.Item, &item)
+	if isAgentActivity(item.Type) {
+		var native nativeAgentActivity
+		if json.Unmarshal(event.Item, &native) != nil {
+			native = nativeAgentActivity{}
+		}
+		return json.Marshal(map[string]any{"threadId": event.ThreadID, "turnId": event.TurnID, "item": native.project(item.ID, item.Type, item.Status)})
+	}
+	if eventErr != nil || (len(event.Item) > 0 && itemErr != nil) {
 		return raw, nil
 	}
 	budget := 65536
 	switch {
 	case method == "item/fileChange/patchUpdated":
 		return json.Marshal(map[string]any{"threadId": event.ThreadID, "turnId": event.TurnID, "itemId": event.ItemID, "changes": event.toolActivity.boundChanges(&budget).Changes})
-	case event.Item.Type == "webSearch" || event.Item.Type == "fileChange":
-		event.Item.toolActivity = event.Item.toolActivity.boundChanges(&budget)
-		return json.Marshal(map[string]any{"threadId": event.ThreadID, "turnId": event.TurnID, "item": event.Item})
+	case item.Type == "webSearch" || item.Type == "fileChange":
+		item.toolActivity = item.toolActivity.boundChanges(&budget)
+		return json.Marshal(map[string]any{"threadId": event.ThreadID, "turnId": event.TurnID, "item": item})
 	default:
 		return raw, nil
 	}

@@ -2,7 +2,9 @@ package bridge
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -74,5 +76,20 @@ func TestHistoryPageCursorContinuationAndRepeatedCursor(t *testing.T) {
 		if next == "" && (err != nil || cursor != "") {
 			t.Fatalf("empty last page: %v", err)
 		}
+	}
+}
+
+func TestHistoryRevisionInvalidatesPreAgentCache(t *testing.T) {
+	const meta = `{"thread":{"id":"one","cwd":"/work"}}`
+	const page = `{"data":[],"nextCursor":""}`
+	_, _, revision, err := fetchHistoryPage(func(method string, _ any) (json.RawMessage, error) {
+		if method == "thread/read" {
+			return json.RawMessage(meta), nil
+		}
+		return json.RawMessage(page), nil
+	}, "/work", "one", 10, "")
+	old := fmt.Sprintf("%x", sha256.Sum256([]byte(meta+page)))
+	if err != nil || revision == old {
+		t.Fatalf("history revision may reuse a cache with no agent activities: %q (%v)", revision, err)
 	}
 }

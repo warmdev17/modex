@@ -102,6 +102,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var answeringDecisionIds by mutableStateOf(setOf<String>()); private set
     val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
+    val activeTurnId: String get() = sessions.activeTurnId
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
     internal var sessionStatus by mutableStateOf<SessionStatus?>(null); private set
