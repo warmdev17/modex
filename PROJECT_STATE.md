@@ -1,8 +1,17 @@
 # Modex project state
 
+## Android updates dev.31–dev.32
+
+Updated 2026-11-24T05:07:13+07:00. Integration branch `fix/android-prompt-drafts`. Latest Android prerelease [dev.32](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.32), versionCode 33, source `b307028`. APK SHA-256 `d147ec09984ebc8e0a94cca3100c4d3898656798782345b13973c43fd2a8a414`.
+
+- [dev.31](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.31), source `77cf8df`: shared connection error dialog with red title and icon, host identity and Edit host action.
+- [dev.32](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.32), source `b307028`: encrypted prompt text and selected references keyed by host and conversation. Backgrounding flushes text. Accepted Send clears the draft. Images are outside the saved draft.
+
+The dev.32 release verified 132 Android unit tests, lint, signed dev.31→dev.32 emulator upgrade, exact draft restoration after process restart, host/thread isolation, Send clearing, storage retry and Forget. Reference picker and narrow keyboard checks passed. Physical phone and TalkBack remain unverified. Source integration leaves the host running.
+
 ## Release train dev.18–dev.30
 
-Updated 2026-11-24T00:05:03+07:00. Integration branch `integration/dev18-dev30`. Latest Android prerelease [dev.30](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.30), versionCode 31, source `ae21f3653a0912825b636330443ec20526f2d13c`. The source commits are retained in order. Release tags identify the original build revisions.
+Updated 2026-11-24T00:05:03+07:00. Integration branch `integration/dev18-dev30`. Android prerelease at that integration [dev.30](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.30), versionCode 31, source `ae21f3653a0912825b636330443ec20526f2d13c`. The source commits are retained in order. Release tags identify the original build revisions.
 
 | Releases | Source | What shipped |
 | --- | --- | --- |
