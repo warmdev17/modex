@@ -116,7 +116,7 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
                     changed(id)
                 }
             }
-            "item/started", "item/completed", "item/plan/delta", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
+            "item/started", "item/completed", "item/plan/delta", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/fileChange/patchUpdated", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
                 if (id == selected) {
                     val target = params.optString("turnId").ifBlank { activeTurns[id].orEmpty() }
                     if (target.isNotBlank() && id in activeTurns && activeTurns[id] != target) return

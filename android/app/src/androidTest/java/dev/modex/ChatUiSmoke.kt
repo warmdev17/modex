@@ -361,7 +361,22 @@ fun Instrumentation.commandTimelineSmoke() {
         runOnMainSync { messages = listOf(messages.last().copy(status = "interrupted", exitCode = 130)) }
         await("Interrupted · exit 130")
         click("Expand command"); await(jsonOutput)
-        output.putString("result", "PASS: command summary, expand/collapse, running/completed/failed/interrupted states and retained output")
+        runOnMainSync {
+            val fixtures = listOf(
+                """{"id":"read","type":"commandExecution","command":"sed -n 1p Main.kt","status":"completed","commandActions":[{"type":"read","name":"Main.kt"}]}""",
+                """{"id":"web","type":"webSearch","query":"Compose documentation"}""",
+                """{"id":"edited","type":"fileChange","status":"completed","changes":[{"path":"Main.kt","diff":"@@ -1 +1 @@\n-old\n+new"}]}""",
+            )
+            messages = fixtures.fold(emptyList()) { timeline, item ->
+                updateChat(timeline, "item/completed", org.json.JSONObject("""{"turnId":"fixture","item":$item}"""))
+            }
+        }
+        await("Explored · Read Main.kt")
+        await("Searched the web for Compose documentation")
+        await("Edited Main.kt")
+        click("Expand file diff"); await("@@ -1 +1 @@\n-old\n+new")
+        shot("tool-activity-diff.png")
+        output.putString("result", "PASS: command lifecycle, exploration, web search and expanded edited file diff")
         finish(-1, output)
     } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
 }

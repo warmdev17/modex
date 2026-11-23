@@ -183,6 +183,11 @@ internal fun styledToolCommand(command: String): AnnotatedString = buildAnnotate
     }
 }
 
+internal fun styledFileDiff(diff: String): AnnotatedString = buildAnnotatedString {
+    append(diff)
+    highlight(diff.take(HIGHLIGHT_LIMIT), 0, ToolLanguage.Diff)
+}
+
 internal fun styledToolOutput(output: String): AnnotatedString = buildAnnotatedString {
     append(output)
     if (output.length > HIGHLIGHT_LIMIT) return@buildAnnotatedString

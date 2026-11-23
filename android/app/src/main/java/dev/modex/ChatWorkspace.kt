@@ -395,7 +395,7 @@ internal fun ChatWorkspace(
                                 entry.notice?.let { Text(it.message, style = MaterialTheme.typography.bodySmall, color = if (it.retrying) Mocha.Blue else Mocha.Subtext, modifier = Modifier.semantics { contentDescription = "Turn notice: ${it.message}" }) }
                             }
                         }
-                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(body, selectable = false)
+                    } else if (role == "command" || role == "web" || role == "file_change") CommandCard(entry) else MarkdownMessage(body, selectable = false)
                     }
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->

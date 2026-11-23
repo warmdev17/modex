@@ -9,6 +9,9 @@ import (
 
 // This boundary is mobile-only: native TUI clients retain the original event.
 func mobileEventParams(method string, raw json.RawMessage) (json.RawMessage, error) {
+	if method == "item/started" || method == "item/completed" || method == "item/fileChange/patchUpdated" {
+		return mobileActivityParams(method, raw)
+	}
 	if method == "thread/settings/updated" || method == "thread/tokenUsage/updated" || method == "account/rateLimits/updated" {
 		var event struct {
 			ThreadID string          `json:"threadId"`

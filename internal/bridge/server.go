@@ -559,6 +559,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 					Turns []struct {
 						turnMetadata
 						Items []struct {
+							toolActivity
 							ID       string          `json:"id"`
 							Command  string          `json:"command"`
 							Cwd      string          `json:"cwd"`
@@ -595,7 +596,19 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 							output = strings.ToValidUTF8(output[:limit], "") + "\n[Output truncated; view full log on host]"
 						}
 						outputBudget -= min(len(item.Output), limit)
-						messages = append(messages, map[string]any{"id": item.ID, "role": "command", "text": output, "command": item.Command, "cwd": item.Cwd, "status": item.Status, "exit_code": item.ExitCode})
+						message := map[string]any{"id": item.ID, "role": "command", "text": output, "command": item.Command, "cwd": item.Cwd, "status": item.Status, "exit_code": item.ExitCode}
+						if len(item.CommandActions) > 0 {
+							message["activity_item"] = toolActivity{CommandActions: item.CommandActions}
+						}
+						messages = append(messages, message)
+						continue
+					}
+					if item.Type == "webSearch" || item.Type == "fileChange" {
+						role, status := "web", "completed"
+						if item.Type == "fileChange" {
+							role, status = "file_change", item.Status
+						}
+						messages = append(messages, map[string]any{"id": item.ID, "role": role, "status": status, "activity_item": item.toolActivity.boundChanges(&outputBudget)})
 						continue
 					}
 					role, text, displayText := "", "", ""
