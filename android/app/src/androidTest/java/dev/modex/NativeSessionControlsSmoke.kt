@@ -25,7 +25,13 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         var changing by mutableStateOf(false)
         var uncertain by mutableStateOf(false)
         var working by mutableStateOf(false)
-        var status by mutableStateOf(SessionStatus(mode = "default", model = "fixture-model", effort = "medium", workspace = "/fixture", provider = "fixture", sandbox = "workspaceWrite", approvalPolicy = "on-request", approvalsReviewer = "user", contextTokens = 1200, totalTokens = 5400, contextWindow = 10000))
+        var status by mutableStateOf(SessionStatus(
+            mode = "default", model = "fixture-model", effort = "medium", workspace = "/fixture",
+            provider = "fixture", sandbox = "workspaceWrite", approvalPolicy = "on-request", approvalsReviewer = "user",
+            contextTokens = 1200, totalTokens = 5400, contextWindow = 10000,
+            primaryLimit = RateLimitWindow(68.0, 300, 1796100000),
+            secondaryLimit = RateLimitWindow(26.0, 10080, 1796620000),
+        ))
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             host = "Controls fixture", connected = true, connecting = false, selected = selected,
             threads = listOf("source", "other"), titles = mapOf("source" to "Source conversation", "other" to "Other conversation"),
@@ -104,7 +110,10 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         defaultPixels.recycle()
         check(defaultColor == 0x89b4fa) { "Default Send is not Mocha blue: ${defaultColor.toString(16)}" }
         touch("Open session status"); await("Session status"); await("Mode: Default")
-        await("Context: 1,200 / 10,000 tokens"); shot("native-controls-status.png")
+        await("Context window"); await("88% left"); await("1,200 used / 10,000 tokens")
+        await("5h limit"); await("32% left")
+        await("Weekly limit"); await("74% left")
+        await("Workspace: /fixture"); shot("native-controls-status.png")
         check(statusRefreshes == 1 && sent.isEmpty() && modeChanges.size == 2) { "Status performed a write" }
         touch("Close")
         for (draft in listOf("/", "/plan", "/help", "/literal/path")) {

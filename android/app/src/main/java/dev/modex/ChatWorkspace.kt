@@ -523,12 +523,6 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
         "externalSandbox" -> "External sandbox"
         else -> known(value)
     }
-    fun limit(label: String, value: RateLimitWindow?) = if (value == null) "$label: Unavailable" else buildString {
-        append("$label: ")
-        append(value.usedPercent?.let { "${java.text.NumberFormat.getNumberInstance().format(it)}% used" } ?: "usage unavailable")
-        value.windowDurationMins?.let { append(" · $it min") }
-        value.resetsAt?.let { append(" · resets ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it * 1000))}") }
-    }
     AlertDialog(
         onDismissRequest = close, title = { Row(verticalAlignment = Alignment.CenterVertically) { ChatGlyph(ChatIcon.Activity); Spacer(Modifier.width(8.dp)); Text("Session status") } },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -539,6 +533,15 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             if (status == null) Text("No status has been reported for this session.", color = Mocha.Subtext)
             else SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val context = contextRemaining(status)
+                SessionUsageRow(
+                    "Context window", context,
+                    if (context != null) "${number(status.contextTokens)} used / ${number(status.contextWindow)} tokens" else null,
+                    showBar = false,
+                )
+                SessionRateLimitRow("5h limit", status.usageWindow(5 * 60L))
+                SessionRateLimitRow("Weekly limit", status.usageWindow(7 * 24 * 60L))
+                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
                 Text("Mode: ${if (status.mode == "plan") "Plan" else if (status.mode == "default") "Default" else "Unavailable"}")
                 Text("Model: ${known(status.model)}")
                 Text("Reasoning: ${known(status.effort)}")
@@ -547,16 +550,43 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
                 Text("Sandbox: ${sandbox(status.sandbox)}")
                 Text("Approvals: ${known(status.approvalPolicy)}")
                 Text("Reviewer: ${known(status.approvalsReviewer)}")
-                Text("Context: ${if (status.contextTokens != null && status.contextWindow != null) "${number(status.contextTokens)} / ${number(status.contextWindow)} tokens" else "Unavailable"}")
                 Text("Session total: ${if (status.totalTokens != null) "${number(status.totalTokens)} tokens" else "Unavailable"}")
                 Text("Limits: ${listOf(status.limitName, status.planType).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Unavailable" }}")
-                Text(limit("Primary", status.primaryLimit))
-                Text(limit("Secondary", status.secondaryLimit))
             } }
         } },
         confirmButton = { TextButton(onClick = close) { Text("Close") } },
         dismissButton = { TextButton(enabled = !loading, onClick = refresh) { Text("Refresh") } }
     )
+}
+
+@Composable
+private fun SessionRateLimitRow(label: String, window: RateLimitWindow?) {
+    val reset = window?.resetsAt?.takeIf { it in 1..Long.MAX_VALUE / 1000 }?.let {
+        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+            .format(java.util.Date(it * 1000))
+    }
+    SessionUsageRow(label, window?.remainingPercent(), reset?.let { "Resets $it" }, showBar = true)
+}
+
+@Composable
+private fun SessionUsageRow(label: String, remaining: Int?, detail: String?, showBar: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+            Text(
+                remaining?.let { "$it% left" } ?: "Unavailable",
+                color = if (remaining == null) Mocha.Subtext else Mocha.Blue,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        if (remaining != null && showBar) {
+            LinearProgressIndicator(
+                progress = { remaining / 100f }, modifier = Modifier.fillMaxWidth(),
+                color = Mocha.Blue, trackColor = Mocha.Surface, gapSize = 0.dp, drawStopIndicator = {},
+            )
+        }
+        detail?.let { Text(it, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall) }
+    }
 }
 
 @Composable

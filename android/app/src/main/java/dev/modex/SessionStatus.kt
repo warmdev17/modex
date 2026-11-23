@@ -1,6 +1,7 @@
 package dev.modex
 
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 internal data class RateLimitWindow(val usedPercent: Double?, val windowDurationMins: Long?, val resetsAt: Long?)
 
@@ -41,6 +42,18 @@ internal fun contextSummary(status: SessionStatus?): String {
     val percent = ((used.toDouble() / window) * 100).coerceIn(0.0, 100.0).toInt()
     return "Context $percent% · ${format.format(used)} / ${format.format(window)}"
 }
+
+internal fun contextRemaining(status: SessionStatus): Int? {
+    val used = status.contextTokens?.takeIf { it >= 0 } ?: return null
+    val window = status.contextWindow?.takeIf { it > 0 } ?: return null
+    return ((1.0 - used.toDouble() / window).coerceIn(0.0, 1.0) * 100).roundToInt()
+}
+
+internal fun SessionStatus.usageWindow(durationMins: Long): RateLimitWindow? =
+    listOfNotNull(primaryLimit, secondaryLimit).firstOrNull { it.windowDurationMins == durationMins }
+
+internal fun RateLimitWindow.remainingPercent(): Int? =
+    usedPercent?.takeIf { it.isFinite() }?.let { (100.0 - it.coerceIn(0.0, 100.0)).roundToInt() }
 
 internal fun readSessionStatus(result: JSONObject, previous: SessionStatus? = null): SessionStatus {
     val session = result.optJSONObject("session") ?: result
