@@ -19,6 +19,7 @@ internal fun Instrumentation.agentActivitySmoke() {
     try {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         val selected = mutableStateOf("agents")
+        val conversation = AgentConversation()
         val state = SessionState().apply { open("agents") }
         fun event(id: String, action: String, targets: String) = state.event("item/completed", JSONObject(
             """{"threadId":"agents","turnId":"turn","item":{"id":"$id","type":"agentActivity","action":"$action","targets":$targets}}"""
@@ -31,6 +32,12 @@ internal fun Instrumentation.agentActivitySmoke() {
                 host = "Agents fixture", connected = true, connecting = false, selected = selected.value,
                 threads = listOf("agents", "other"), titles = emptyMap(), messages = state.messages,
                 busy = state.busy, activeTurnId = state.activeTurnId,
+                agentConversation = conversation,
+                onOpenAgent = { agent ->
+                    conversation.open(agent)
+                    conversation.begin(1, older = false)
+                    conversation.result(1, JSONObject("""{"thread":{"id":"${agent.id}"},"messages":[{"id":"task","role":"user","text":"Inspect sample.kt"},{"id":"read","role":"command","command":"cat sample.kt","text":"sample"},{"id":"answer","role":"assistant","text":"Read-only agent response"}]}"""))
+                },
                 historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture",
                 decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {},
                 onCreate = { _, _, _ -> }, onSend = { _, _, _, _ -> false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {},
@@ -79,7 +86,27 @@ internal fun Instrumentation.agentActivitySmoke() {
         var button = await("Agents 2")
         while (!button.isClickable) button = button.parent ?: error("Agents has no click action")
         check(button.stateDescription?.toString() == "2 running")
-        val bounds = tap(button)
+        val bounds = Rect().also(button::getBoundsInScreen)
+        val x = bounds.left + (8 * activity.resources.displayMetrics.density).toInt()
+        val inside = bounds.centerY()
+        val outside = bounds.top + 2
+        fun colors(): Pair<Int, Int> {
+            val bitmap = checkNotNull(uiAutomation.takeScreenshot())
+            return (bitmap.getPixel(x, inside) to bitmap.getPixel(x, outside)).also { bitmap.recycle() }
+        }
+        val resting = colors()
+        val pressTime = SystemClock.uptimeMillis()
+        fun press(action: Int) {
+            MotionEvent.obtain(pressTime, SystemClock.uptimeMillis(), action, bounds.exactCenterX(), bounds.exactCenterY(), 0).also {
+                sendPointerSync(it)
+                it.recycle()
+            }
+        }
+        press(MotionEvent.ACTION_DOWN)
+        Thread.sleep(230)
+        val pressed = colors()
+        press(MotionEvent.ACTION_UP)
+        check(pressed.first != resting.first && pressed.second == resting.second) { "Pressed feedback must stay inside the chip" }
         val minimum = (48 * activity.resources.displayMetrics.density).toInt() - 1
         check(bounds.height() >= minimum && bounds.width() >= minimum && bounds.bottom <= stop.top)
         await("Agent activity")
@@ -94,6 +121,17 @@ internal fun Instrumentation.agentActivitySmoke() {
         await("Received a task")
         await("Error")
         screenshot("agents-sheet.png")
+        tap(await("reviewer"))
+        await("Read-only agent response")
+        await("Inspect sample.kt")
+        runOnMainSync {
+            conversation.event("item/agentMessage/delta", JSONObject("""{"threadId":"one","turnId":"child-turn","itemId":"live-answer","delta":"Live agent update"}"""))
+        }
+        await("Live agent update")
+        check(node("Message Codex") == null && node("Send message") == null && node("Stop response") == null)
+        screenshot("agent-conversation.png")
+        tap(await("Back to agents"))
+        await("Agent activity")
         tap(await("Close agent activity"))
         await("Send message")
         tap(await("Agents"))
@@ -101,7 +139,7 @@ internal fun Instrumentation.agentActivitySmoke() {
         runOnMainSync { state.open("other"); selected.value = "other" }
         await("Message Codex")
         check(node("Agent activity") == null && node("Agents") == null)
-        result.putString("result", "PASS: compact Agents button with IME, accessible counts, live timeline, retained entry and isolated chat")
+        result.putString("result", "PASS: compact Agents button with IME, accessible counts, live timeline, read-only transcript, Back and isolated chat")
         finish(-1, result)
     } catch (failure: Throwable) {
         result.putString("result", "FAIL: ${failure.javaClass.simpleName}: ${failure.message}")

@@ -91,4 +91,4 @@ The chat timeline shows Codex exploration actions, web searches and file changes
 
 ## Following subagents
 
-The **Agents** button above the message field opens the current chat’s subagent timeline. Its count shows agents reported as running. The timeline keeps the last reported outcome and the activity milestones from loaded chat history. If the button is absent in an older conversation, scroll back to load the turns that contain agent activity. Agent names depend on the names Codex supplies. Install the updated APK and host to see these events.
+The **Agents** button above the message field opens the current chat’s subagent timeline. Its count shows agents reported as running. The timeline keeps the last reported outcome and the activity milestones from loaded chat history. If the button is absent in an older conversation, scroll back to load the turns that contain agent activity. Tap an agent to open its read-only conversation. It shows Codex’s available messages and tool output and follows live updates while the chat stays open. Agent names depend on the names Codex supplies. Subagent history requires a host that forwards agent activity (dev.33 or later).

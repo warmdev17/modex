@@ -115,6 +115,7 @@ internal fun HostWorkspace(
             attachments = vm.attachments.drafts[vm.selected].orEmpty(), attachmentWorking = vm.attachments.working,
             attachmentProgress = vm.attachments.progress, attachmentError = vm.attachments.error.ifBlank { vm.promptDrafts.error },
             promptDrafts = vm.promptDrafts,
+            agentConversation = vm.agentConversation, onOpenAgent = vm::openAgent, onAgentHistory = vm::loadAgentHistory,
             loadAttachment = vm::attachmentFile,
             onPhoneFiles = { phoneThread = vm.selected; phoneGeneration = vm.attachments.generation; phoneTarget = vm.savedConnection.toString(); documentPicker.launch(arrayOf("*/*")) },
             onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.attachments.directoryFor(remoteThread), remoteThread) },

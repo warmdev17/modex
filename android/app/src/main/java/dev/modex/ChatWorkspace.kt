@@ -144,6 +144,8 @@ internal fun ChatWorkspace(
     onCreateInProject: (String, String, String, String, String) -> Unit = { model, mode, effort, _, _ -> onCreate(model, mode, effort) },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {},
     promptDrafts: PromptDrafts? = null, activeTurnId: String = "",
+    agentConversation: AgentConversation? = null, onOpenAgent: (AgentTimeline) -> Unit = {},
+    onAgentHistory: (Boolean) -> Unit = {},
 ) {
     var deleting by remember(host, archived) { mutableStateOf("") }
     if (deleting.isNotBlank()) AlertDialog(
@@ -221,8 +223,13 @@ internal fun ChatWorkspace(
         agentTimeline(messages, activeTurnId, connected && !historyLoading)
     }
     var showAgentActivity by remember(host, selected) { mutableStateOf(false) }
-    if (showAgentActivity && agents.isNotEmpty()) {
-        AgentActivitySheet(agents, hasOlderHistory, olderHistoryLoading, onOlderHistory) { showAgentActivity = false }
+    val openedAgent = agentConversation?.agent
+    if (openedAgent != null) {
+        AgentConversationScreen(agentConversation, agents.firstOrNull { it.id == openedAgent.id } ?: openedAgent,
+            onAgentHistory, loadAttachment)
+    } else if (showAgentActivity && agents.isNotEmpty()) {
+        AgentActivitySheet(agents, hasOlderHistory, olderHistoryLoading, onOlderHistory,
+            onOpenAgent.takeIf { agentConversation != null }) { showAgentActivity = false }
     }
     val latestPromptIndex = remember(reasoningTimeline) { reasoningTimeline.indexOfLast { it.role == "You" } }
     val latestPrompt = reasoningTimeline.getOrNull(latestPromptIndex)
@@ -400,21 +407,10 @@ internal fun ChatWorkspace(
             } else Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(state = scroll, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 itemsIndexed(timeline, key = { index, entry -> if (entry.id.isBlank()) "legacy-$index" else "${entry.turnId}/${entry.role}/${entry.id}" }) { _, entry ->
-                    val role = entry.role; val body = entry.text
-                    MessageActions(body, if (role == "You") ({ if (prompt.isNotBlank() && prompt != body) editing = body else applyEdit(body) }) else null) {
-                    if (role == "You") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Surface(color = Mocha.Surface, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(0.9f)) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                if (entry.attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    entry.attachments.forEach { file -> AttachmentTile(file, loadAttachment, { preview = file }) }
-                                }
-                                if (body.isNotBlank()) Text(body, style = MaterialTheme.typography.bodyLarge)
-                                if (entry.status != "inProgress" && entry !== completedWork) WorkTimer(entry)
-                                entry.notice?.let { Text(it.message, style = MaterialTheme.typography.bodySmall, color = if (it.retrying) Mocha.Blue else Mocha.Subtext, modifier = Modifier.semantics { contentDescription = "Turn notice: ${it.message}" }) }
-                            }
-                        }
-                    } else if (role == "command" || role == "web" || role == "file_change") CommandCard(entry) else MarkdownMessage(body, selectable = false)
-                    }
+                    ChatTranscriptEntry(entry, showWork = entry !== completedWork, loadAttachment, { preview = it },
+                        onEdit = if (entry.role == "You") ({
+                            if (prompt.isNotBlank() && prompt != entry.text) editing = entry.text else applyEdit(entry.text)
+                        }) else null)
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
                     InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
