@@ -5,7 +5,7 @@
 Updated 2026-11-24T06:52:36+07:00. Feature branch `feat/subagent-activity`. Signed Android [dev.34](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.34), versionCode 35, source `6ffc9a99c9bc6b851d81326187ee2a7775ddddf8`. APK SHA-256 `8c4e4d6f8c268f06707d233a1b1e86cc729be6954361e01fa10b78f0de9220b7`. Public assets were redownloaded and checksum-verified.
 
 - The Agents panel opens read-only child conversations with the main chat renderer, live events and paged history. Press highlights stay inside each control. The existing dev.33 host provided child events and saved messages in an isolated real Codex test. Android-only delivery kept the existing host process active.
-- At the tagged revision, the Go suite, 137 Android release tests, release lint, matching signer validation, signed dev.33 to dev.34 data-preserving upgrade, 320 dp Agents UI smoke and existing keyboard/reference regression passed. Physical hardware and TalkBack remain unverified. Source integration into main remains pending.
+- At the tagged revision, the Go suite, 137 Android release tests, release lint, matching signer validation, signed dev.33 to dev.34 data-preserving upgrade, 320 dp Agents UI smoke and existing keyboard/reference regression passed. Physical hardware and TalkBack remain unverified. This branch carries both subagent releases into main with their original source commits.
 
 ## Subagent Activity Timeline dev.33
 
@@ -14,7 +14,7 @@ Updated 2026-11-24T05:43:24+07:00. Feature branch `feat/subagent-activity`. Sign
 - The Agents chip and timeline display Codex activity from the current chat's live events and loaded history. Start, interaction and terminal markers survive reconnect and history restoration. Older activity appears as older turns are loaded.
 - At the tagged source, `go test -race ./...`, `go vet ./...`, and the local Python suite with the built host passed (one optional test skipped). The exact installed host binary passed a live isolated supervisor test with two actual agents, journal reattach, and identical paged history. The previous executable was backed up before replacement.
 - Android release unit tests (135), release lint, signer validation, signed dev.32 to dev.33 in-place upgrade with encrypted synthetic state, and the 320 dp Agents IME smoke passed. The existing composer regression with references and an image passed. Physical device and TalkBack were not exercised.
-- The host executable was staged while the existing supervisor remained active. Activation uses the final one-shot delayed restart. After activation, reset the session cursor on Android and reconnect. Source integration into main is pending.
+- The dev.33 host was installed and activated with a one-shot restart. The dev.34 Android update uses that host. The cursor reset applies to the dev.33 host upgrade.
 
 ## Android updates dev.31–dev.32
 
