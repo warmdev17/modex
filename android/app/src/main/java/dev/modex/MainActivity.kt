@@ -17,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.semantics.semantics
@@ -35,10 +36,11 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditing: Boolean, onHome: () -> Unit, onName: (String) -> Unit, onForget: () -> Unit) {
+internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditing: Boolean, onHome: () -> Unit, onName: (String) -> Unit) {
     val context = LocalContext.current
     var displayName by rememberSaveable { mutableStateOf(hostName) }
     var wasConnected by remember { mutableStateOf(vm.connected) }
+    var wasConnecting by remember { mutableStateOf(vm.connecting) }
     LaunchedEffect(vm.connected, vm.connecting) {
         if (wasConnected && !vm.connected && !vm.connecting) onHome()
         if (vm.connected) wasConnected = true
@@ -47,9 +49,20 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
     var host by rememberSaveable { mutableStateOf(saved?.host.orEmpty()) }; var port by rememberSaveable { mutableStateOf(saved?.port?.toString() ?: "22") }
     var user by rememberSaveable { mutableStateOf(saved?.user.orEmpty()) }; var pin by rememberSaveable { mutableStateOf(saved?.pin.orEmpty()) }
     var binary by rememberSaveable { mutableStateOf(saved?.binary.orEmpty()) }; var state by rememberSaveable { mutableStateOf(saved?.state.orEmpty()) }
+    var advanced by rememberSaveable { mutableStateOf(false) }
+    var showConnectionError by remember { mutableStateOf(false) }
     val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
     var connectionSettings by rememberSaveable { mutableStateOf(initiallyEditing) }; var importError by rememberSaveable { mutableStateOf("") }
+    var openAfterConnect by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(vm.connected, vm.connecting) {
+        if (vm.connected && openAfterConnect) connectionSettings = false
+        if (!vm.connecting) {
+            if (wasConnecting && !vm.connected && !connectionSettings && vm.error.isNotBlank()) onHome()
+            openAfterConnect = false
+        }
+        wasConnecting = vm.connecting
+    }
     val keyPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) try {
             if (vm.connected || vm.connecting) {
@@ -143,52 +156,60 @@ internal fun HostWorkspace(vm: ModexViewModel, hostName: String, initiallyEditin
             Text("Host settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             IconButton(onClick = onHome) { ChatGlyph(ChatIcon.Computer, "All hosts") }
         }
-        Spacer(Modifier.height(8.dp))
-        if (vm.error.isNotBlank()) Text(vm.error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp))
-        if (!vm.connected && !vm.connecting) {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Start the Modex supervisor on your laptop or VPS first. Verify its SSH fingerprint through a trusted channel.")
+        val issue = importError.ifBlank { vm.error }
+        val draft = Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary.trim(), state.trim())
+        val canSave = vm.keyLoaded && displayName.isNotBlank() && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && !vm.connecting
+        if (showConnectionError && issue.isNotBlank()) AlertDialog(
+            onDismissRequest = { showConnectionError = false },
+            title = { Text("Connection details") },
+            text = { Text(issue) },
+            confirmButton = { TextButton(onClick = { showConnectionError = false }) { Text("Close") } },
+        )
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (vm.connecting) LinearProgressIndicator(Modifier.fillMaxWidth())
                 OutlinedTextField(displayName, { displayName = it.take(80) }, label = { Text("Host name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(host, { host = it }, label = { Text("Hostname or IP") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(user, { user = it }, label = { Text("SSH username") }, singleLine = true, modifier = Modifier.weight(2f))
-                    OutlinedTextField(port, { port = it }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(port, { port = it.filter(Char::isDigit).take(5) }, label = { Text("Port") }, singleLine = true, modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number))
                 }
-                OutlinedTextField(pin, { pin = it }, label = { Text("Verified SHA256 host fingerprint") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(binary, { binary = it }, label = { Text("Remote modex-host path") }, placeholder = { Text("Absolute path shown by modex service install") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(state, { state = it }, label = { Text("Remote supervisor state directory") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(pin, { pin = it }, label = { Text("SSH fingerprint") }, placeholder = { Text("SHA256:…") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedButton(onClick = {
                     // Returning from the picker must not auto-reconnect with the old key.
                     vm.disconnect()
                     importError = ""
                     keyPicker.launch(arrayOf("*/*"))
-                }, modifier = Modifier.fillMaxWidth()) { Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH private key") }
-                Text("Your key and connection are encrypted on this device. Use Remove saved host to remove them. Passphrase keys are not supported yet.", style = MaterialTheme.typography.bodySmall)
-                if (importError.isNotEmpty()) Text(importError, color = MaterialTheme.colorScheme.error)
-                Button(onClick = { onName(displayName); vm.connect(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary.trim(), state.trim())); if (vm.connecting) connectionSettings = false }, enabled = vm.keyLoaded && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && binary.startsWith("/") && state.startsWith("/"), modifier = Modifier.fillMaxWidth()) { Text("Connect / reconnect") }
-                OutlinedButton(onClick = {
-                    if (vm.configure(Connection(host.trim(), port.toIntOrNull() ?: 0, user.trim(), pin.trim(), binary.trim(), state.trim()))) { onName(displayName); onHome() }
-                }, enabled = vm.keyLoaded && displayName.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Save host") }
-                Row {
-                    TextButton(onClick = vm::reset) { Text("Reset session cursor") }
-                    TextButton(onClick = onForget) { Text("Remove saved host") }
+                }, enabled = !vm.connected && !vm.connecting, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (vm.keyLoaded) "Replace SSH key" else "Import SSH key")
                 }
-            }
-        } else {
-            Text(if (vm.connecting) "Connecting…" else "Connected", color = Mocha.Blue)
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                vm.savedConnection?.let { connection ->
-                    Text("${connection.user}@${connection.host}:${connection.port}", style = MaterialTheme.typography.titleMedium)
-                    Text("Host binary", color = Mocha.Subtext)
-                    Text(connection.binary)
-                    Text("Supervisor state directory", color = Mocha.Subtext)
-                    Text(connection.state)
-                    Text("SSH host fingerprint", color = Mocha.Subtext)
-                    Text(connection.pin, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { advanced = !advanced }) {
+                    ChatGlyph(if (advanced) ChatIcon.ChevronDown else ChatIcon.ChevronRight)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Advanced settings")
                 }
-                Text("Disconnect to edit connection settings.", color = Mocha.Subtext)
-            }
-            TextButton(onClick = vm::disconnect) { Text("Disconnect") }
+                if (advanced) {
+                    OutlinedTextField(binary, { binary = it }, label = { Text("Host binary") }, placeholder = { Text("~/.local/bin/modex-host") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(state, { state = it }, label = { Text("State directory") }, placeholder = { Text("~/.local/state/modex-phone") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    Text("Leave blank for defaults. Custom paths must be absolute.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+                }
+                if (vm.connected || vm.connecting) TextButton(onClick = vm::disconnect) { Text("Disconnect") }
+        }
+        if (issue.isNotBlank()) TextButton(onClick = { showConnectionError = true }) {
+            Text(issue, maxLines = 2, overflow = TextOverflow.Ellipsis, color = Mocha.Red, style = MaterialTheme.typography.bodySmall)
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                if (vm.configure(draft)) { onName(displayName); onHome() }
+            }, enabled = canSave, modifier = Modifier.weight(1f)) { Text("Save host") }
+            Button(onClick = {
+                if (vm.configure(draft)) {
+                    onName(displayName)
+                    vm.connect(draft)
+                    if (vm.connected) connectionSettings = false
+                    else if (vm.connecting) openAfterConnect = true
+                }
+            }, enabled = canSave, modifier = Modifier.weight(1f)) { Text("Connect") }
         }
     }
 }

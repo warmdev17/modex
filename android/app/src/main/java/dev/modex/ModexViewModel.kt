@@ -172,7 +172,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     if (r.getString("method") == "threads/mode") modeChanging = true
                 }
             }
-        } catch (_: Exception) { error = "Saved host could not be unlocked. Forget it and import the SSH key again." }
+        } catch (_: Exception) { error = "Saved host could not be unlocked. Open Edit host to enter the details and import the SSH key again." }
     }
     private fun persist() {
         val c = config ?: return
@@ -270,23 +270,32 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         require(!connected && !connecting && bytes.size in 1..(256 * 1024))
         key?.fill(0); key = bytes; keyLoaded = true
     }
-    fun reset() {
-        if (connected || connecting) return
-        sessionSettings = ""; threadListLoading = false; titles = emptyMap()
+    private fun clearJournalState(replacement: JournalState = JournalState()) {
         leaveSession()
-        journal = JournalState(); pending.clear(); sentAttachmentPaths.clear(); threads = emptyList()
-        sessions.reset(); historyLoading = false; selectedWorkspace = ""; threadWorkspaces = emptyMap(); decisions = emptyList(); answeringDecisionIds = emptySet(); error = ""
-        persist()
+        journal = replacement
+        pending.clear()
+        sentAttachmentPaths.clear()
+        threadListLoading = false
+        titles = emptyMap()
+        threads = emptyList()
+        sessions.reset()
+        selectedWorkspace = ""
+        threadWorkspaces = emptyMap()
+        decisions = emptyList()
+        answeringDecisionIds = emptySet()
+        error = ""
     }
     fun configure(value: Connection): Boolean {
-        if (connected || connecting) return false
         if (value.host.isBlank() || value.user.isBlank() || value.port !in 1..65535 ||
-            !value.pin.matches(Regex("SHA256:[A-Za-z0-9+/]{43}")) || !value.binary.startsWith("/") || !value.state.startsWith("/")) {
-            error = "Check the host, port, fingerprint and absolute remote paths."; return false
+            !value.pin.matches(Regex("SHA256:[A-Za-z0-9+/]{43}")) ||
+            runCatching { remoteCommand(value.binary, value.state, 0, null) }.isFailure) {
+            error = "Check the address, port, fingerprint and any custom paths."; return false
         }
         if (!keyLoaded) { error = "Import an unencrypted SSH private key first."; return false }
-        if (config != null && config != value) {
-            reset(); handledPlans = emptySet(); planSending = false; historyCache.clear(); lastThread = ""; modelChoices = emptyMap(); hostChoice = ModelChoice()
+        val previous = config
+        if (previous != value && (connected || connecting)) disconnect()
+        if (previous != null && (previous.pin != value.pin || previous.user != value.user || previous.state != value.state)) {
+            clearJournalState(); handledPlans = emptySet(); planSending = false; historyCache.clear(); lastThread = ""; modelChoices = emptyMap(); hostChoice = ModelChoice()
             attachments.clear(); projects = emptyList(); projectMembership = emptyMap()
         }
         config = value; savedConnection = value; error = ""; persist()
@@ -306,9 +315,16 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         val copy = key!!.copyOf()
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                current.open(value, copy, journal, onHello = {
+                fun attach(targetJournal: JournalState, recovering: Boolean) = current.open(value, copy, targetJournal, onHello = {
                     kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) {
                         check(transport === current)
+                        if (recovering) {
+                            val uncertain = pending.values.any { it.first in setOf("turn/start", "turn/interrupt", "decision/respond", "plans/respond", "threads/permissions") }
+                            invalidateSessionRequests()
+                            clearJournalState(targetJournal)
+                            if (uncertain) error = "Session reconnected. Review the conversation before repeating any action whose result was unclear."
+                            persist()
+                        }
                         connecting = false; connected = true; threadListLoading = false
                         models = emptyList(); modelCursors.clear(); modelCatalogStatus = "Loading models…"
                         request("status", JSONObject())
@@ -322,6 +338,14 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         journal.frame(frame) { apply(it) }; persist()
                     } }
                 })
+                val original = journal
+                try {
+                    attach(original, recovering = false)
+                } catch (rejected: ConnectionFailure) {
+                    if (!rejected.recoverJournal || original.instance == null) throw rejected
+                    withContext(Dispatchers.Main) { check(transport === current && connecting) }
+                    attach(JournalState(), recovering = true)
+                }
             } catch (failure: Exception) {
                 withContext(Dispatchers.Main) { if (transport === current && reconnectAllowed) error = (failure as? ConnectionFailure)?.message ?: "Connection stopped while applying session data. Reconnect to observe; do not resend uncertain prompts." }
             } finally {

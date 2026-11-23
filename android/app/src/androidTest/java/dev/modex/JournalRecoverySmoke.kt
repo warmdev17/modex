@@ -8,6 +8,11 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 
+internal fun Instrumentation.readSshFixtureKey(path: String): ByteArray {
+    require(path.startsWith("/data/local/tmp/modex-journal-") && path.matches(Regex("[A-Za-z0-9_./-]+")) && ".." !in path)
+    return android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand("cat " + path)).use { it.readBytes() }
+}
+
 /** Only the isolated SSH/fake-provider fixture supplies this profile. */
 internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
     val output = Bundle()
@@ -15,13 +20,11 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
     try {
         val config = Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,
             args.getString("pin")!!, args.getString("binary")!!, args.getString("state")!!)
-        val connection = JSONObject().put("host", config.host).put("port", config.port).put("user", config.user)
+        val connection = JSONObject().put("host", "10.0.2.3").put("port", config.port).put("user", config.user)
             .put("pin", config.pin).put("binary", config.binary).put("state", config.state)
         val store = SavedHost(targetContext, "journal-fixture")
         store.clear()
-        val keyPath = args.getString("keyPath")!!
-        require(keyPath.startsWith("/data/local/tmp/modex-journal-") && keyPath.matches(Regex("[A-Za-z0-9_./-]+")))
-        val key = android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand("cat " + keyPath)).use { it.readBytes() }
+        val key = readSshFixtureKey(args.getString("keyPath")!!)
         store.save(JSONObject().put("connection", connection)
             .put("key", Base64.encodeToString(key, Base64.NO_WRAP))
             .put("instance", args.getString("instance")).put("cursor", 1).put("selected", "fixture-thread")
@@ -45,9 +48,10 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
                 Thread.sleep(100)
             }
         }
-        runOnMainSync { session.foreground() }
-        await { !session.connected && !session.connecting && session.error.contains("Reset session cursor") }
-        runOnMainSync { session.reset(); session.connect(config) }
+        runOnMainSync {
+            check(session.configure(config) && session.keyLoaded) { "Editing the saved address lost the key" }
+            session.foreground()
+        }
         await { session.connected }
         runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
         await { session.connected && session.selected == "fixture-thread" && !session.historyLoading &&
@@ -64,8 +68,8 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
         await { session.decisions.size == 1 && session.answeringDecisionIds.isEmpty() }
         runOnMainSync { session.disconnect() }
         await { !session.connected && !session.connecting }
-        // Reset again while retention is still exceeded: the resolved approval must stay gone.
-        runOnMainSync { session.reset(); session.connect(config) }
+        // The resolved approval must stay gone when reconnecting.
+        runOnMainSync { session.connect(config) }
         await { session.connected }
         runOnMainSync { check(session.selected.isBlank()); session.select("fixture-thread") }
         await { session.connected && session.selected == "fixture-thread" && !session.historyLoading && session.decisions.size == 1 }
@@ -79,7 +83,7 @@ internal fun Instrumentation.journalRecoverySmoke(args: Bundle) {
             screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
         }
         screenshot.recycle()
-        output.putString("result", "PASS: expired cursor, reset/checkpoint, active history, model/effort, pending approval/question and resolved-decision reconciliation")
+        output.putString("result", "PASS: automatic journal recovery, active history, model/effort, pending approval/question and resolved-decision reconciliation")
         finish(-1, output)
     } catch (failure: Throwable) {
         output.putString("result", "FAIL: journal recovery " + failure.javaClass.simpleName + ": " + failure.message)

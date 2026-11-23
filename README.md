@@ -315,7 +315,7 @@ The native chat uses Catppuccin Mocha with blue accents, a left conversation dra
 
 The app restores the saved connection and selected conversation when reopened; a foreground connection notification supports multitasking. A saved session is observed, never automatically resubmitted. `threads/read` with `include_turns` loads stored user/assistant text on selection/reconnect. Update the host binary along with the APK.
 
-Current limits: text-only history, no image/tool transcript display; file-change requests can be declined/cancelled but **cannot be accepted** until a diff viewer exists. No passphrase-key UI, multiple saved hosts, SSH agent/config aliases, automatic host installation, done/decision push relay or bubbles yet. The connection notification is local foreground-service status. Android may terminate or time-limit foreground services (including data-sync service limits); reopening restores the encrypted snapshot and reconnects. Force-stop/reboot does not auto-start a service. A changed supervisor instance or expired journal still requires Reset session cursor; no prompt is retried. Windows supervisor targets remain unavailable. This is a development APK, not a published release.
+See [mobile development](docs/mobile-development.md) for current connection behavior, including saved hosts, automatic journal recovery and foreground service limits.
 
 
 Opt-in Android SSH integration (Linux host with `sshd`, running `emulator-5554`):

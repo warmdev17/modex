@@ -31,6 +31,7 @@ internal fun ConnectionHome() {
     var create by rememberSaveable { mutableStateOf(false) }
     var newName by rememberSaveable { mutableStateOf("") }
     var delete by rememberSaveable { mutableStateOf("") }
+    var issueHost by remember { mutableStateOf("") }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_START) manager.foreground() }
@@ -55,8 +56,7 @@ internal fun ConnectionHome() {
         }
         key(profile.id) {
             HostWorkspace(manager.controller(profile.id), profile.name, editor,
-                onHome = { opened = ""; targetThread = ""; page = "Hosts" }, onName = { manager.rename(profile.id, it) },
-                onForget = { delete = profile.id })
+                onHome = { opened = ""; targetThread = ""; page = "Hosts" }, onName = { manager.rename(profile.id, it) })
         }
     } else Scaffold(
         modifier = Modifier.safeDrawingPadding(),
@@ -122,9 +122,10 @@ internal fun ConnectionHome() {
                                             Text(vm.savedConnection?.let { "${it.user}@${it.host}:${it.port}" } ?: "Finish setting up this host", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
                                         if (vm.connecting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                        else Text(if (vm.connected) "Online" else "Offline", color = if (vm.connected) Mocha.Blue else Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+                                        else if (!vm.connected && vm.error.isNotBlank()) TextButton(onClick = { issueHost = host.id }, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                                            Text("Issue", color = Mocha.Red, style = MaterialTheme.typography.labelSmall)
+                                        } else Text(if (vm.connected) "Online" else "Offline", color = if (vm.connected) Mocha.Blue else Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
                                     }
-                                    if (vm.error.isNotBlank()) Text(vm.error, color = Mocha.Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
                                     if (vm.runningThreads.isNotEmpty() || vm.decisions.isNotEmpty()) Text("${vm.runningThreads.size} running · ${vm.decisions.size} waiting for input", color = Mocha.Blue, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp))
                                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Box {
@@ -149,6 +150,15 @@ internal fun ConnectionHome() {
                 }
             }
         }
+    }
+    manager.profiles.firstOrNull { it.id == issueHost }?.let { host ->
+        val issue = manager.controller(host.id).error
+        if (issue.isNotBlank()) AlertDialog(
+            onDismissRequest = { issueHost = "" }, title = { Text(host.name) },
+            text = { Text(issue) },
+            confirmButton = { TextButton(onClick = { issueHost = ""; opened = host.id; editor = true }) { Text("Edit host") } },
+            dismissButton = { TextButton(onClick = { issueHost = "" }) { Text("Close") } },
+        )
     }
     if (create) AlertDialog(onDismissRequest = { create = false }, title = { Text("Add host") },
         text = { OutlinedTextField(newName, { newName = it.take(80) }, label = { Text("Name") }, placeholder = { Text("Laptop or VPS") }, singleLine = true) },

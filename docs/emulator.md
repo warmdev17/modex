@@ -28,4 +28,4 @@ The key is streamed over ADB stdin into a temporary app-private file, encrypted 
 
 For an emulator already configured with the old `modex-emulator` state directory, disconnect and change its remote supervisor state directory to the phone's path in the connection form. Preserve the saved host and app data; changing the JSON alone does not replace an existing encrypted profile. The old supervisor directory is not deleted or migrated.
 
-For profiles still using `/tmp/modex-host`, disconnect, open Connection settings, and set **Remote modex-host path** to the absolute installed path (for example `/home/your-linux-user/.local/bin/modex-host`). Keep the existing supervisor state directory. Changing the local JSON does not overwrite an existing encrypted device profile.
+For profiles still using `/tmp/modex-host`, open **Connection settings → Advanced settings** and clear **Host binary** to use `~/.local/bin/modex-host`, or enter your absolute install path. Keep the existing state directory. Changing the local JSON does not overwrite an existing encrypted device profile.

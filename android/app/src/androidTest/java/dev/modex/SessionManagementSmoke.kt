@@ -211,7 +211,7 @@ internal fun Instrumentation.sessionManagementSmoke() {
         var returned by mutableStateOf(false)
         runOnMainSync {
             state(vm, "connected", true)
-            activity.setContent { ModexTheme { if (returned) Text("Saved Hosts reached") else HostWorkspace(vm, "Fixture host", false, { returned = true }, {}, {}) } }
+            activity.setContent { ModexTheme { if (returned) Text("Saved Hosts reached") else HostWorkspace(vm, "Fixture host", false, { returned = true }, {}) } }
         }
         await("Open sessions")
         runOnMainSync { vm.foreground(); check(vm.selected.isBlank()) }

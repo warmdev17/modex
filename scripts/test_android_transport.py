@@ -22,10 +22,13 @@ def main():
     parser.add_argument('--continuity', action='store_true')
     parser.add_argument('--attachments', action='store_true')
     parser.add_argument('--journal-recovery', action='store_true')
+    parser.add_argument('--stale-instance', action='store_true', help='Seed a previous supervisor identity in the journal recovery fixture.')
     parser.add_argument('--serial', default='emulator-5554')
     args = parser.parse_args()
     if sum((args.attachments, args.continuity, args.journal_recovery, args.connections)) > 1:
         parser.error('choose one fixture mode')
+    if args.stale_instance and not args.journal_recovery:
+        parser.error('--stale-instance requires --journal-recovery')
     host = str(args.host.resolve())
     adb = [args.adb, '-s', args.serial]
 
@@ -139,7 +142,7 @@ for line in sys.stdin:
                     warmup.close()
                 import json
                 instance = json.loads((state / 'endpoint.json').read_text())['instance']
-            if args.journal_recovery:
+            if args.journal_recovery or args.connections:
                 command = shlex.join(['sh', '-c', 'umask 077; cat > "$1"', 'modex-journal', remote_key])
                 run(adb + ['shell', '-T', command], input=(root / 'client').read_bytes())
             else:
@@ -151,9 +154,10 @@ for line in sys.stdin:
             for stage in stages:
                 extras = ['-e', 'preview', 'continuity', '-e', 'stage', stage] if args.continuity else ['-e','preview','attachments','-e','root',str(root)] if args.attachments else []
                 if args.connections:
-                    extras = ["-e", "preview", "connection-management", "-e", "stage", stage, "-e", "state2", str(second_state)]
+                    extras = ["-e", "preview", "connection-management", "-e", "stage", stage, "-e", "state2", str(second_state), "-e", "keyPath", remote_key]
                 if args.journal_recovery:
-                    extras = ['-e', 'preview', 'journal-recovery', '-e', 'instance', instance, '-e', 'keyPath', remote_key]
+                    saved_instance = 'previous-supervisor' if args.stale_instance else instance
+                    extras = ['-e', 'preview', 'journal-recovery', '-e', 'instance', saved_instance, '-e', 'keyPath', remote_key]
                 result = run(adb + ['shell', shlex.join(['am', 'instrument', '-w'] + extras + ['-e', 'port', str(port), '-e', 'user', getpass.getuser(), '-e', 'pin', pin, '-e', 'binary', host, '-e', 'state', str(state), 'dev.modex.test/dev.modex.TransportSmoke'])])
                 output = result.stdout.decode()
                 if 'PASS:' not in output or 'INSTRUMENTATION_CODE: -1' not in output:
@@ -184,7 +188,7 @@ for line in sys.stdin:
         finally:
             try:
                 run(adb + ['shell', 'am', 'force-stop', 'dev.modex'])
-                if args.journal_recovery:
+                if args.journal_recovery or args.connections:
                     run(adb + ['shell', 'rm', '-f', remote_key])
                 else:
                     run(adb + ['shell', 'run-as', 'dev.modex', 'rm', '-f', 'files/smoke-key'])

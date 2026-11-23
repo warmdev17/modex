@@ -12,12 +12,12 @@ class ConnectionFailureTest {
     }
     @Test fun identifiesRemoteFailuresWithoutShowingStderr() {
         assertTrue(connectionFailure("attach", Exception(), "modex-host: another client is attached\nsecret").message!!.contains("another client"))
-        assertTrue(connectionFailure("attach", Exception(), "modex-host: supervisor instance changed; do not reuse cursor").message!!.contains("Reset session cursor"))
+        assertTrue(connectionFailure("attach", Exception(), "modex-host: supervisor instance changed; do not reuse cursor").recoverJournal)
         assertTrue(connectionFailure("attach", Exception(), "sh: /tmp/secret: not found").message!!.contains("binary"))
         assertFalse(connectionFailure("attach", Exception(), "unrecognized secret").message!!.contains("secret"))
     }
     @Test fun identifiesJournalGapAndFingerprint() {
-        assertTrue(connectionFailure("stream", Exception("Journal gap. Do not resend the previous prompt.")).message!!.contains("Reset session cursor"))
+        assertFalse(connectionFailure("stream", Exception("Journal gap. Do not resend the previous prompt.")).recoverJournal)
         assertTrue(connectionFailure("fingerprint", Exception("private detail")).message!!.contains("fingerprint"))
     }
     @Test fun doesNotMisclassifyCallbackErrorsAsNetworkFailure() {
@@ -26,14 +26,14 @@ class ConnectionFailureTest {
     }
     @Test fun detectsExpiredReplayFromRemoteHost() {
         for (detail in listOf("replay gap: cursor older than retained events", "cursor ahead of supervisor journal")) {
-            assertTrue(connectionFailure("attach", Exception(), detail).message!!.contains("Reset session cursor"))
+            assertTrue(connectionFailure("attach", Exception(), "modex-host: $detail").recoverJournal)
         }
     }
     @Test fun missingBinaryCommandWithCursorFlagIsNotReplayGap() {
         val stderr = "fish: Unknown command: /tmp/missing\nexec /tmp/missing --attach --cursor 0 --instance private-value"
         val message = connectionFailure("attach", Exception(), stderr).message!!
         assertTrue(message.contains("binary") || message.contains("attach failed"))
-        assertFalse(message.contains("Reset session cursor"))
+        assertFalse(connectionFailure("attach", Exception(), stderr).recoverJournal)
         assertFalse(message.contains("private-value"))
     }
 }
