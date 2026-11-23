@@ -41,7 +41,8 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             check(stored.getInt("cursor") == 105 && stored.getString("key") == fixtureKey &&
                 stored.getJSONObject("host_choice").getString("model") == "fixture-model")
             val manager = app.connections
-            check(manager.profiles == existing)
+            val issueLayout = args.getString("stage") == "issue-layout"
+            check(if (issueLayout) manager.profiles.containsAll(existing) else manager.profiles == existing)
             val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
             fun find(label: String): AccessibilityNodeInfo? {
@@ -82,6 +83,23 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             fun back() = sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
 
             node("Navigation toolbar")
+            if (issueLayout) {
+                val manage = "Manage ${saved.name}"
+                val before = Rect().also(node(manage)::getBoundsInScreen)
+                runOnMainSync {
+                    val controller = manager.controller(saved.id)
+                    check(!controller.configure(controller.savedConnection!!.copy(port = 0)))
+                }
+                node("Issue")
+                val after = Rect().also(node(manage)::getBoundsInScreen)
+                check(before == after) { "Issue moved the host controls from $before to $after" }
+                tap("Issue")
+                node("Check the address, port, fingerprint and any custom paths.")
+                tap("Close")
+                output.putString("result", "PASS: Issue keeps host controls in place and opens details ($after)")
+                finish(-1, output)
+                return
+            }
             tap("Add host")
             node("Hostname or IP")
             check(manager.profiles == existing)

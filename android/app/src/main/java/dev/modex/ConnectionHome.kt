@@ -140,7 +140,7 @@ internal fun ConnectionHome() {
                             var actions by remember { mutableStateOf(false) }
                             Surface(color = Mocha.Mantle, shape = RoundedCornerShape(12.dp)) {
                                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Surface(color = Mocha.Surface, shape = RoundedCornerShape(10.dp)) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { ChatGlyph(ChatIcon.Computer, color = if (vm.connected) Mocha.Blue else Mocha.Subtext) } }
                                         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                             Text(host.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
