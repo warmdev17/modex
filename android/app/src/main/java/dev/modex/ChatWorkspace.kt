@@ -374,7 +374,6 @@ internal fun ChatWorkspace(
                 LazyColumn(state = scroll, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 itemsIndexed(timeline, key = { index, entry -> if (entry.id.isBlank()) "legacy-$index" else "${entry.turnId}/${entry.role}/${entry.id}" }) { _, entry ->
                     val role = entry.role; val body = entry.text
-                    val display = liveMessageText(entry.id, body, entry.status == "inProgress")
                     MessageActions(body, if (role == "You") ({ if (prompt.isNotBlank() && prompt != body) editing = body else applyEdit(body) }) else null) {
                     if (role == "You") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         Surface(color = Mocha.Surface, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(0.9f)) {
@@ -387,7 +386,7 @@ internal fun ChatWorkspace(
                                 entry.notice?.let { Text(it.message, style = MaterialTheme.typography.bodySmall, color = if (it.retrying) Mocha.Blue else Mocha.Subtext, modifier = Modifier.semantics { contentDescription = "Turn notice: ${it.message}" }) }
                             }
                         }
-                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(display, selectable = false)
+                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(body, selectable = false)
                     }
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->

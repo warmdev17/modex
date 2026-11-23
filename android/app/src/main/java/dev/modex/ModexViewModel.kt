@@ -173,15 +173,38 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         saveJob?.cancel()
         saveJob = viewModelScope.launch {
             kotlinx.coroutines.delay(150)
+            val cachedPages = historyCache.pages().toMutableList()
+            if (selected.isNotBlank()) {
+                cachedPages.removeAll { it.first == selected }
+                cachedPages += selected to (visibleHistory ?: CachedHistory(emptyList(), "", "")).copy(entries = messages, revision = "")
+            }
             val snapshot = JSONObject().put("connection", JSONObject().put("host", c.host).put("port", c.port).put("user", c.user).put("pin", c.pin).put("binary", c.binary).put("state", c.state))
                 .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
                 .put("model_choices", modelChoicesJson(modelChoices)).put("host_choice", hostChoice.toJson()).put("selected_workspace", selectedWorkspace).put("attachment_directories", attachments.directoriesJson())
-                .put("active_turns", sessions.activityJson()).put("last_thread", lastThread).put("history_cache", historyCache.toJson())
+                .put("active_turns", sessions.activityJson()).put("last_thread", lastThread)
                 .put("handled_plans", JSONArray(handledPlans.toList())).put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
             withContext(Dispatchers.IO) {
-            try { saved.save(snapshot, revision) } catch (_: Exception) { withContext(Dispatchers.Main) { error = "Could not save connection securely. Keep the app open or import again next time." } }
-        } }
+                try {
+                    val bounded = HistoryCache()
+                    for ((id, page) in cachedPages) {
+                        currentCoroutineContext().ensureActive()
+                        bounded.remember(id, page)
+                    }
+                    snapshot.put("history_cache", bounded.toJson())
+                    currentCoroutineContext().ensureActive()
+                    saved.save(snapshot, revision)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { withContext(Dispatchers.Main) { error = "Could not save connection securely. Keep the app open or import again next time." } }
+            }
+        }
     }
+    private fun cacheVisibleHistory() {
+        if (selected.isNotBlank()) {
+            val page = visibleHistory ?: CachedHistory(emptyList(), "", "")
+            historyCache.remember(selected, page.copy(entries = messages, revision = ""))
+        }
+    }
+
     internal suspend fun attachmentFile(file: Attachment): java.io.File = withContext(Dispatchers.IO) {
         if (connecting) kotlinx.coroutines.withTimeout(20000) {
             androidx.compose.runtime.snapshotFlow { connected || !connecting }.first { it }
@@ -215,6 +238,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     fun loadOlderHistory() = loadHistory(true)
     private fun leaveSession() {
+        cacheVisibleHistory()
         selectionGeneration++
         settingsRevision++
         handledPlans += pending.values.filter { it.first == "plans/respond" }.map { it.second }
@@ -689,10 +713,12 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             if (reportedMode == "default" || reportedMode == "plan") modeUncertain = false
             sessionStatusError = ""
         }
+        val before = messages
         sessions.event(event, params)
-        if (selected.isNotBlank()) {
-            val page = visibleHistory ?: CachedHistory(emptyList(), "", "")
-            historyCache.remember(selected, page.copy(entries = messages, revision = ""))
+        // Streaming prefixes stay in SessionState; only snapshot/terminal/navigation boundaries encode history.
+        if (messages !== before) {
+            if (event.endsWith("Delta") || event.endsWith("/delta")) historyCache.invalidateRevision(selected)
+            else cacheVisibleHistory()
         }
         if (event in listOf("thread/status/changed", "thread/closed")) {
             observe(params.optString("threadId"))

@@ -28,6 +28,15 @@ class HistoryCacheTest {
         small.latest("a", listOf(entry("a")), "", "r")
         assertNull(small.get("a"))
     }
+    @Test fun streamedChangesInvalidateCachedFingerprintWithoutLosingOlderPage() {
+        val cache = HistoryCache()
+        cache.remember("stream", CachedHistory(listOf(entry("older"), entry("partial")), "cursor", "same"))
+        cache.invalidateRevision("stream")
+        assertEquals(listOf("older", "partial"), cache.get("stream")!!.entries.map { it.id })
+        assertEquals("cursor", cache.get("stream")!!.cursor)
+        assertEquals("", cache.get("stream")!!.revision)
+        assertEquals(listOf("fresh"), cache.latest("stream", listOf(entry("fresh")), "cursor", "same").entries.map { it.id })
+    }
     @Test fun overlappingPagesPreferNewerStreamedContent() {
         val old = entry("a").copy(text = "partial")
         val new = old.copy(text = "complete")

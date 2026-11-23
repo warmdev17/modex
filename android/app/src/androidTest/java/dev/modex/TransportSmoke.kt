@@ -10,6 +10,8 @@ class TransportSmoke : Instrumentation() {
     private lateinit var args: Bundle
     override fun onCreate(arguments: Bundle) { super.onCreate(arguments); args = arguments; start() }
     override fun onStart() {
+        if (args.getString("preview") == "stream-render") { streamingRenderSmoke(); return }
+        if (args.getString("preview") == "stream-performance") { streamingPerformanceSmoke(); return }
         if (args.getString("preview") == "composer-responsiveness") { composerResponsivenessSmoke(args); return }
         if (args.getString("preview") == "native-session-controls") { nativeSessionControlsSmoke(); return }
         if (args.getString("preview") == "session-management") { sessionManagementSmoke(); return }
