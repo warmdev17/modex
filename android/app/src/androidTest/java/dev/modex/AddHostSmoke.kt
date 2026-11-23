@@ -137,13 +137,29 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
                 val error = "SSH key could not be loaded. Import a supported unencrypted private key."
                 tap("Connect")
                 node(error)
-                tap("Close")
-                node("Navigation toolbar")
-                node("Issue")
-                tap("Manage Configured fixture")
+                val titleBounds = Rect().also(node("Connection error")::getBoundsInScreen)
+                node("Configured fixture")
+                val screenshot = uiAutomation.takeScreenshot() ?: error("No error dialog screenshot")
+                try {
+                    val pixels = IntArray(titleBounds.width() * titleBounds.height())
+                    screenshot.getPixels(pixels, 0, titleBounds.width(), titleBounds.left, titleBounds.top, titleBounds.width(), titleBounds.height())
+                    check(pixels.any { it and 0xffffff == 0xf38ba8 }) { "Connection error title is missing the red accent" }
+                    File(app.filesDir, "connection-error-dialog.png").outputStream().use {
+                        screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                } finally {
+                    screenshot.recycle()
+                }
                 tap("Edit host")
                 node("Host settings")
+                set("Port", "0")
                 tap("Connect")
+                tap("Check the address, port, fingerprint and any custom paths.")
+                node("Connection error")
+                tap("Close")
+                set("0", "22")
+                tap("Connect")
+                node("Connection error")
                 node(error)
                 tap("Close")
                 node("Navigation toolbar")

@@ -59,7 +59,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
+internal enum class ChatIcon { Menu, New, Send, More, Close, Model, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Error, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color = LocalContentColor.current) {
@@ -78,6 +78,11 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color
             ChatIcon.ChevronDown -> { line(6f,9f,12f,15f); line(12f,15f,18f,9f) }
             ChatIcon.Down -> { line(12f,5f,12f,19f); line(6f,13f,12f,19f); line(12f,19f,18f,13f) }
             ChatIcon.Stop -> drawRoundRect(color, Offset(6*u,6*u), Size(12*u,12*u), CornerRadius(u,u))
+            ChatIcon.Error -> {
+                drawCircle(color, 9.5f * u, style = androidx.compose.ui.graphics.drawscope.Stroke(1.8f * u))
+                line(12f, 7f, 12f, 12f)
+                drawCircle(color, 1.1f * u, Offset(12f * u, 16f * u))
+            }
             ChatIcon.Close -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
             ChatIcon.More -> for (y in listOf(5f,12f,19f)) drawCircle(color,1.4f*u,Offset(12*u,y*u))
             ChatIcon.Folder -> { line(3f,7f,3f,19f); line(3f,19f,21f,19f); line(21f,19f,21f,8f); line(21f,8f,11f,8f); line(11f,8f,9f,5f); line(9f,5f,3f,5f); line(3f,5f,3f,7f) }

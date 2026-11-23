@@ -112,12 +112,9 @@ internal fun HostSettings(
         }
         val issue = importError.ifBlank { saveError }.ifBlank { connectionError }
         val canSave = keyLoaded && (newHost || displayName.isNotBlank()) && host.isNotBlank() && user.isNotBlank() && pin.isNotBlank() && !connecting
-        if (showConnectionError && issue.isNotBlank()) AlertDialog(
-            onDismissRequest = { showConnectionError = false },
-            title = { Text("Connection details") },
-            text = { Text(issue) },
-            confirmButton = { TextButton(onClick = { showConnectionError = false }) { Text("Close") } },
-        )
+        if (showConnectionError && issue.isNotBlank()) {
+            ConnectionIssueDialog(issue, onClose = { showConnectionError = false })
+        }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (connecting) LinearProgressIndicator(Modifier.fillMaxWidth())
             OutlinedTextField(displayName, { displayName = it.take(80) }, label = { Text(if (newHost) "Display name (optional)" else "Host name") }, singleLine = true, modifier = Modifier.fillMaxWidth())

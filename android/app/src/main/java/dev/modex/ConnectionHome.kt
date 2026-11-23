@@ -216,11 +216,9 @@ internal fun ConnectionHome() {
         }
     }
     issue?.let { (host, message) ->
-        AlertDialog(
-            onDismissRequest = { issue = null }, title = { Text(host.name) },
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = { issue = null; opened = host.id; editor = true }) { Text("Edit host") } },
-            dismissButton = { TextButton(onClick = { issue = null }) { Text("Close") } },
+        ConnectionIssueDialog(
+            message, onClose = { issue = null }, hostName = host.name,
+            onEdit = { issue = null; opened = host.id; editor = true },
         )
     }
     if (delete.isNotBlank()) AlertDialog(onDismissRequest = { delete = "" }, title = { Text("Remove saved host?") },
