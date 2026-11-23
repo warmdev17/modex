@@ -1,5 +1,14 @@
 # Modex project state
 
+## Subagent Activity Timeline dev.33
+
+Updated 2026-11-24T05:43:24+07:00. Feature branch `feat/subagent-activity`. Signed Android [dev.33](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.33), versionCode 34, source `c573c74cd79c720dbfddf8e6bfc35851a38fc8ef`. APK SHA-256 `5c20fea497daf47c0b76cfd37ca25400234faf49a4a5aa1e2b449344e745373a`. Public assets were downloaded and checksum-verified.
+
+- The Agents chip and timeline display Codex activity from the current chat's live events and loaded history. Start, interaction and terminal markers survive reconnect and history restoration. Older activity appears as older turns are loaded.
+- At the tagged source, `go test -race ./...`, `go vet ./...`, and the local Python suite with the built host passed (one optional test skipped). The exact installed host binary passed a live isolated supervisor test with two actual agents, journal reattach, and identical paged history. The previous executable was backed up before replacement.
+- Android release unit tests (135), release lint, signer validation, signed dev.32 to dev.33 in-place upgrade with encrypted synthetic state, and the 320 dp Agents IME smoke passed. The existing composer regression with references and an image passed. Physical device and TalkBack were not exercised.
+- The host executable was staged while the existing supervisor remained active. Activation uses the final one-shot delayed restart. After activation, reset the session cursor on Android and reconnect. Source integration into main is pending.
+
 ## Android updates dev.31–dev.32
 
 Updated 2026-11-24T05:07:13+07:00. Integration branch `fix/android-prompt-drafts`. Latest Android prerelease [dev.32](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.32), versionCode 33, source `b307028`. APK SHA-256 `d147ec09984ebc8e0a94cca3100c4d3898656798782345b13973c43fd2a8a414`.
