@@ -5,9 +5,62 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import java.io.File
+
+fun Instrumentation.markdownTableSmoke() {
+    val output = Bundle()
+    try {
+        val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        runOnMainSync { activity.setContent {
+            ModexTheme {
+                Surface {
+                    Column(Modifier.padding(16.dp).width(280.dp)) {
+                        MarkdownMessage("""
+                            | Việc cần làm | Trạng thái |
+                            | --- | --- |
+                            | Theo dõi | Mở rộng để xem chi tiết, tiến độ và toàn bộ nội dung mà Codex trả về. |
+                            | Quyền | Phiên đang chạy |
+                        """.trimIndent())
+                    }
+                }
+            }
+        } }
+        fun find(node: AccessibilityNodeInfo?, label: String): AccessibilityNodeInfo? {
+            if (node == null || node.text?.toString() == label) return node
+            for (i in 0 until node.childCount) find(node.getChild(i), label)?.let { return it }
+            return null
+        }
+        waitForIdleSync()
+        val deadline = System.currentTimeMillis() + 5000
+        var right = find(uiAutomation.rootInActiveWindow, "Trạng thái")
+        while (right == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(100)
+            right = find(uiAutomation.rootInActiveWindow, "Trạng thái")
+        }
+        val root = uiAutomation.rootInActiveWindow
+        val leftBounds = android.graphics.Rect().also { checkNotNull(find(root, "Việc cần làm")).getBoundsInScreen(it) }
+        val rightBounds = android.graphics.Rect().also { checkNotNull(right).getBoundsInScreen(it) }
+        val density = activity.resources.displayMetrics.density
+        check(rightBounds.left - leftBounds.left <= 150 * density) { "Second column is pushed outside its share of the viewport" }
+        val screenshot = checkNotNull(uiAutomation.takeScreenshot())
+        File(targetContext.filesDir, "markdown-table-narrow.png").outputStream().use {
+            screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        screenshot.recycle()
+        output.putString("result", "PASS: narrow Markdown table")
+        finish(-1, output)
+    } catch (e: Throwable) {
+        output.putString("result", "FAIL: ${e.message}")
+        finish(0, output)
+    }
+}
 
 /** Render-only fixture. No host connection, credentials, or prompt is submitted. */
 fun Instrumentation.chatUiSmoke() {
