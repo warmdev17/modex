@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
+import android.system.Os
 import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -15,6 +16,8 @@ import org.json.JSONObject
 /** A named device-local encrypted store; excluded from cloud backup and device transfer. */
 class SavedHost(context: Context, name: String = "host") {
     private val file = AtomicFile(File(context.noBackupFilesDir, "$name.enc"))
+    private val pending = File(context.noBackupFilesDir, "$name.enc.pending")
+    private val legacyBackup = File(context.noBackupFilesDir, "$name.enc.bak")
     private var generation = 0L
     @Synchronized fun revision() = generation
     private val alias = "modex.saved-$name.v1"
@@ -32,12 +35,23 @@ class SavedHost(context: Context, name: String = "host") {
         val plain = value.toString().toByteArray(Charsets.UTF_8)
         try {
             val bytes = cipher.iv + cipher.doFinal(plain)
-            val output = file.startWrite()
-            try { output.write(bytes); file.finishWrite(output) } catch (e: Exception) { file.failWrite(output); throw e }
-        } finally { plain.fill(0) }
+            if (legacyBackup.exists()) {
+                file.openRead().close()
+                check(!legacyBackup.exists()) { "Could not recover the encrypted store" }
+            }
+            pending.outputStream().use {
+                it.write(bytes)
+                it.fd.sync()
+            }
+            // AtomicFile.finishWrite logs commit failures instead of reporting them to the caller.
+            Os.rename(pending.path, file.baseFile.path)
+        } finally {
+            plain.fill(0)
+            pending.delete()
+        }
     }
     @Synchronized fun load(): JSONObject? {
-        if (!file.baseFile.exists()) return null
+        if (!file.baseFile.exists() && !legacyBackup.exists()) return null
         val bytes = file.readFully()
         require(bytes.size > 28)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(0, 12))) }
@@ -47,6 +61,10 @@ class SavedHost(context: Context, name: String = "host") {
     @Synchronized fun clear() {
         generation++
         file.delete()
+        pending.delete()
         KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias) }
     }
 }
+
+internal fun Connection.toJson(): JSONObject = JSONObject().put("host", host).put("port", port)
+    .put("user", user).put("pin", pin).put("binary", binary).put("state", state)

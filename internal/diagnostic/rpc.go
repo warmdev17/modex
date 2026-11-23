@@ -36,6 +36,9 @@ func classifyRPCError(raw json.RawMessage) string {
 		Message string          `json:"message"`
 	}
 	_ = json.Unmarshal(raw, &detail)
+	if isUsageLimitMessage(detail.Message) {
+		return "usage_limit_exceeded"
+	}
 	s := string(detail.Code) + " " + detail.Message
 	for _, known := range []struct{ key, category string }{
 		{"forked history still references", "thread_has_dependents"},

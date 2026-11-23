@@ -12,7 +12,7 @@ internal fun connectionProfiles(data: JSONObject?, legacy: Boolean): List<HostPr
         val id = item.getString("id")
         require(id == "host" || id.matches(Regex("[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}")))
         val name = item.getString("name")
-        require(name.isNotBlank() && name.length <= 80 && name.none { it.isISOControl() })
+        require(name.isNotBlank() && name.length <= 253 && name.none { it.isISOControl() })
         HostProfile(id, name)
     }
     require(profiles.map { it.id }.distinct().size == profiles.size)

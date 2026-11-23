@@ -325,6 +325,29 @@ func TestListPreservesCodexSessionName(t *testing.T) {
 	}
 }
 
+func TestStoredHistoryIncludesWebAndFileActivity(t *testing.T) {
+	call := func(context.Context, string, any) (json.RawMessage, error) {
+		return json.RawMessage(`{"thread":{"id":"one","cwd":"/work","turns":[{"id":"t","status":"completed","items":[{"id":"web","type":"webSearch","query":"compose","results":[{"private":"SECRET"}]},{"id":"edit","type":"fileChange","status":"completed","changes":[{"path":"src/Main.kt","diff":"@@ -1 +1 @@\n-old\n+new"}]},{"id":"read","type":"commandExecution","command":"sed -n 1p src/Main.kt","commandActions":[{"type":"read","name":"Main.kt"}]}]}]}}`), nil
+	}
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true}`)}, call)
+	raw, _ := json.Marshal(result)
+	if err != nil || !strings.Contains(string(raw), `"role":"web"`) || !strings.Contains(string(raw), `"role":"file_change"`) ||
+		!strings.Contains(string(raw), `+new`) || !strings.Contains(string(raw), `"commandActions"`) || strings.Contains(string(raw), "SECRET") {
+		t.Fatalf("missing or unsafe activity: %s %v", raw, err)
+	}
+}
+
+func TestMobileToolActivityKeepsDiffAndOmitsOpaqueWebResults(t *testing.T) {
+	web, err := EncodeEvent("item/completed", json.RawMessage(`{"threadId":"t","turnId":"turn","item":{"type":"webSearch","id":"w","query":"Compose","results":[{"private":"SECRET"}]}}`))
+	if err != nil || !strings.Contains(string(web), `"query":"Compose"`) || strings.Contains(string(web), "SECRET") {
+		t.Fatalf("invalid web projection: %s %v", web, err)
+	}
+	diff, err := EncodeEvent("item/fileChange/patchUpdated", json.RawMessage(`{"threadId":"t","turnId":"turn","itemId":"edit","changes":[{"path":"Main.kt","diff":"-old\n+new"}]}`))
+	if err != nil || !strings.Contains(string(diff), `"itemId":"edit"`) || !strings.Contains(string(diff), `-old\n+new`) {
+		t.Fatalf("missing diff or identity: %s %v", diff, err)
+	}
+}
+
 func TestStoredHistoryIncludesCommandLifecycle(t *testing.T) {
 	call := func(context.Context, string, any) (json.RawMessage, error) {
 		return json.RawMessage(`{"thread":{"id":"one","cwd":"/work","turns":[{"status":"inProgress","items":[{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"inProgress","aggregatedOutput":"PASS","exitCode":null}]}]}}`), nil

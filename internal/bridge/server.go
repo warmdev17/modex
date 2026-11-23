@@ -59,6 +59,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "threads/permissions":
+		allowed["thread_id"], allowed["workspace"], allowed["profile"] = true, true, true
 	case "threads/mode", "threads/status":
 		allowed["workspace"] = true
 		allowed["thread_id"] = true
@@ -162,6 +164,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 	}
 	switch cmd.Method {
+	case "threads/permissions":
+		return sessionPermissions(p, cwd, fetch)
 	case "threads/archive", "threads/unarchive", "threads/delete", "threads/fork":
 		return threadLifecycle(cmd.Method, p, cwd, fetch)
 	case "plans/respond":
@@ -555,6 +559,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 					Turns []struct {
 						turnMetadata
 						Items []struct {
+							toolActivity
 							ID       string          `json:"id"`
 							Command  string          `json:"command"`
 							Cwd      string          `json:"cwd"`
@@ -591,7 +596,19 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 							output = strings.ToValidUTF8(output[:limit], "") + "\n[Output truncated; view full log on host]"
 						}
 						outputBudget -= min(len(item.Output), limit)
-						messages = append(messages, map[string]any{"id": item.ID, "role": "command", "text": output, "command": item.Command, "cwd": item.Cwd, "status": item.Status, "exit_code": item.ExitCode})
+						message := map[string]any{"id": item.ID, "role": "command", "text": output, "command": item.Command, "cwd": item.Cwd, "status": item.Status, "exit_code": item.ExitCode}
+						if len(item.CommandActions) > 0 {
+							message["activity_item"] = toolActivity{CommandActions: item.CommandActions}
+						}
+						messages = append(messages, message)
+						continue
+					}
+					if item.Type == "webSearch" || item.Type == "fileChange" {
+						role, status := "web", "completed"
+						if item.Type == "fileChange" {
+							role, status = "file_change", item.Status
+						}
+						messages = append(messages, map[string]any{"id": item.ID, "role": role, "status": status, "activity_item": item.toolActivity.boundChanges(&outputBudget)})
 						continue
 					}
 					role, text, displayText := "", "", ""

@@ -5,9 +5,62 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import java.io.File
+
+fun Instrumentation.markdownTableSmoke() {
+    val output = Bundle()
+    try {
+        val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        runOnMainSync { activity.setContent {
+            ModexTheme {
+                Surface {
+                    Column(Modifier.padding(16.dp).width(280.dp)) {
+                        MarkdownMessage("""
+                            | Việc cần làm | Trạng thái |
+                            | --- | --- |
+                            | Theo dõi | Mở rộng để xem chi tiết, tiến độ và toàn bộ nội dung mà Codex trả về. |
+                            | Quyền | Phiên đang chạy |
+                        """.trimIndent())
+                    }
+                }
+            }
+        } }
+        fun find(node: AccessibilityNodeInfo?, label: String): AccessibilityNodeInfo? {
+            if (node == null || node.text?.toString() == label) return node
+            for (i in 0 until node.childCount) find(node.getChild(i), label)?.let { return it }
+            return null
+        }
+        waitForIdleSync()
+        val deadline = System.currentTimeMillis() + 5000
+        var right = find(uiAutomation.rootInActiveWindow, "Trạng thái")
+        while (right == null && System.currentTimeMillis() < deadline) {
+            Thread.sleep(100)
+            right = find(uiAutomation.rootInActiveWindow, "Trạng thái")
+        }
+        val root = uiAutomation.rootInActiveWindow
+        val leftBounds = android.graphics.Rect().also { checkNotNull(find(root, "Việc cần làm")).getBoundsInScreen(it) }
+        val rightBounds = android.graphics.Rect().also { checkNotNull(right).getBoundsInScreen(it) }
+        val density = activity.resources.displayMetrics.density
+        check(rightBounds.left - leftBounds.left <= 150 * density) { "Second column is pushed outside its share of the viewport" }
+        val screenshot = checkNotNull(uiAutomation.takeScreenshot())
+        File(targetContext.filesDir, "markdown-table-narrow.png").outputStream().use {
+            screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        screenshot.recycle()
+        output.putString("result", "PASS: narrow Markdown table")
+        finish(-1, output)
+    } catch (e: Throwable) {
+        output.putString("result", "FAIL: ${e.message}")
+        finish(0, output)
+    }
+}
 
 /** Render-only fixture. No host connection, credentials, or prompt is submitted. */
 fun Instrumentation.chatUiSmoke() {
@@ -248,10 +301,14 @@ fun Instrumentation.historyScrollSmoke() {
 fun Instrumentation.commandTimelineSmoke() {
     val output = Bundle()
     try {
+        val command = "/usr/sbin/bash -lc date"
+        val jsonOutput = "{\"ok\": true, \"count\": 42}"
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var messages by mutableStateOf(listOf(ChatEntry("a", "Codex", "Checking the workspace.")))
         runOnMainSync {
-            messages = updateChat(messages, "item/started", org.json.JSONObject("""{"item":{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"inProgress"}}"""))
+            messages = updateChat(messages, "item/started", org.json.JSONObject().put("item",
+                org.json.JSONObject().put("id", "c").put("type", "commandExecution").put("command", command)
+                    .put("cwd", "/work").put("status", "inProgress")))
             messages = updateChat(messages, "item/commandExecution/outputDelta", org.json.JSONObject("""{"itemId":"c","delta":"TOOL_OUTPUT_MARKER"}"""))
             activity.setContent { ModexTheme { Surface { ChatWorkspace(
                 "fixture", true, false, "tools", listOf("tools"), emptyMap(), messages,
@@ -280,10 +337,11 @@ fun Instrumentation.commandTimelineSmoke() {
             File(targetContext.filesDir, name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
             bmp.recycle()
         }
-        await("Terminal activity"); await("Running"); await("go test ./...")
+        await("Running"); await("Running date…")
         check(node("TOOL_OUTPUT_MARKER") == null) { "Output exposed while collapsed" }
         shot("command-collapsed.png")
         click("Expand command")
+        await(command)
         await("TOOL_OUTPUT_MARKER")
         shot("command-expanded.png")
         click("Collapse command")
@@ -291,10 +349,34 @@ fun Instrumentation.commandTimelineSmoke() {
         while (node("TOOL_OUTPUT_MARKER") != null && System.currentTimeMillis() < collapseDeadline) Thread.sleep(100)
         shot("command-recollapsed.png")
         check(node("TOOL_OUTPUT_MARKER") == null) { "Output still exposed after collapse" }
-        runOnMainSync { messages = updateChat(messages, "item/completed", org.json.JSONObject("""{"item":{"id":"c","type":"commandExecution","command":"go test ./...","cwd":"/work","status":"completed","aggregatedOutput":"TOOL_OUTPUT_MARKER","exitCode":1}}""")) }
+        runOnMainSync { messages = listOf(messages.last().copy(status = "completed", exitCode = 0, text = jsonOutput)) }
+        await("Ran date")
+        await("Completed · exit 0")
+        shot("command-ran.png")
+        click("Expand command"); await(jsonOutput)
+        shot("command-highlighted.png")
+        click("Collapse command")
+        runOnMainSync { messages = listOf(messages.last().copy(status = "failed", exitCode = 1)) }
         await("Failed · exit 1")
-        click("Expand command"); await("TOOL_OUTPUT_MARKER")
-        output.putString("result", "PASS: running card, hidden output, expand/collapse, failed exit status and retained output")
+        runOnMainSync { messages = listOf(messages.last().copy(status = "interrupted", exitCode = 130)) }
+        await("Interrupted · exit 130")
+        click("Expand command"); await(jsonOutput)
+        runOnMainSync {
+            val fixtures = listOf(
+                """{"id":"read","type":"commandExecution","command":"sed -n 1p Main.kt","status":"completed","commandActions":[{"type":"read","name":"Main.kt"}]}""",
+                """{"id":"web","type":"webSearch","query":"Compose documentation"}""",
+                """{"id":"edited","type":"fileChange","status":"completed","changes":[{"path":"Main.kt","diff":"@@ -1 +1 @@\n-old\n+new"}]}""",
+            )
+            messages = fixtures.fold(emptyList()) { timeline, item ->
+                updateChat(timeline, "item/completed", org.json.JSONObject("""{"turnId":"fixture","item":$item}"""))
+            }
+        }
+        await("Explored · Read Main.kt")
+        await("Searched the web for Compose documentation")
+        await("Edited Main.kt")
+        click("Expand file diff"); await("@@ -1 +1 @@\n-old\n+new")
+        shot("tool-activity-diff.png")
+        output.putString("result", "PASS: command lifecycle, exploration, web search and expanded edited file diff")
         finish(-1, output)
     } catch (e: Throwable) { output.putString("result", "FAIL: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0, output) }
 }

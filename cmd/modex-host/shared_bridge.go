@@ -175,6 +175,27 @@ func (s *sharedBackend) call(ctx context.Context, method string, params any, emi
 	}
 	values, _ := params.(map[string]any)
 	id, _ := values["threadId"].(string)
+	if method == "modex/thread/permissions" {
+		s.dispatchMu.Lock()
+		defer s.dispatchMu.Unlock()
+		s.mu.Lock()
+		state := s.sessions[id]
+		if state == nil {
+			s.mu.Unlock()
+			return nil, bridge.ErrSessionNotOwned
+		}
+		busy := state.busy
+		for _, d := range s.pending {
+			busy = busy || d.ThreadID == id
+		}
+		s.mu.Unlock()
+		if busy {
+			return nil, bridge.ErrSessionBusy
+		}
+		requestCtx, cancel := modeRequestContext(ctx)
+		defer cancel()
+		return s.p.CallPersistent(requestCtx, "thread/settings/update", params)
+	}
 	if method == "modex/thread/mode" || method == "turn/start" || method == "thread/settings/update" || method == "thread/start" || method == "thread/resume" || method == "thread/fork" {
 		s.dispatchMu.Lock()
 		defer s.dispatchMu.Unlock()
@@ -714,12 +735,13 @@ func updateSharedSettings(state *sharedSession, raw json.RawMessage) {
 			Approval json.RawMessage `json:"approvalPolicy"`
 			Reviewer string          `json:"approvalsReviewer"`
 			Sandbox  json.RawMessage `json:"sandboxPolicy"`
+			Profile  json.RawMessage `json:"activePermissionProfile"`
 		} `json:"threadSettings"`
 	}
 	if state.settings == nil || json.Unmarshal(raw, &event) != nil {
 		return
 	}
-	native, _ := json.Marshal(map[string]any{"collaborationMode": event.Settings.Mode, "model": event.Settings.Model, "reasoningEffort": event.Settings.Effort, "approvalPolicy": event.Settings.Approval, "approvalsReviewer": event.Settings.Reviewer, "sandbox": event.Settings.Sandbox})
+	native, _ := json.Marshal(map[string]any{"collaborationMode": event.Settings.Mode, "model": event.Settings.Model, "reasoningEffort": event.Settings.Effort, "approvalPolicy": event.Settings.Approval, "approvalsReviewer": event.Settings.Reviewer, "sandbox": event.Settings.Sandbox, "activePermissionProfile": event.Settings.Profile})
 	safe, err := bridge.SafeSession(native)
 	if err != nil {
 		return
@@ -728,7 +750,7 @@ func updateSharedSettings(state *sharedSession, raw json.RawMessage) {
 	if json.Unmarshal(safe, &update) != nil {
 		return
 	}
-	for _, key := range []string{"collaboration_mode", "effort", "approval_policy", "approvals_reviewer", "sandbox"} {
+	for _, key := range []string{"collaboration_mode", "effort", "approval_policy", "approvals_reviewer", "sandbox", "permission_profile"} {
 		delete(state.settings, key)
 	}
 	for k, v := range update {

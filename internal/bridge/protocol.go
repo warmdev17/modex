@@ -26,6 +26,8 @@ func DecodeCommand(raw []byte) (Command, error) {
 		return Command{}, errors.New("command id must be positive")
 	}
 	switch cmd.Method {
+	case "threads/permissions":
+		return cmd, nil
 	case "threads/mode", "threads/status", "plans/respond", "references/list", "client/attached", "projects/create", "projects/list", "models/list", "status", "threads/archive", "threads/unarchive", "threads/delete", "threads/fork", "threads/list", "threads/start", "threads/read", "threads/resume", "threads/takeover", "turn/start", "turn/interrupt", "decision/respond":
 		return cmd, nil
 	default:

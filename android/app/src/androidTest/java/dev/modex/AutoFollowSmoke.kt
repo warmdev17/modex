@@ -108,6 +108,11 @@ internal fun Instrumentation.autoFollowSmoke() {
         val activityText = activityNode.contentDescription.toString()
         check(activityText.contains("Continuing profile work") && Regex("[0-9]+s").containsMatchIn(activityText)) { "Missing thinking action or elapsed time: $activityText" }
         val activityBounds = Rect().also { activityNode.getBoundsInScreen(it) }
+        val modeNode = find(root()) { it.text?.toString() == "Enable Plan" } ?: error("No mode control")
+        val modeBounds = Rect().also(modeNode::getBoundsInScreen)
+        check(activityBounds.left >= modeBounds.right && modeBounds.centerY() in activityBounds.top until activityBounds.bottom) {
+            "Live activity is not beside the mode: $activityBounds, mode $modeBounds"
+        }
         val inputBounds = Rect().also { find(root()) { it.contentDescription == "Message Codex" }!!.getBoundsInScreen(it) }
         check(activityBounds.bottom <= inputBounds.top) { "Activity is not above prompt input" }
         check(find(list()) { it.text?.toString()?.contains("Continuing profile work") == true } == null) { "Thinking is duplicated inside the transcript" }
@@ -130,7 +135,8 @@ internal fun Instrumentation.autoFollowSmoke() {
         }
         waitForIdleSync(); Thread.sleep(500)
         check(find(root()) { it.contentDescription?.toString()?.startsWith("Turn activity: ") == true } == null) { "Live activity remained after interrupt" }
-        check(visible("Interrupted · 12s")) { "Completed history lost interruption timer" }
+        check(visible("Interrupted · 12s")) { "Composer lost the interruption timer" }
+        check(find(list()) { it.text?.toString() == "Interrupted · 12s" } == null) { "Latest interruption timer is duplicated in history" }
         check(find(list()) { it.text?.toString()?.contains("Continuing profile work") == true } == null) { "Historical thinking remained inside the transcript" }
         runOnMainSync {
             busy = true

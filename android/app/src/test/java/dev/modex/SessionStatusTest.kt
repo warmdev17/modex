@@ -5,6 +5,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SessionStatusTest {
+    @Test fun exhaustedUsageIsReportedUntilItsReset() {
+        val limit = JSONObject("""{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1700000030}}""")
+        assertTrue(usageLimitWarning(limit, 1700000000).startsWith("Codex 5-hour usage limit reached. Resets"))
+        assertEquals("", usageLimitWarning(limit, 1700000030))
+        limit.getJSONObject("primary").put("usedPercent", 99.9)
+        assertEquals("", usageLimitWarning(limit, 1700000000))
+        limit.put("rateLimitReachedType", "workspace_member_usage_limit_reached")
+        assertEquals("Codex workspace usage limit reached.", usageLimitWarning(limit, 1700000000))
+    }
+    @Test fun contextRemainingUsesCurrentTokensAndKeepsMissingDataUnavailable() {
+        assertEquals(88, contextRemaining(SessionStatus(contextTokens = 1200, contextWindow = 10000)))
+        assertEquals(0, contextRemaining(SessionStatus(contextTokens = 12000, contextWindow = 10000)))
+        assertNull(contextRemaining(SessionStatus(contextTokens = -1, contextWindow = 10000)))
+        assertNull(contextRemaining(SessionStatus(contextTokens = 0, contextWindow = null)))
+    }
+
+    @Test fun usageWindowsUseReportedDurationAndRemainingCapacity() {
+        val weekly = RateLimitWindow(26.0, 10080, 1770000000)
+        val fiveHours = RateLimitWindow(68.0, 300, 1770000100)
+        val status = SessionStatus(primaryLimit = weekly, secondaryLimit = fiveHours)
+        assertEquals(fiveHours, status.usageWindow(300))
+        assertEquals(weekly, status.usageWindow(10080))
+        assertEquals(32, fiveHours.remainingPercent())
+        assertEquals(74, weekly.remainingPercent())
+        assertNull(status.copy(primaryLimit = RateLimitWindow(0.0, 60, null)).usageWindow(10080))
+        assertNull(fiveHours.copy(usedPercent = Double.NaN).remainingPercent())
+        assertNull(fiveHours.copy(usedPercent = null).remainingPercent())
+    }
+
     @Test fun parsesReportedSessionContextAndLimitsWithoutInventingZeros() {
         val result = JSONObject("""{
           "session":{"collaboration_mode":"plan","model":"gpt-6","effort":"high","approval_policy":"on-request","approvals_reviewer":"user","sandbox":"workspaceWrite","thread":{"id":"t1","cwd":"/work/modex","modelProvider":"openai"}},

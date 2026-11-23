@@ -21,6 +21,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "legacy-connections") { legacyConnectionSmoke(); return }
         if (args.getString("preview") == "journal-recovery") { journalRecoverySmoke(args); return }
         if (args.getString("preview") == "upgrade") { upgradeSmoke(args); return }
+        if (args.getString("preview") == "add-host") { addHostSmoke(args); return }
         if (args.getString("preview") == "skill-picker") { referencePickerSmoke(); return }
         if (args.getString("preview") == "large-history") { largeHistorySmoke(args); return }
         if (args.getString("preview") == "emulator-profile") { importEmulatorProfile(); return }
@@ -30,6 +31,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "remote-project") { remoteProjectSmoke(); return }
         if (args.getString("preview") == "new-chat") { newChatSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
+        if (args.getString("preview") == "markdown-table") { markdownTableSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }
         if (args.getString("preview") == "auto-follow") { autoFollowSmoke(); return }
         if (args.getString("preview") == "history-scroll") { historyScrollSmoke(); return }
@@ -40,7 +42,14 @@ class TransportSmoke : Instrumentation() {
             try {
                 store.save(JSONObject().put("key", "PRIVATE_TEST_MARKER").put("cursor", 12))
                 check(store.load()!!.getLong("cursor") == 12L)
-                val raw = File(targetContext.noBackupFilesDir, "test-only.enc").readBytes()
+                val base = File(targetContext.noBackupFilesDir, "test-only.enc")
+                val backup = File(targetContext.noBackupFilesDir, "test-only.enc.bak")
+                check(base.renameTo(backup))
+                check(store.load()!!.getLong("cursor") == 12L)
+                check(base.renameTo(backup))
+                store.save(JSONObject().put("key", "PRIVATE_TEST_MARKER").put("cursor", 13))
+                check(!backup.exists() && store.load()!!.getLong("cursor") == 13L)
+                val raw = base.readBytes()
                 check(!String(raw, Charsets.ISO_8859_1).contains("PRIVATE_TEST_MARKER"))
                 raw[raw.lastIndex] = (raw.last().toInt() xor 1).toByte()
                 File(targetContext.noBackupFilesDir, "test-only.enc").writeBytes(raw)
@@ -51,7 +60,7 @@ class TransportSmoke : Instrumentation() {
                 store.clear(); check(store.load() == null)
                 store.save(JSONObject().put("key", "stale"), oldRevision)
                 check(store.load() == null)
-                result.putString("result", "PASS: Keystore encryption, restore, tamper rejection, forget")
+                result.putString("result", "PASS: Keystore encryption, legacy backup recovery and replacement, tamper rejection, forget")
                 finish(-1, result)
             } catch (_: Throwable) { result.putString("result", "FAIL: encrypted persistence"); finish(0, result) }
             finally { store.clear() }

@@ -112,12 +112,26 @@ private fun CodeBlock(code: String, language: String) {
 @Composable
 private fun MarkdownTable(table: TableBlock) {
     val rows = table.children().flatMap { it.children() }
-    Column(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).width(IntrinsicSize.Max)) {
-        for (row in rows) {
-            Row(Modifier.fillMaxWidth()) {
-                row.children().forEach { cell ->
-                    Surface(color = if ((cell as? TableCell)?.isHeader == true) Mocha.Surface else Mocha.Mantle, border = BorderStroke(0.5.dp, Mocha.Overlay), modifier = Modifier.width(180.dp)) {
-                        Box(Modifier.padding(12.dp)) { InlineText(cell, MaterialTheme.typography.bodyMedium) }
+    val columns = rows.firstOrNull()?.children()?.size ?: return
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val tableWidth = if (columns <= 2) maxWidth else maxOf(maxWidth, 112.dp * columns)
+        val scroll = if (tableWidth > maxWidth) Modifier.horizontalScroll(rememberScrollState()) else Modifier
+        Column(scroll.width(tableWidth)) {
+            for (row in rows) {
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                    row.children().forEach { cell ->
+                        val header = (cell as? TableCell)?.isHeader == true
+                        Surface(
+                            color = if (header) Mocha.Surface else Mocha.Mantle,
+                            border = BorderStroke(0.5.dp, Mocha.Overlay),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
+                        ) {
+                            Box(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                InlineText(cell, MaterialTheme.typography.bodyMedium.copy(
+                                    fontWeight = if (header) FontWeight.SemiBold else FontWeight.Normal,
+                                ))
+                            }
+                        }
                     }
                 }
             }

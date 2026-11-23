@@ -175,7 +175,7 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 		}
 		return json.RawMessage(`{"updated":true}`), nil
 	}
-	if method == "modex/thread/status" || method == "modex/thread/mode" {
+	if method == "modex/thread/status" || method == "modex/thread/mode" || method == "modex/thread/permissions" {
 		w := s.workers[id]
 		if w == nil {
 			return nil, bridge.ErrSessionNotOwned
@@ -185,6 +185,14 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 		w.cacheMu.Unlock()
 		if !owned {
 			return nil, bridge.ErrSessionNotOwned
+		}
+		if method == "modex/thread/permissions" {
+			if w.busy || len(w.decisions.List()) != 0 {
+				return nil, bridge.ErrSessionBusy
+			}
+			requestCtx, cancel := modeRequestContext(ctx)
+			defer cancel()
+			return w.process.CallPersistent(requestCtx, "thread/settings/update", params)
 		}
 		if method == "modex/thread/mode" {
 			if w.busy || len(w.decisions.List()) != 0 {

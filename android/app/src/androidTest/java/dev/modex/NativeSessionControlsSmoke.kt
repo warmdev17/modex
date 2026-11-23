@@ -25,15 +25,29 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         var changing by mutableStateOf(false)
         var uncertain by mutableStateOf(false)
         var working by mutableStateOf(false)
-        var status by mutableStateOf(SessionStatus(mode = "default", model = "fixture-model", effort = "medium", workspace = "/fixture", provider = "fixture", sandbox = "workspaceWrite", approvalPolicy = "on-request", approvalsReviewer = "user", contextTokens = 1200, totalTokens = 5400, contextWindow = 10000))
+        var usageWarning by mutableStateOf("")
+        val permissionRequests = mutableListOf<String>()
+        var status by mutableStateOf(SessionStatus(
+            mode = "default", model = "fixture-model", effort = "medium", workspace = "/fixture",
+            provider = "fixture", sandbox = "workspaceWrite", approvalPolicy = "on-request", approvalsReviewer = "user",
+            contextTokens = 1200, totalTokens = 5400, contextWindow = 10000,
+            primaryLimit = RateLimitWindow(68.0, 300, 1796100000),
+            secondaryLimit = RateLimitWindow(26.0, 10080, 1796620000),
+        ))
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             host = "Controls fixture", connected = true, connecting = false, selected = selected,
             threads = listOf("source", "other"), titles = mapOf("source" to "Source conversation", "other" to "Other conversation"),
-            messages = listOf(ChatEntry(role = "Codex", text = "Completed fixture reply", status = "completed")),
+            messages = listOf(
+                ChatEntry(role = "You", id = "older", text = "Older prompt", status = "completed", durationMs = 4_000),
+                ChatEntry(role = "You", id = "latest", text = "Latest prompt", status = "completed", durationMs = 12_000),
+                ChatEntry(role = "Codex", text = "Completed fixture reply", status = "completed"),
+            ),
             busy = working, historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture-model", sessionEffort = "medium",
             decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> },
             onSend = { text, _, _, _ -> sent += text; false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {},
             sessionStatus = status, modeChanging = changing, modeUncertain = uncertain, onSessionStatus = { statusRefreshes++ }, onSessionMode = { mode -> modeChanges += mode; changing = true },
+            permissionProfiles = listOf(SessionPermissionProfile(":workspace", "", true), SessionPermissionProfile("team-policy", "Project policy", true)),
+            onSessionPermissions = { permissionRequests += it }, usageWarning = usageWarning,
             models = listOf(ModelOption("fixture-model", "Fixture model", "medium", listOf("medium" to "Balanced")))
         ) } } } }
         fun nodes(label: String): List<AccessibilityNodeInfo> {
@@ -78,9 +92,45 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
             File(targetContext.filesDir, name).outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; image.recycle()
         }
         type("Fixture draft")
-        await("Default")
+        var defaultMode = await("Default")
+        while (!defaultMode.isClickable) defaultMode = defaultMode.parent ?: error("Default has no click action")
+        val modeBounds = Rect().also(defaultMode::getBoundsInScreen)
+        check(modeBounds.height() >= (48 * activity.resources.displayMetrics.density).toInt() - 1) {
+            "Compact mode lost its 48 dp touch area: $modeBounds"
+        }
+        val timeBounds = Rect().also(await("Worked · 12s")::getBoundsInScreen)
+        check(timeBounds.left > modeBounds.right && modeBounds.centerY() in timeBounds.top until timeBounds.bottom) {
+            "Worked time is not beside the mode: $timeBounds, mode $modeBounds"
+        }
+        val inputRight = Rect().also(await("Message input container")::getBoundsInScreen).right
+        check(inputRight - timeBounds.right in 0..(16 * activity.resources.displayMetrics.density).toInt()) {
+            "Worked time is not at the right of the composer: $timeBounds, input right $inputRight"
+        }
+        check(nodes("Worked · 12s").size == 1) { "Latest work duration is duplicated" }
+        await("Worked · 4s")
         await("Context 12% · 1,200 / 10,000")
-        touch("Default"); await("Changing mode…")
+
+        fun modePixels(): IntArray {
+            val screen = uiAutomation.takeScreenshot() ?: error("No screenshot")
+            return IntArray(modeBounds.width() * modeBounds.height()).also {
+                screen.getPixels(it, 0, modeBounds.width(), modeBounds.left, modeBounds.top, modeBounds.width(), modeBounds.height())
+                screen.recycle()
+            }
+        }
+        val beforePress = modePixels()
+        val pressTime = SystemClock.uptimeMillis()
+        fun modePointer(action: Int) {
+            val event = MotionEvent.obtain(pressTime, SystemClock.uptimeMillis(), action, modeBounds.exactCenterX(), modeBounds.exactCenterY(), 0)
+            try { sendPointerSync(event) } finally { event.recycle() }
+        }
+        modePointer(MotionEvent.ACTION_DOWN)
+        try {
+            Thread.sleep(300)
+            check(beforePress.contentEquals(modePixels())) { "Mode gets a highlight while pressed" }
+        } finally {
+            modePointer(MotionEvent.ACTION_UP)
+        }
+        await("Changing mode…")
         check(modeChanges == listOf("plan")) { "Single tap did not request Plan: $modeChanges" }
         check(nodes("Plan").isEmpty()) { "Mode changed before host acknowledgement" }
         runOnMainSync { status = status.copy(mode = "plan"); changing = false }
@@ -104,7 +154,10 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         defaultPixels.recycle()
         check(defaultColor == 0x89b4fa) { "Default Send is not Mocha blue: ${defaultColor.toString(16)}" }
         touch("Open session status"); await("Session status"); await("Mode: Default")
-        await("Context: 1,200 / 10,000 tokens"); shot("native-controls-status.png")
+        await("Context window"); await("88% left"); await("1,200 used / 10,000 tokens")
+        await("5h limit"); await("32% left")
+        await("Weekly limit"); await("74% left")
+        await("Workspace: /fixture"); shot("native-controls-status.png")
         check(statusRefreshes == 1 && sent.isEmpty() && modeChanges.size == 2) { "Status performed a write" }
         touch("Close")
         for (draft in listOf("/", "/plan", "/help", "/literal/path")) {
@@ -127,6 +180,18 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         touch("Open session status"); await("Session status")
         check(statusRefreshes == 3) { "Read-only status unavailable during running turn" }
         touch("Close"); shot("native-controls-final.png")
+        runOnMainSync { working = false }
+        touch("Connection menu"); touch("Session settings"); await("Current: Workspace write")
+        touch("team-policy"); touch("Apply")
+        check(permissionRequests == listOf("", "team-policy")) { "Profile selection did not use Session settings" }
+        runOnMainSync { status = status.copy(permissionProfile = "team-policy") }
+        await("Current: team-policy")
+        shot("session-permissions.png")
+        touch("Close")
+        runOnMainSync { usageWarning = "Codex 5-hour usage limit reached." }
+        await("Codex 5-hour usage limit reached.")
+        shot("usage-limit.png")
+        touch("Codex 5-hour usage limit reached."); await("Session status")
         output.putString("result", "PASS: one-tap native mode with ACK/pending/fresh/uncertain/busy states, tappable read-only context/status, all slash drafts are plain messages")
         finish(-1, output)
     } catch (failure: Throwable) {

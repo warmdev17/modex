@@ -1,6 +1,7 @@
 package dev.modex
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,9 +15,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.platform.LocalLifecycleOwner
 
@@ -29,8 +32,38 @@ internal fun ConnectionHome() {
     var targetThread by rememberSaveable { mutableStateOf("") }
     var editor by rememberSaveable { mutableStateOf(false) }
     var create by rememberSaveable { mutableStateOf(false) }
-    var newName by rememberSaveable { mutableStateOf("") }
     var delete by rememberSaveable { mutableStateOf("") }
+    var issue by remember { mutableStateOf<Pair<HostProfile, String>?>(null) }
+    var manualConnectHost by rememberSaveable { mutableStateOf("") }
+
+    fun closeHost() {
+        opened = ""; targetThread = ""; manualConnectHost = ""
+    }
+
+    fun returnToHosts() {
+        closeHost()
+        page = "Hosts"
+    }
+
+    fun connectHost(id: String, connection: Connection) {
+        val vm = manager.controller(id)
+        if (vm.connected || vm.connecting) return
+        manualConnectHost = id
+        vm.connect(connection)
+    }
+
+    manager.profiles.firstOrNull { it.id == manualConnectHost }?.let { host ->
+        val vm = manager.controller(host.id)
+        LaunchedEffect(host.id, vm.connecting, vm.connected, vm.connectFailure) {
+            if (!vm.connecting) {
+                manualConnectHost = ""
+                if (!vm.connected && vm.connectFailure.isNotBlank()) {
+                    returnToHosts()
+                    issue = host to vm.connectFailure
+                }
+            }
+        }
+    }
     val owner = LocalLifecycleOwner.current
     DisposableEffect(owner) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_START) manager.foreground() }
@@ -44,9 +77,33 @@ internal fun ConnectionHome() {
     val connectedHosts = manager.profiles.filter { manager.controller(it.id).connected }.map { it.id }.toSet()
     val liveWaiting = activities.filter { it.hostId in connectedHosts }.sumOf { it.waiting }
     val profile = manager.profiles.firstOrNull { it.id == opened }
-    if (profile != null) {
+    if (create) {
+        val draft: NewHostDraft = viewModel()
+        val close = { draft.replaceKey(null); create = false }
+        HostSettings(
+            hostName = "", saved = null, keyLoaded = draft.key != null, newHost = true,
+            onImportKey = draft::replaceKey, onBack = close, onHome = close,
+            onSubmit = { name, connection, connect ->
+                draft.key?.let { bytes ->
+                    manager.add(name, connection, bytes).fold(
+                        onSuccess = { id ->
+                            close()
+                            if (connect) {
+                                editor = false
+                                targetThread = ""
+                                opened = id
+                                connectHost(id, connection)
+                            }
+                            null
+                        },
+                        onFailure = { it.message },
+                    )
+                }
+            },
+        )
+    } else if (profile != null) {
         val vm = manager.controller(profile.id)
-        BackHandler { opened = ""; targetThread = "" }
+        BackHandler { closeHost() }
         LaunchedEffect(profile.id, targetThread, vm.connected, vm.historyLoading) {
             if (targetThread.isNotBlank() && vm.connected && !vm.historyLoading) {
                 val target = targetThread; targetThread = ""
@@ -54,9 +111,9 @@ internal fun ConnectionHome() {
             }
         }
         key(profile.id) {
-            HostWorkspace(manager.controller(profile.id), profile.name, editor,
-                onHome = { opened = ""; targetThread = ""; page = "Hosts" }, onName = { manager.rename(profile.id, it) },
-                onForget = { delete = profile.id })
+            HostWorkspace(vm, profile.name, editor, onHome = ::returnToHosts,
+                onName = { manager.rename(profile.id, it) },
+                onConnect = { connectHost(profile.id, it) })
         }
     } else Scaffold(
         modifier = Modifier.safeDrawingPadding(),
@@ -74,7 +131,7 @@ internal fun ConnectionHome() {
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
             Row(Modifier.fillMaxWidth().height(56.dp).semantics { contentDescription = "Navigation toolbar" }, verticalAlignment = Alignment.CenterVertically) {
                 Text(page, modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                if (page == "Hosts") FilledTonalButton(shape = RoundedCornerShape(10.dp), onClick = { newName = ""; create = true },
+                if (page == "Hosts") FilledTonalButton(shape = RoundedCornerShape(10.dp), onClick = { create = true },
                     colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base)) {
                     ChatGlyph(ChatIcon.Attach); Spacer(Modifier.width(6.dp)); Text("Add host")
                 }
@@ -84,7 +141,7 @@ internal fun ConnectionHome() {
                 "Activity" -> ActivityList(activities, manager.profiles.associate { it.id to it.name }, connectedHosts) { hostId, threadId ->
                     opened = hostId; targetThread = threadId; editor = false
                     val vm = manager.controller(hostId)
-                    if (!vm.connected && !vm.connecting) vm.savedConnection?.let(vm::connect)
+                    vm.savedConnection?.let { connectHost(hostId, it) }
                 }
                 "Settings" -> {
                     Surface(color = Mocha.Mantle, shape = RoundedCornerShape(12.dp)) {
@@ -115,16 +172,24 @@ internal fun ConnectionHome() {
                             var actions by remember { mutableStateOf(false) }
                             Surface(color = Mocha.Mantle, shape = RoundedCornerShape(12.dp)) {
                                 Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(Modifier.heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Surface(color = Mocha.Surface, shape = RoundedCornerShape(10.dp)) { Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { ChatGlyph(ChatIcon.Computer, color = if (vm.connected) Mocha.Blue else Mocha.Subtext) } }
                                         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                                             Text(host.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             Text(vm.savedConnection?.let { "${it.user}@${it.host}:${it.port}" } ?: "Finish setting up this host", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         }
-                                        if (vm.connecting) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                        else Text(if (vm.connected) "Online" else "Offline", color = if (vm.connected) Mocha.Blue else Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+                                        val hasIssue = !vm.connecting && !vm.connected && vm.error.isNotBlank()
+                                        val statusAction = if (hasIssue) Modifier.clickable(role = Role.Button) {
+                                            issue = host to vm.error
+                                        } else Modifier
+                                        Box(Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).then(statusAction), contentAlignment = Alignment.CenterEnd) {
+                                            when {
+                                                vm.connecting -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                                hasIssue -> Text("Issue", color = Mocha.Red, style = MaterialTheme.typography.labelSmall)
+                                                else -> Text(if (vm.connected) "Online" else "Offline", color = if (vm.connected) Mocha.Blue else Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        }
                                     }
-                                    if (vm.error.isNotBlank()) Text(vm.error, color = Mocha.Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
                                     if (vm.runningThreads.isNotEmpty() || vm.decisions.isNotEmpty()) Text("${vm.runningThreads.size} running · ${vm.decisions.size} waiting for input", color = Mocha.Blue, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 8.dp))
                                     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Box {
@@ -139,7 +204,7 @@ internal fun ConnectionHome() {
                                         Button(shape = RoundedCornerShape(10.dp), onClick = {
                                             editor = vm.savedConnection == null; targetThread = ""
                                             opened = host.id
-                                            if (!vm.connected && !vm.connecting) vm.savedConnection?.let(vm::connect)
+                                            vm.savedConnection?.let { connectHost(host.id, it) }
                                         }) { Text(if (vm.connected || vm.connecting) "Open" else if (vm.savedConnection == null) "Set up" else "Connect") }
                                     }
                                 }
@@ -150,11 +215,14 @@ internal fun ConnectionHome() {
             }
         }
     }
-    if (create) AlertDialog(onDismissRequest = { create = false }, title = { Text("Add host") },
-        text = { OutlinedTextField(newName, { newName = it.take(80) }, label = { Text("Name") }, placeholder = { Text("Laptop or VPS") }, singleLine = true) },
-        confirmButton = { TextButton(enabled = newName.isNotBlank(), onClick = {
-            manager.add(newName)?.let { opened = it; editor = true; create = false }
-        }) { Text("Continue") } }, dismissButton = { TextButton(onClick = { create = false }) { Text("Cancel") } })
+    issue?.let { (host, message) ->
+        AlertDialog(
+            onDismissRequest = { issue = null }, title = { Text(host.name) },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { issue = null; opened = host.id; editor = true }) { Text("Edit host") } },
+            dismissButton = { TextButton(onClick = { issue = null }) { Text("Close") } },
+        )
+    }
     if (delete.isNotBlank()) AlertDialog(onDismissRequest = { delete = "" }, title = { Text("Remove saved host?") },
         text = { Text("Disconnect this host and remove its saved key and session state from this device. Remote files and conversations are kept.") },
         confirmButton = { TextButton(onClick = { manager.remove(delete); if (opened == delete) opened = ""; delete = "" }) { Text("Remove", color = Mocha.Red) } },

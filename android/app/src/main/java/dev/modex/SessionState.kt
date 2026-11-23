@@ -97,7 +97,11 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
                         val reported = params.optJSONObject("turn")?.takeUnless { it.isNull("durationMs") }?.optLong("durationMs")?.takeIf { it >= 0 }
                         messages = messages.map { entry ->
                             if (entry.turnId == turn) entry.copy(status = if (entry.role in listOf("You", "plan") || entry.status == "inProgress") status else entry.status,
-                                notice = if (entry.role == "You") eventTurnNotice(params) else entry.notice,
+                                notice = if (entry.role == "You") {
+                                    val terminal = eventTurnNotice(params)
+                                    if (status != "completed" && terminal?.category in listOf(null, "turn_failed") &&
+                                        entry.notice?.retrying == false) entry.notice else terminal
+                                } else entry.notice,
                                 durationMs = if (entry.role == "You") reported ?: entry.startedAtMs?.let { (now() - it).coerceAtLeast(0) } else entry.durationMs) else entry
                         }
                     }
@@ -112,7 +116,7 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
                     changed(id)
                 }
             }
-            "item/started", "item/completed", "item/plan/delta", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
+            "item/started", "item/completed", "item/plan/delta", "item/agentMessage/delta", "item/commandExecution/outputDelta", "item/fileChange/patchUpdated", "item/reasoning/summaryTextDelta", "item/reasoning/summaryPartAdded" ->
                 if (id == selected) {
                     val target = params.optString("turnId").ifBlank { activeTurns[id].orEmpty() }
                     if (target.isNotBlank() && id in activeTurns && activeTurns[id] != target) return

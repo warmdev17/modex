@@ -23,16 +23,14 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
             check(manager.profiles.all { it.name in listOf("Fixture laptop", "Fixture VPS") }) { "This fixture requires a disposable emulator with no user hosts" }
             runOnMainSync { manager.profiles.toList().forEach { manager.remove(it.id) } }
             manager.reconnectOnOpen(false)
-            val first = manager.add("Fixture laptop")!!
-            val second = manager.add("Fixture VPS")!!
-            val bytes = File(targetContext.filesDir, "smoke-key").readBytes()
+            val bytes = args.getString("keyPath")?.let(::readSshFixtureKey) ?: File(targetContext.filesDir, "smoke-key").readBytes()
             try {
                 runOnMainSync {
-                    for ((id, state) in listOf(first to args.getString("state")!!, second to args.getString("state2")!!)) {
-                        val vm = manager.controller(id)
-                        vm.importKey(bytes.copyOf())
-                        vm.connect(Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,
-                            args.getString("pin")!!, args.getString("binary")!!, state))
+                    for ((name, state) in listOf("Fixture laptop" to args.getString("state")!!, "Fixture VPS" to args.getString("state2")!!)) {
+                        val connection = Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,
+                            args.getString("pin")!!, args.getString("binary")!!, state)
+                        val id = manager.add(name, connection, bytes).getOrThrow()
+                        manager.controller(id).connect(connection)
                     }
                 }
             } finally { bytes.fill(0) }
@@ -57,11 +55,14 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
         await { !a.historyLoading && !b.historyLoading && a.messages.isNotEmpty() && b.messages.isNotEmpty() }
         if (!restore) {
             runOnMainSync {
-                check(!a.configure(a.savedConnection!!.copy(host = "other.invalid")))
+                check(!a.configure(a.savedConnection!!.copy(port = 0)))
                 check(a.savedConnection!!.host == "10.0.2.2")
                 a.chooseModel("fixture-chosen", "high")
                 check(b.sessionModel == "fixture" && b.sessionEffort == "low")
-                a.disconnect()
+                val original = a.savedConnection!!
+                check(a.configure(original.copy(host = "other.invalid")) && a.keyLoaded)
+                check(a.savedConnection!!.host == "other.invalid")
+                check(a.configure(original))
                 check(b.connected && a.messages.isEmpty() && b.messages.isNotEmpty())
                 b.refreshThreads()
             }
@@ -81,7 +82,7 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
             val found = mutableListOf<AccessibilityNodeInfo>()
             fun walk(n: AccessibilityNodeInfo?) {
                 if (n == null) return
-                if (n.text?.toString() == label || n.contentDescription?.toString() == label) found += n
+                if (n.isVisibleToUser && (n.text?.toString() == label || n.contentDescription?.toString() == label)) found += n
                 for (i in 0 until n.childCount) walk(n.getChild(i))
             }
             walk(uiAutomation.rootInActiveWindow)
@@ -91,7 +92,8 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
             val deadline = System.currentTimeMillis() + 5000
             while (nodes(label).size <= index && System.currentTimeMillis() < deadline) Thread.sleep(80)
             val matches = nodes(label)
-            val node = if (label in listOf("Hosts", "Activity", "Settings")) matches.last() else matches.getOrNull(index) ?: error("Missing UI: $label")
+            val node = (if (label in listOf("Hosts", "Activity", "Settings")) matches.lastOrNull() else matches.getOrNull(index))
+                ?: error("Missing UI: $label")
             val bounds = Rect().also(node::getBoundsInScreen)
             val time = SystemClock.uptimeMillis()
             // Native navigation tabs can expose selection without isClickable; exercise real touch.
@@ -121,6 +123,29 @@ internal fun Instrumentation.connectionManagementSmoke(args: Bundle) {
         val screenshot = uiAutomation.takeScreenshot()!!
         File(targetContext.filesDir, "connections-home.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
         screenshot.recycle()
+        click("Manage Fixture laptop"); click("Edit host")
+        awaitLabel("Host settings")
+        check(nodes("Host binary").isEmpty() && nodes("State directory").isEmpty())
+        click("Advanced settings")
+        awaitLabel("Host binary"); awaitLabel("State directory")
+        click("Advanced settings")
+        val collapsedBy = System.currentTimeMillis() + 5000
+        while (nodes("Host binary").isNotEmpty() && System.currentTimeMillis() < collapsedBy) Thread.sleep(100)
+        check(nodes("Host binary").isEmpty()) { "Advanced fields stayed visible after collapsing" }
+        val editor = uiAutomation.takeScreenshot()!!
+        File(targetContext.filesDir, "connections-editor.png").outputStream().use { editor.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        editor.recycle()
+        sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        awaitLabel("Manage Fixture laptop")
+        runOnMainSync {
+            a.disconnect()
+            check(!a.configure(a.savedConnection!!.copy(port = 0)))
+        }
+        awaitLabel("Issue")
+        check(nodes("Check the address, port, fingerprint and any custom paths.").isEmpty())
+        click("Issue")
+        awaitLabel("Check the address, port, fingerprint and any custom paths.")
+        click("Close")
         if (restore) runOnMainSync {
             manager.remove(first.id)
             check(b.connected && b.savedConnection != null)

@@ -127,6 +127,9 @@ internal fun ChatWorkspace(
     sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
     sessionStatus: SessionStatus? = null, sessionStatusLoading: Boolean = false, sessionStatusError: String = "", modeChanging: Boolean = false, modeUncertain: Boolean = false,
     onSessionStatus: () -> Unit = {}, onSessionMode: (String) -> Unit = {},
+    permissionProfiles: List<SessionPermissionProfile> = emptyList(), permissionsWorking: Boolean = false,
+    permissionsMessage: String = "", onSessionPermissions: (String) -> Unit = {},
+    usageWarning: String = "",
     threadWorkspaces: Map<String,String> = emptyMap(), threadListLoading: Boolean = false,
     registeredProjects: List<RemoteProject> = emptyList(), projectMembership: Map<String,String> = emptyMap(), projectStatus: String = "",
     attachments: List<Attachment> = emptyList(), attachmentWorking: Boolean = false,
@@ -207,6 +210,10 @@ internal fun ChatWorkspace(
     var showSessionStatus by remember(selected) { mutableStateOf(false) }
     val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
     val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" } }
+    val latestPromptIndex = remember(reasoningTimeline) { reasoningTimeline.indexOfLast { it.role == "You" } }
+    val latestPrompt = reasoningTimeline.getOrNull(latestPromptIndex)
+    val showWorkStatus = !historyLoading && selected.isNotBlank()
+    val completedWork = latestPrompt?.takeIf { showWorkStatus && !busy && it.status != "inProgress" }
     val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
     LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
@@ -291,7 +298,7 @@ internal fun ChatWorkspace(
                 Box {
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
                     ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true })
+                        DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true; onSessionPermissions("") })
                         if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, onClick = { menu = false; onHome() })
                         DropdownMenuItem(text = { Text("Connection settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, onClick = { menu = false; onConnection() })
                         if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, leadingIcon = { ChatGlyph(ChatIcon.Disconnect) }, onClick = { menu = false; onDisconnect() })
@@ -302,6 +309,12 @@ internal fun ChatWorkspace(
                 Column(Modifier.padding(12.dp)) {
                     SelectionContainer { Text(error, style = MaterialTheme.typography.bodySmall) }
                     if (takeoverSession.isNotBlank()) TextButton(onClick = { showTakeover = true }, enabled = connected && !historyLoading) { Text("Take over on phone") }
+                }
+            }
+            if (usageWarning.isNotBlank() && selected.isNotBlank()) {
+                Surface(color = Mocha.Mantle, shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = ::openStatus)) {
+                    Text(usageWarning, Modifier.padding(12.dp), color = Mocha.Red, style = MaterialTheme.typography.bodyMedium)
                 }
             }
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
@@ -382,11 +395,11 @@ internal fun ChatWorkspace(
                                     entry.attachments.forEach { file -> AttachmentTile(file, loadAttachment, { preview = file }) }
                                 }
                                 if (body.isNotBlank()) Text(body, style = MaterialTheme.typography.bodyLarge)
-                                if (entry.status != "inProgress") WorkTimer(entry)
+                                if (entry.status != "inProgress" && entry !== completedWork) WorkTimer(entry)
                                 entry.notice?.let { Text(it.message, style = MaterialTheme.typography.bodySmall, color = if (it.retrying) Mocha.Blue else Mocha.Subtext, modifier = Modifier.semantics { contentDescription = "Turn notice: ${it.message}" }) }
                             }
                         }
-                    } else if (role == "command") CommandCard(entry) else MarkdownMessage(body, selectable = false)
+                    } else if (role == "command" || role == "web" || role == "file_change") CommandCard(entry) else MarkdownMessage(body, selectable = false)
                     }
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
@@ -418,14 +431,14 @@ internal fun ChatWorkspace(
                     }
                 }
             }
-            if (busy && !historyLoading && selected.isNotBlank()) {
-                val promptIndex = reasoningTimeline.indexOfLast { it.role == "You" }
-                val turn = reasoningTimeline.getOrNull(promptIndex)?.takeIf { it.status == "inProgress" }
-                val reasoning = if (turn == null) null else reasoningTimeline.drop(promptIndex + 1).lastOrNull { it.role == "reasoning" }
-                val action = reasoning?.let { reasoningLabel(it.summaryParts.lastOrNull { part -> part.isNotBlank() }.orEmpty().ifBlank { it.text }) }.orEmpty().ifBlank { "Working" }
-                WorkTimer(turn ?: ChatEntry(role = "You", status = "inProgress"), if (stopping) "Stopping" else action,
-                    Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 8.dp))
+            val running = busy && showWorkStatus
+            val activeWork = latestPrompt?.takeIf { running && it.status == "inProgress" }
+            val workAction = if (!running) null else if (stopping) "Stopping" else {
+                val reasoning = activeWork?.let { reasoningTimeline.drop(latestPromptIndex + 1).lastOrNull { it.role == "reasoning" } }
+                reasoning?.let { reasoningLabel(it.summaryParts.lastOrNull { part -> part.isNotBlank() }.orEmpty().ifBlank { it.text }) }
+                    .orEmpty().ifBlank { "Working" }
             }
+            val work = if (running) activeWork ?: ChatEntry(role = "You", status = "inProgress") else completedWork
             PromptComposer(
                 prompt, { updatePrompt(it) }, busy,
                 (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank(),
@@ -441,7 +454,7 @@ internal fun ChatWorkspace(
                 onAddReference = ::addReference, onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
                 suggestionsEnabled = !drawer.isOpen,
                 mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain, modeEnabled = modeActionEnabled,
-                onMode = onSessionMode, onModeRefresh = onSessionStatus,
+                onMode = onSessionMode, onModeRefresh = onSessionStatus, work = work, workAction = workAction,
             ) {
                 if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) }, chosenReferences)) updatePrompt("")
             }
@@ -486,14 +499,14 @@ internal fun ChatWorkspace(
         confirmButton = { TextButton(enabled = canSwitch && model.isNotBlank() && validModelId(model), onClick = { onCreateInProject(model.trim(), permissionMode, newEffort, newWorkspace, newProjectId); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
         dismissButton = { TextButton(onClick = { newChat = false }) { Text("Cancel") } }
     )
-    if (showSettings) AlertDialog(
-        onDismissRequest = { showSettings = false }, title = { Text("Session settings") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SelectionContainer { Text(sessionSettings.ifBlank { "No permission report saved for this session." }) }
-            Text(if (sessionSettings.isBlank()) "Reload while connected and the session is idle to read its settings." else "Last reported when this session was opened. Host policy and individual tool approvals also apply.", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
-        } },
-        confirmButton = { TextButton(onClick = { showSettings = false }) { Text("Close") } },
-        dismissButton = { TextButton(enabled = connected && !busy && !historyLoading, onClick = { showSettings = false; onSelect(selected) }) { Text("Reload settings") } }
+    if (showSettings) SessionPermissionsDialog(
+        status = sessionStatus,
+        profiles = permissionProfiles,
+        working = permissionsWorking,
+        message = permissionsMessage,
+        canApply = connected && !busy && !historyLoading && !modeChanging && selectedDecisions.isEmpty() && !planResponding,
+        onRequest = onSessionPermissions,
+        onClose = { showSettings = false },
     )
     if (showModel) AlertDialog(
         onDismissRequest = { showModel = false },
@@ -523,12 +536,6 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
         "externalSandbox" -> "External sandbox"
         else -> known(value)
     }
-    fun limit(label: String, value: RateLimitWindow?) = if (value == null) "$label: Unavailable" else buildString {
-        append("$label: ")
-        append(value.usedPercent?.let { "${java.text.NumberFormat.getNumberInstance().format(it)}% used" } ?: "usage unavailable")
-        value.windowDurationMins?.let { append(" · $it min") }
-        value.resetsAt?.let { append(" · resets ${java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT).format(java.util.Date(it * 1000))}") }
-    }
     AlertDialog(
         onDismissRequest = close, title = { Row(verticalAlignment = Alignment.CenterVertically) { ChatGlyph(ChatIcon.Activity); Spacer(Modifier.width(8.dp)); Text("Session status") } },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -539,6 +546,15 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             if (status == null) Text("No status has been reported for this session.", color = Mocha.Subtext)
             else SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val context = contextRemaining(status)
+                SessionUsageRow(
+                    "Context window", context,
+                    if (context != null) "${number(status.contextTokens)} used / ${number(status.contextWindow)} tokens" else null,
+                    showBar = false,
+                )
+                SessionRateLimitRow("5h limit", status.usageWindow(5 * 60L))
+                SessionRateLimitRow("Weekly limit", status.usageWindow(7 * 24 * 60L))
+                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
                 Text("Mode: ${if (status.mode == "plan") "Plan" else if (status.mode == "default") "Default" else "Unavailable"}")
                 Text("Model: ${known(status.model)}")
                 Text("Reasoning: ${known(status.effort)}")
@@ -547,16 +563,43 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
                 Text("Sandbox: ${sandbox(status.sandbox)}")
                 Text("Approvals: ${known(status.approvalPolicy)}")
                 Text("Reviewer: ${known(status.approvalsReviewer)}")
-                Text("Context: ${if (status.contextTokens != null && status.contextWindow != null) "${number(status.contextTokens)} / ${number(status.contextWindow)} tokens" else "Unavailable"}")
                 Text("Session total: ${if (status.totalTokens != null) "${number(status.totalTokens)} tokens" else "Unavailable"}")
                 Text("Limits: ${listOf(status.limitName, status.planType).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Unavailable" }}")
-                Text(limit("Primary", status.primaryLimit))
-                Text(limit("Secondary", status.secondaryLimit))
             } }
         } },
         confirmButton = { TextButton(onClick = close) { Text("Close") } },
         dismissButton = { TextButton(enabled = !loading, onClick = refresh) { Text("Refresh") } }
     )
+}
+
+@Composable
+private fun SessionRateLimitRow(label: String, window: RateLimitWindow?) {
+    val reset = window?.resetsAt?.takeIf { it in 1..Long.MAX_VALUE / 1000 }?.let {
+        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT)
+            .format(java.util.Date(it * 1000))
+    }
+    SessionUsageRow(label, window?.remainingPercent(), reset?.let { "Resets $it" }, showBar = true)
+}
+
+@Composable
+private fun SessionUsageRow(label: String, remaining: Int?, detail: String?, showBar: Boolean) {
+    Column(Modifier.fillMaxWidth().padding(bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
+            Text(
+                remaining?.let { "$it% left" } ?: "Unavailable",
+                color = if (remaining == null) Mocha.Subtext else Mocha.Blue,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+        if (remaining != null && showBar) {
+            LinearProgressIndicator(
+                progress = { remaining / 100f }, modifier = Modifier.fillMaxWidth(),
+                color = Mocha.Blue, trackColor = Mocha.Surface, gapSize = 0.dp, drawStopIndicator = {},
+            )
+        }
+        detail?.let { Text(it, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall) }
+    }
 }
 
 @Composable
@@ -569,7 +612,7 @@ private fun PromptComposer(
     referenceEnabled: Boolean, chosenReferences: List<PromptReference>, onAddReference: (PromptReference) -> Unit,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
     suggestionsEnabled: Boolean, mode: String, modeChanging: Boolean, modeUncertain: Boolean, modeEnabled: Boolean,
-    onMode: (String) -> Unit, onModeRefresh: () -> Unit, onSend: () -> Unit
+    onMode: (String) -> Unit, onModeRefresh: () -> Unit, work: ChatEntry?, workAction: String?, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     var editor by remember(draftKey) { mutableStateOf(TextFieldValue(prompt, TextRange(prompt.length))) }
@@ -590,19 +633,27 @@ private fun PromptComposer(
     val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val control = modeControl(mode, modeUncertain, modeChanging)
     val modeColor = if (mode == "plan") Mocha.Pink else Mocha.Blue
-    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
-        TextButton(
-            onClick = { if (control.refresh) onModeRefresh() else onMode(control.target) },
-            enabled = modeEnabled && control.enabled,
-            colors = ButtonDefaults.textButtonColors(contentColor = if (control.refresh) Mocha.Red else modeColor, disabledContentColor = Mocha.Subtext),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp), shape = RoundedCornerShape(6.dp),
-            modifier = Modifier.heightIn(min = 48.dp).semantics { stateDescription = if (mode == "plan") "Plan mode enabled" else if (mode == "default") "Default mode enabled" else "Mode unavailable" }
-        ) {
-            if (modeChanging) {
-                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Mocha.Subtext)
-                Spacer(Modifier.width(6.dp))
+    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val modeAvailable = modeEnabled && control.enabled
+            Row(
+                Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                    .clickable(
+                        interactionSource = null, indication = null, enabled = modeAvailable, role = Role.Button,
+                        onClick = { if (control.refresh) onModeRefresh() else onMode(control.target) },
+                    )
+                    .padding(horizontal = 8.dp)
+                    .semantics { stateDescription = if (mode == "plan") "Plan mode enabled" else if (mode == "default") "Default mode enabled" else "Mode unavailable" },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (modeChanging) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = Mocha.Subtext)
+                Text(control.label, style = MaterialTheme.typography.labelSmall,
+                    color = if (!modeAvailable) Mocha.Subtext else if (control.refresh) Mocha.Red else modeColor)
             }
-            Text(control.label, style = MaterialTheme.typography.labelMedium)
+            if (work != null) Box(Modifier.weight(1f).padding(start = 8.dp), contentAlignment = Alignment.CenterEnd) {
+                WorkTimer(work, workAction)
+            }
         }
         Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Message input container" }) {
         Column(Modifier.padding(12.dp)) {

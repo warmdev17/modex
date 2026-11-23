@@ -7,11 +7,13 @@ import org.json.JSONObject
 fun fingerprint(key: ByteArray): String = "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(key))
 
 fun remoteCommand(binary: String, state: String, cursor: Long, instance: String?): String {
-    require(binary.startsWith('/') && state.startsWith('/'))
+    require((binary.isEmpty() || binary.startsWith('/')) && (state.isEmpty() || state.startsWith('/')))
     require(listOf(binary, state, instance.orEmpty()).none { value -> value.any { it == '\n' || it == '\r' || it == '\u0000' } })
     require(cursor >= 0 && (cursor == 0L || !instance.isNullOrBlank()))
     fun quote(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
-    return "exec ${quote(binary)} --attach --state-dir ${quote(state)} --cursor $cursor" + (instance?.let { " --instance ${quote(it)}" } ?: "")
+    val executable = if (binary.isEmpty()) "\"\$HOME\"/.local/bin/modex-host" else quote(binary)
+    val stateDirectory = if (state.isEmpty()) "\"\$HOME\"/.local/state/modex-phone" else quote(state)
+    return "exec $executable --attach --state-dir $stateDirectory --cursor $cursor" + (instance?.let { " --instance ${quote(it)}" } ?: "")
 }
 
 class JournalState(instance: String? = null, cursor: Long = 0) {
@@ -23,9 +25,9 @@ class JournalState(instance: String? = null, cursor: Long = 0) {
     fun hello(frame: JSONObject) {
         require(frame.optBoolean("ready") && frame.optString("instance").isNotBlank()) { "Supervisor did not acknowledge attach" }
         val incoming = frame.getString("instance")
-        require(instance == null || instance == incoming) { "Supervisor restarted. Reset connection to load a new journal." }
+        require(instance == null || instance == incoming) { "Supervisor identity changed in the attach reply." }
         val checkpoint = if (frame.optBoolean("resynced")) {
-            require(instance == null && cursor == 0L) { "Reset session cursor before accepting a new checkpoint." }
+            require(instance == null && cursor == 0L) { "Checkpoint requires a fresh journal." }
             val value = frame.get("cursor")
             require(value is Number && value.toString().toLongOrNull()?.let { it > 0 } == true) { "Invalid journal checkpoint" }
             value.toLong()
