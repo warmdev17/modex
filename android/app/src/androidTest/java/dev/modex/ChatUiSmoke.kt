@@ -248,7 +248,7 @@ fun Instrumentation.historyScrollSmoke() {
 fun Instrumentation.commandTimelineSmoke() {
     val output = Bundle()
     try {
-        val command = "/usr/bin/bash -lc \"go test ./...\""
+        val command = "/usr/sbin/bash -lc date"
         val jsonOutput = "{\"ok\": true, \"count\": 42}"
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var messages by mutableStateOf(listOf(ChatEntry("a", "Codex", "Checking the workspace.")))
@@ -284,7 +284,7 @@ fun Instrumentation.commandTimelineSmoke() {
             File(targetContext.filesDir, name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
             bmp.recycle()
         }
-        await("Running"); await("Running go test ./...…")
+        await("Running"); await("Running date…")
         check(node("TOOL_OUTPUT_MARKER") == null) { "Output exposed while collapsed" }
         shot("command-collapsed.png")
         click("Expand command")
@@ -297,7 +297,7 @@ fun Instrumentation.commandTimelineSmoke() {
         shot("command-recollapsed.png")
         check(node("TOOL_OUTPUT_MARKER") == null) { "Output still exposed after collapse" }
         runOnMainSync { messages = listOf(messages.last().copy(status = "completed", exitCode = 0, text = jsonOutput)) }
-        await("Ran go test ./...")
+        await("Ran date")
         await("Completed · exit 0")
         shot("command-ran.png")
         click("Expand command"); await(jsonOutput)

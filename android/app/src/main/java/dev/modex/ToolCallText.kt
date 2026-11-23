@@ -7,6 +7,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 
 private const val HIGHLIGHT_LIMIT = 16_384
 private val shellWrapper = Regex("""^(?:(?:/[\w.-]+)*/)?(?:bash|sh|zsh)[ \t]+-(?:lc|c)[ \t]+""")
+private val bareShellCommand = Regex("""[A-Za-z0-9_./][A-Za-z0-9_./-]*""")
 
 internal fun commandSummary(command: String, running: Boolean): AnnotatedString = buildAnnotatedString {
     val display = if (command.length <= HIGHLIGHT_LIMIT) unwrapShell(command) ?: command else command
@@ -24,7 +25,9 @@ private fun unwrapShell(command: String): String? {
     val input = command.trim()
     val prefix = shellWrapper.find(input) ?: return null
     var index = prefix.range.last + 1
-    if (input.getOrNull(index) !in listOf('\'', '"')) return null
+    if (input.getOrNull(index) !in listOf('\'', '"')) {
+        return input.substring(index).takeIf(bareShellCommand::matches)
+    }
     val result = StringBuilder()
     while (index < input.length) {
         val quote = input[index++]

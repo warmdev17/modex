@@ -4,6 +4,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ToolCallTextTest {
+    @Test fun summaryUnwrapsBareSingleWordCodexCommands() {
+        assertEquals("Ran date", commandSummary("/usr/sbin/bash -lc date", false).text)
+        val running = commandSummary("/usr/sbin/bash -lc pwd", true)
+        assertEquals("Running pwd…", running.text)
+        assertEquals(listOf("pwd"), running.spanStyles.map { running.text.substring(it.start, it.end) })
+        for (command in listOf("bash -lc date extra", "bash -lc date; pwd", "bash -lc -x")) {
+            assertEquals("Ran $command", commandSummary(command, false).text)
+        }
+    }
+
     @Test fun summaryShowsCommandAndKeepsUnexpectedWrappers() {
         assertEquals("Ran git status", commandSummary("/usr/bin/bash -lc 'git status'", false).text)
         assertEquals("Running echo \"hello\"…", commandSummary("/bin/bash -lc \"echo \\\"hello\\\"\nls\"", true).text)
