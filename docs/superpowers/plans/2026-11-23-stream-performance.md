@@ -1,0 +1,9 @@
+# Streaming performance fix
+
+Goal: remove severe Android lag when streamed text grows, preserving rich Markdown, exact text, scroll anchors, Stop, encrypted continuity and cache limits. No backend or product feature changes.
+
+Measured RED real ViewModel:1500history/80deltas total8811ms,p95149,max441ms. Root path synchronously JSON-encodes whole cache for every delta. Defer cache encoding to snapshot/terminal/navigation boundaries; frozen page references are captured on Main and bounded snapshotJSON/encryption generated on IO. Preserve10sessions/4MiB limits and SavedHost revision/cancellation. Navigation flush keeps current partial text.
+
+Render regression uses an in-process Compose semantics timer: publicdev16 500char mixedMarkdown burst2324ms, candidate190ms. Initial24KiB denseparagraph layout is a separate rich-content/no-hang check and is not claimed optimized. Earlier UiAutomation timing included binder idle and is not used as the final latency metric. Delete intermediate20ms typewriter and pass native streamed body directly to same Markdown renderer. Preserve rendered-growth scrolling and manual reading anchor; do not downgrade to plain text or introduce parser threading before measurement.
+
+Primary owns VM/cache/instrumentation/delivery/state; stream_perf_trace owns bounded render change and test; independent reviewer read-only. Validate realVM budget (<32msp95,<1600mstotal), final prefix after navigation and actualencrypted VM snapshot+forget, 500char mixedMarkdown burst<300ms and24KiB richcontent/nohang<8s, fullunit/lint/releasebuilds and existingcontrols/@IME/autoFollow/upgrade fixtures. FinalAPKsame signer/increasingcode, PR/merge preservedcommits, source tag and publichashes. Android-only: nohostrestart. Deviceconfirmationremainsseparate fromemulator evidence.

@@ -79,18 +79,7 @@ class ChatInteractionTest {
         assertEquals(2100L, completed.durationMs)
     }
 
-    @Test fun liveRevealNeverSplitsUnicodeSurrogatesAndAlwaysFinishes() {
-        val text = "Hello 👋🏽 bradar 🇻🇳"
-        var end = 0
-        var steps = 0
-        while (end < text.length) {
-            val next = nextRevealEnd(text, end)
-            assertTrue(next > end)
-            assertFalse(next < text.length && Character.isLowSurrogate(text[next]))
-            end = next; steps++
-            assertTrue(steps < 100)
-        }
-        assertEquals(text.length, end)
+    @Test fun workDurationFormatsMinutesAndSeconds() {
         assertEquals("1m 1s", formatWorkDuration(61000))
     }
 

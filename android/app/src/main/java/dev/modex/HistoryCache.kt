@@ -11,6 +11,10 @@ internal data class CachedHistory(val entries: List<ChatEntry>, val cursor: Stri
 internal class HistoryCache(private val maxSessions: Int = 10, private val maxBytes: Int = 4 * 1024 * 1024) {
     private val sessions = linkedMapOf<String, CachedHistory>()
     fun get(id: String): CachedHistory? = sessions[id]
+    fun pages(): List<Pair<String, CachedHistory>> = sessions.toList()
+    fun invalidateRevision(id: String) {
+        sessions[id]?.let { if (it.revision.isNotEmpty()) sessions[id] = it.copy(revision = "") }
+    }
     fun clear() = sessions.clear()
     fun remove(id: String) { sessions.remove(id) }
     fun latest(id: String, entries: List<ChatEntry>, cursor: String, revision: String): CachedHistory {
