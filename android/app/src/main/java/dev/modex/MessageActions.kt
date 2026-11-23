@@ -68,5 +68,9 @@ internal fun WorkTimer(entry: ChatEntry, action: String? = null, modifier: Modif
     }, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("• $action", modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
         if (duration != null) Text("(${formatWorkDuration(duration)})", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
-    } else if (entry.status.isNotBlank()) Text(workStatusLabel(entry.status) + (duration?.let { " · ${formatWorkDuration(it)}" } ?: ""), color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+    } else if (entry.status.isNotBlank()) Text(
+        workStatusLabel(entry.status) + (duration?.let { " · ${formatWorkDuration(it)}" } ?: ""),
+        modifier = modifier, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall,
+    )
 }

@@ -37,7 +37,11 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             host = "Controls fixture", connected = true, connecting = false, selected = selected,
             threads = listOf("source", "other"), titles = mapOf("source" to "Source conversation", "other" to "Other conversation"),
-            messages = listOf(ChatEntry(role = "Codex", text = "Completed fixture reply", status = "completed")),
+            messages = listOf(
+                ChatEntry(role = "You", id = "older", text = "Older prompt", status = "completed", durationMs = 4_000),
+                ChatEntry(role = "You", id = "latest", text = "Latest prompt", status = "completed", durationMs = 12_000),
+                ChatEntry(role = "Codex", text = "Completed fixture reply", status = "completed"),
+            ),
             busy = working, historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture-model", sessionEffort = "medium",
             decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> },
             onSend = { text, _, _, _ -> sent += text; false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {},
@@ -88,9 +92,45 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
             File(targetContext.filesDir, name).outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; image.recycle()
         }
         type("Fixture draft")
-        await("Default")
+        var defaultMode = await("Default")
+        while (!defaultMode.isClickable) defaultMode = defaultMode.parent ?: error("Default has no click action")
+        val modeBounds = Rect().also(defaultMode::getBoundsInScreen)
+        check(modeBounds.height() >= (48 * activity.resources.displayMetrics.density).toInt() - 1) {
+            "Compact mode lost its 48 dp touch area: $modeBounds"
+        }
+        val timeBounds = Rect().also(await("Worked · 12s")::getBoundsInScreen)
+        check(timeBounds.left > modeBounds.right && modeBounds.centerY() in timeBounds.top until timeBounds.bottom) {
+            "Worked time is not beside the mode: $timeBounds, mode $modeBounds"
+        }
+        val inputRight = Rect().also(await("Message input container")::getBoundsInScreen).right
+        check(inputRight - timeBounds.right in 0..(16 * activity.resources.displayMetrics.density).toInt()) {
+            "Worked time is not at the right of the composer: $timeBounds, input right $inputRight"
+        }
+        check(nodes("Worked · 12s").size == 1) { "Latest work duration is duplicated" }
+        await("Worked · 4s")
         await("Context 12% · 1,200 / 10,000")
-        touch("Default"); await("Changing mode…")
+
+        fun modePixels(): IntArray {
+            val screen = uiAutomation.takeScreenshot() ?: error("No screenshot")
+            return IntArray(modeBounds.width() * modeBounds.height()).also {
+                screen.getPixels(it, 0, modeBounds.width(), modeBounds.left, modeBounds.top, modeBounds.width(), modeBounds.height())
+                screen.recycle()
+            }
+        }
+        val beforePress = modePixels()
+        val pressTime = SystemClock.uptimeMillis()
+        fun modePointer(action: Int) {
+            val event = MotionEvent.obtain(pressTime, SystemClock.uptimeMillis(), action, modeBounds.exactCenterX(), modeBounds.exactCenterY(), 0)
+            try { sendPointerSync(event) } finally { event.recycle() }
+        }
+        modePointer(MotionEvent.ACTION_DOWN)
+        try {
+            Thread.sleep(300)
+            check(beforePress.contentEquals(modePixels())) { "Mode gets a highlight while pressed" }
+        } finally {
+            modePointer(MotionEvent.ACTION_UP)
+        }
+        await("Changing mode…")
         check(modeChanges == listOf("plan")) { "Single tap did not request Plan: $modeChanges" }
         check(nodes("Plan").isEmpty()) { "Mode changed before host acknowledgement" }
         runOnMainSync { status = status.copy(mode = "plan"); changing = false }
