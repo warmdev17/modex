@@ -1,5 +1,12 @@
 # Modex project state
 
+## Read-only Subagent Conversations dev.34
+
+Updated 2026-11-24T06:52:36+07:00. Feature branch `feat/subagent-activity`. Signed Android [dev.34](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.34), versionCode 35, source `6ffc9a99c9bc6b851d81326187ee2a7775ddddf8`. APK SHA-256 `8c4e4d6f8c268f06707d233a1b1e86cc729be6954361e01fa10b78f0de9220b7`. Public assets were redownloaded and checksum-verified.
+
+- The Agents panel opens read-only child conversations with the main chat renderer, live events and paged history. Press highlights stay inside each control. The existing dev.33 host provided child events and saved messages in an isolated real Codex test. Android-only delivery kept the existing host process active.
+- At the tagged revision, the Go suite, 137 Android release tests, release lint, matching signer validation, signed dev.33 to dev.34 data-preserving upgrade, 320 dp Agents UI smoke and existing keyboard/reference regression passed. Physical hardware and TalkBack remain unverified. Source integration into main remains pending.
+
 ## Subagent Activity Timeline dev.33
 
 Updated 2026-11-24T05:43:24+07:00. Feature branch `feat/subagent-activity`. Signed Android [dev.33](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.33), versionCode 34, source `c573c74cd79c720dbfddf8e6bfc35851a38fc8ef`. APK SHA-256 `5c20fea497daf47c0b76cfd37ca25400234faf49a4a5aa1e2b449344e745373a`. Public assets were downloaded and checksum-verified.
