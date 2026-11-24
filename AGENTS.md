@@ -16,7 +16,9 @@
 
 # Phone-only development delivery
 
-- During an owner-authorized mobile development session, finishing a verified milestone includes a versioned Android APK, a source tag, and a downloadable GitHub pre-release link; a local build or Actions artifact alone is not delivery. Keep the existing PR/merge rules.
+- Do not publish a release for every verified milestone. Release only when the feature is substantial, after roughly five small UI changes have been grouped into one coherent update, or when a modex-host logic change ships with its required Android UI change. Keep the existing PR/merge rules.
+- For smaller Android UI changes, do not create a source tag or GitHub pre-release. Build and verify the APK, then transfer the test APK through SSH/SFTP using the host currently connected in Modex. Preserve the established signing identity and existing app data.
+- When a change meets the release threshold, delivery includes a versioned Android APK, a source tag, and a downloadable GitHub pre-release link; a local build or Actions artifact alone is not release delivery.
 - Verify package identity, the established signing certificate and an increasing versionCode before publishing. Never rotate the signing identity, uninstall the app or clear its data to work around an update failure. Keep signing keys private; never put them in Git or release assets.
 - Test an in-place APK upgrade with encrypted synthetic state, plus the affected unit, lint and UI checks. Report physical-device gaps separately. Publish checksums and identify the exact source revision.
 - Android-only updates must not restart modex-host. Installing an APK may restart the Android process; keep server-side turns alive and restore the saved connection afterward.
