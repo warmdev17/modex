@@ -63,6 +63,10 @@ internal fun Instrumentation.autoFollowSmoke() {
         }
         check(find(root()) { it.contentDescription == "Scroll to latest" } == null) { "Jump button visible at bottom" }
         await("Stream start")
+        fun previousPrompt() = find(root()) {
+            it.isVisibleToUser && it.contentDescription == "Jump to previous prompt"
+        }
+        check(previousPrompt() == null) { "Previous prompt visible at latest" }
         val longText = "Stream start\n\n" + (0..39).joinToString("\n\n") { "Stream paragraph $it" } + "\n\nSTREAM_END_FIRST"
         runOnMainSync { messages = messages.dropLast(1) + messages.last().copy(text = longText) }
         await("STREAM_END_FIRST")
@@ -84,6 +88,15 @@ internal fun Instrumentation.autoFollowSmoke() {
         check(before.sameAs(after)) { "Streaming moved the reading viewport" }
         before.recycle(); after.recycle()
         check(!atBottom("STREAM_END_SECOND")) { "Streaming pulled reader to bottom" }
+        val header = find(root()) { it.contentDescription == "Open session status" } ?: error("No chat header")
+        var previous = previousPrompt() ?: error("No previous prompt below the header while reading")
+        while (!previous.isClickable) previous = previous.parent ?: error("Previous prompt is not clickable")
+        val previewBounds = Rect().also(previous::getBoundsInScreen)
+        check(previewBounds.top >= Rect().also(header::getBoundsInScreen).bottom)
+        screenshot("previous-prompt.png")
+        check(previous.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "Previous prompt rejected click" }
+        waitForIdleSync()
+        check(visible("Past message 29") && previousPrompt() == null) { "Tap did not reveal the original prompt" }
         var jump = find(root()) { it.contentDescription == "Scroll to latest" } ?: error("No jump button while reading history")
         while (!jump.isClickable) jump = jump.parent ?: error("Jump button is not clickable")
         check(jump.performAction(AccessibilityNodeInfo.ACTION_CLICK))

@@ -38,6 +38,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.CornerRadius
@@ -309,6 +310,10 @@ internal fun ChatWorkspace(
         }
     ) {
         Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+            val scroll = rememberLazyListState()
+            var openAtLatest by remember(selected) { mutableStateOf(true) }
+            var followLatest by remember(selected) { mutableStateOf(true) }
+            var autoScrolling by remember(selected) { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = ::openSessions) { ChatGlyph(ChatIcon.Menu,"Open sessions") }
                 Column(Modifier.weight(1f).padding(horizontal = 8.dp).clickable(enabled = selected.isNotBlank(), onClick = ::openStatus).semantics { if (selected.isNotBlank()) contentDescription = "Open session status" }) {
@@ -326,6 +331,38 @@ internal fun ChatWorkspace(
                     }
                 }
             }
+            if (selected.isNotBlank() && !historyLoading && !openAtLatest && !followLatest && scroll.canScrollForward) {
+                val previousPrompt by remember(timeline, scroll) {
+                    derivedStateOf {
+                        val first = scroll.firstVisibleItemIndex.coerceAtMost(timeline.size)
+                        if (timeline.getOrNull(first)?.role == "You") null
+                        else (first - 1 downTo 0).firstOrNull { timeline[it].role == "You" }
+                    }
+                }
+                previousPrompt?.let { index ->
+                    val entry = timeline[index]
+                    val previewText = entry.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()
+                        ?: entry.attachments.firstOrNull()?.name ?: "Previous prompt"
+                    Surface(
+                        color = Mocha.Mantle,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                .semantics { contentDescription = "Jump to previous prompt" }
+                                .clickable(role = Role.Button) { scroll.requestScrollToItem(index) }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Box(Modifier.rotate(180f)) { ChatGlyph(ChatIcon.Down, color = Mocha.Blue) }
+                            Text(previewText, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall, color = Mocha.Text)
+                        }
+                    }
+                }
+            }
             if (error.isNotBlank()) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
                 Column(Modifier.padding(12.dp)) {
                     SelectionContainer { Text(error, style = MaterialTheme.typography.bodySmall) }
@@ -339,10 +376,6 @@ internal fun ChatWorkspace(
                 }
             }
             if (historyLoading || connecting) LinearProgressIndicator(Modifier.fillMaxWidth(), color = Mocha.Blue, trackColor = Mocha.Surface)
-            val scroll = rememberLazyListState()
-            var openAtLatest by remember(selected) { mutableStateOf(true) }
-            var followLatest by remember(selected) { mutableStateOf(true) }
-            var autoScrolling by remember(selected) { mutableStateOf(false) }
             var requestingOlder by remember(selected) { mutableStateOf(false) }
             fun loadEarlier() {
                 if (!connected || !hasOlderHistory || historyLoading || olderHistoryLoading || requestingOlder) return

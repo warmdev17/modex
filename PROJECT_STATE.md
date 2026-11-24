@@ -1,5 +1,12 @@
 # Modex project state
 
+## Previous prompt preview
+
+Updated 2026-11-24T08:59:00+07:00. Branch `feat/previous-prompt-preview`, based on `ca07c01`. In the main chat, scrolling into history reveals the nearest preceding hidden prompt below the header. Tap to jump to the original without resuming auto-follow.
+
+- Verified the milestone with `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --offline` (137 unit tests), and the auto-follow instrumentation at 320 dp with font scales 1.0 and 1.3. The fixture checks header placement, tapping to jump and viewport stability during streaming. The initial signed candidate preserved encrypted synthetic state over dev.34. The final same-signer APK was installed and exercised on the emulator. Physical phone installation remains unverified.
+- Private SFTP preview on the connected host at `.modex/previews/modex-0.1.0-preview.35-previous-prompt.apk`. Version code 36, SHA-256 `cbefeaddb1835c1cb1a5c516ce5c7d8f1a6a024cefa4b72068930c834fa084aa`. SFTP read-back matched the exact tested APK. Include this UI change in a later release batch.
+
 ## Read-only Subagent Conversations dev.34
 
 Updated 2026-11-24T06:52:36+07:00. Feature branch `feat/subagent-activity`. Signed Android [dev.34](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.34), versionCode 35, source `6ffc9a99c9bc6b851d81326187ee2a7775ddddf8`. APK SHA-256 `8c4e4d6f8c268f06707d233a1b1e86cc729be6954361e01fa10b78f0de9220b7`. Public assets were redownloaded and checksum-verified.
