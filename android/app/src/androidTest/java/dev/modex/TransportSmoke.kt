@@ -17,6 +17,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "session-management") { sessionManagementSmoke(); return }
         if (args.getString("preview") == "plan-review") { planReviewSmoke(); return }
         if (args.getString("preview") == "prompt-drafts") { promptDraftSmoke(args); return }
+        if (args.getString("preview") == "agent-activity") { agentActivitySmoke(); return }
         if (args.getString("preview") == "activity-navigation") { activityNavigationSmoke(); return }
         if (args.getString("preview") == "connection-management") { connectionManagementSmoke(args); return }
         if (args.getString("preview") == "legacy-connections") { legacyConnectionSmoke(); return }

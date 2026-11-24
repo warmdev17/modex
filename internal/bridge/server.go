@@ -560,6 +560,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						turnMetadata
 						Items []struct {
 							toolActivity
+							nativeAgentActivity
 							ID       string          `json:"id"`
 							Command  string          `json:"command"`
 							Cwd      string          `json:"cwd"`
@@ -589,6 +590,13 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 					active = true
 				}
 				for _, item := range turn.Items {
+					if isAgentActivity(item.Type) {
+						activity := item.nativeAgentActivity.project(item.ID, item.Type, item.Status)
+						if len(activity.Targets) > 0 {
+							messages = append(messages, map[string]any{"id": item.ID, "role": "agent_activity", "activity_item": activity})
+						}
+						continue
+					}
 					if item.Type == "commandExecution" {
 						output := item.Output
 						limit := min(65536, outputBudget)

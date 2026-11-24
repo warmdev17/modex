@@ -67,6 +67,7 @@ func fetchHistoryPage(fetch func(string, any) (json.RawMessage, error), cwd, id 
 		Thread
 		Turns []json.RawMessage `json:"turns"`
 	}{thread.Thread, page.Data}})
-	sum := sha256.Sum256(append(append([]byte(nil), meta...), raw...))
+	// Change this prefix when a new mobile projection makes earlier cached pages incomplete.
+	sum := sha256.Sum256(append(append([]byte("agent-activity-v1\x00"), meta...), raw...))
 	return result, page.Next, fmt.Sprintf("%x", sum), err
 }

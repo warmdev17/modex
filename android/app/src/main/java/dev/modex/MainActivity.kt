@@ -92,7 +92,7 @@ internal fun HostWorkspace(
         ChatWorkspace(
             host = hostName, connected = vm.connected, connecting = vm.connecting,
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
-            runningThreads = vm.runningThreads, busy = vm.busy, stopping = vm.stopping, onStop = vm::stop, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
+            runningThreads = vm.runningThreads, busy = vm.busy, activeTurnId = vm.activeTurnId, stopping = vm.stopping, onStop = vm::stop, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
             sessionStatus = vm.sessionStatus, sessionStatusLoading = vm.sessionStatusLoading, sessionStatusError = vm.sessionStatusError, modeChanging = vm.modeChanging, modeUncertain = vm.modeUncertain,
             onSessionStatus = vm::refreshSessionStatus, onSessionMode = vm::changeSessionMode,
@@ -115,6 +115,7 @@ internal fun HostWorkspace(
             attachments = vm.attachments.drafts[vm.selected].orEmpty(), attachmentWorking = vm.attachments.working,
             attachmentProgress = vm.attachments.progress, attachmentError = vm.attachments.error.ifBlank { vm.promptDrafts.error },
             promptDrafts = vm.promptDrafts,
+            agentConversation = vm.agentConversation, onOpenAgent = vm::openAgent, onAgentHistory = vm::loadAgentHistory,
             loadAttachment = vm::attachmentFile,
             onPhoneFiles = { phoneThread = vm.selected; phoneGeneration = vm.attachments.generation; phoneTarget = vm.savedConnection.toString(); documentPicker.launch(arrayOf("*/*")) },
             onRemoteFiles = { remoteThread = vm.selected; vm.attachments.browse(vm.attachments.directoryFor(remoteThread), remoteThread) },

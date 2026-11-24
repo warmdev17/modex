@@ -14,6 +14,7 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
     val stopping: Boolean get() = selected in stoppingTurns
     private val activityVersions = mutableMapOf<String, Long>()
     val runningThreads: Set<String> get() = activeTurns.keys
+    val activeTurnId: String get() = activeTurns[selected].orEmpty()
     val busy: Boolean get() = selected in activeTurns
 
     fun clearSelection() { selected = ""; messages = emptyList() }
@@ -77,6 +78,18 @@ internal class SessionState(private val now: () -> Long = System::currentTimeMil
         val id = params.optString("threadId")
         if (id.isBlank()) return
         val turn = params.optJSONObject("turn")?.optString("id").orEmpty()
+        if ((method == "item/started" || method == "item/completed") &&
+            params.optJSONObject("item")?.optString("type") == "agentActivity") {
+            // A child can finish after the parent turn or while the next parent turn is active.
+            if (id == selected) {
+                val updated = updateChat(messages, method, params)
+                if (updated != messages) {
+                    messages = updated
+                    changed(id)
+                }
+            }
+            return
+        }
         when (method) {
             "turn/started" -> {
                 if (turn.isBlank()) return

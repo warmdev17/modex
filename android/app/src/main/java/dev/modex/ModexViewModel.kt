@@ -102,6 +102,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var answeringDecisionIds by mutableStateOf(setOf<String>()); private set
     val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
+    val activeTurnId: String get() = sessions.activeTurnId
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
     internal var sessionStatus by mutableStateOf<SessionStatus?>(null); private set
@@ -250,7 +251,28 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         request("threads/read", params, selected)?.let { historyRequests[it] = HistoryRequest(selected, cursor, sessions.activityVersion(selected), messages) }
     }
     fun loadOlderHistory() = loadHistory(true)
+    internal val agentConversation = AgentConversation()
+
+    internal fun openAgent(agent: AgentTimeline) {
+        if (!connected || selected.isBlank() ||
+            messages.none { entry -> entry.agentActivity?.targets?.any { it.id == agent.id } == true }) return
+        agentConversation.open(agent)
+        loadAgentHistory()
+    }
+
+    internal fun loadAgentHistory(older: Boolean = false) {
+        val agent = agentConversation.agent ?: return
+        if (agentConversation.loading || !connected || selected.isBlank()) return
+        val params = withWorkspace(JSONObject().put("thread_id", agent.id).put("include_turns", true).put("limit", 10), selectedWorkspace)
+        if (older) {
+            if (agentConversation.cursor.isBlank()) return
+            params.put("cursor", agentConversation.cursor)
+        }
+        request("threads/read", params, tag = "agent-history")?.let { agentConversation.begin(it, older) }
+    }
+
     private fun leaveSession() {
+        agentConversation.close()
         cacheVisibleHistory()
         selectionGeneration++
         settingsRevision++
@@ -523,7 +545,16 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         val destination = transport
         viewModelScope.launch(Dispatchers.IO) {
             try { destination?.send(command) ?: error("Disconnected") }
-            catch (_: Exception) { withContext(Dispatchers.Main) { if (transport === destination) error = "Delivery uncertain. Reconnect and observe before retrying." } }
+            catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    if (transport === destination) {
+                        if (method == "threads/read" && tag == "agent-history") {
+                            pending.remove(id)
+                            agentConversation.result(id, null)
+                        } else error = "Delivery uncertain. Reconnect and observe before retrying."
+                    }
+                }
+            }
         }
         return id
     }
@@ -532,6 +563,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             val id = frame.getLong("id")
             val sentAttachments = sentAttachmentPaths.remove(id)
             val operation = pending.remove(id) ?: return
+            if (operation.first == "threads/read" && operation.second == "agent-history") {
+                agentConversation.result(id, frame.optJSONObject("result"))
+                return
+            }
             if (operation.first == "threads/list" && (listRequests.remove(id) != listGeneration || !connected)) return
             val lifecycle = lifecycleRequests.remove(id)
             if (operation.first in listOf("threads/archive", "threads/unarchive", "threads/delete", "threads/fork")) {
@@ -800,6 +835,11 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             params.optString("plan_key").takeIf { it.isNotBlank() }?.let { handledPlans += it }
         }
         val event = frame.optString("event")
+        if (params.optString("threadId") == agentConversation.agent?.id) {
+            agentConversation.event(event, params)
+            if ((event == "turn/started" || event == "turn/completed") &&
+                (agentConversation.error || agentConversation.messages.isEmpty())) loadAgentHistory()
+        }
         if (event == "account/rateLimits/updated") {
             params.optJSONObject("rateLimits")?.let { limits ->
                 if (limits.optString("limitId").let { it.isBlank() || it == "codex" } || usageLimitWarning(limits).isNotBlank()) {

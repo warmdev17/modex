@@ -143,7 +143,9 @@ internal fun ChatWorkspace(
     onNewProject: () -> Unit = {},
     onCreateInProject: (String, String, String, String, String) -> Unit = { model, mode, effort, _, _ -> onCreate(model, mode, effort) },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {},
-    promptDrafts: PromptDrafts? = null,
+    promptDrafts: PromptDrafts? = null, activeTurnId: String = "",
+    agentConversation: AgentConversation? = null, onOpenAgent: (AgentTimeline) -> Unit = {},
+    onAgentHistory: (Boolean) -> Unit = {},
 ) {
     var deleting by remember(host, archived) { mutableStateOf("") }
     if (deleting.isNotBlank()) AlertDialog(
@@ -216,7 +218,19 @@ internal fun ChatWorkspace(
     }
     var showSessionStatus by remember(selected) { mutableStateOf(false) }
     val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
-    val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" } }
+    val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" || it.role == "agent_activity" } }
+    val agents = remember(messages, activeTurnId, connected, historyLoading) {
+        agentTimeline(messages, activeTurnId, connected && !historyLoading)
+    }
+    var showAgentActivity by remember(host, selected) { mutableStateOf(false) }
+    val openedAgent = agentConversation?.agent
+    if (openedAgent != null) {
+        AgentConversationScreen(agentConversation, agents.firstOrNull { it.id == openedAgent.id } ?: openedAgent,
+            onAgentHistory, loadAttachment)
+    } else if (showAgentActivity && agents.isNotEmpty()) {
+        AgentActivitySheet(agents, hasOlderHistory, olderHistoryLoading, onOlderHistory,
+            onOpenAgent.takeIf { agentConversation != null }) { showAgentActivity = false }
+    }
     val latestPromptIndex = remember(reasoningTimeline) { reasoningTimeline.indexOfLast { it.role == "You" } }
     val latestPrompt = reasoningTimeline.getOrNull(latestPromptIndex)
     val showWorkStatus = !historyLoading && selected.isNotBlank()
@@ -393,21 +407,10 @@ internal fun ChatWorkspace(
             } else Box(Modifier.weight(1f).fillMaxWidth()) {
                 LazyColumn(state = scroll, modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 itemsIndexed(timeline, key = { index, entry -> if (entry.id.isBlank()) "legacy-$index" else "${entry.turnId}/${entry.role}/${entry.id}" }) { _, entry ->
-                    val role = entry.role; val body = entry.text
-                    MessageActions(body, if (role == "You") ({ if (prompt.isNotBlank() && prompt != body) editing = body else applyEdit(body) }) else null) {
-                    if (role == "You") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                        Surface(color = Mocha.Surface, shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth(0.9f)) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                if (entry.attachments.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    entry.attachments.forEach { file -> AttachmentTile(file, loadAttachment, { preview = file }) }
-                                }
-                                if (body.isNotBlank()) Text(body, style = MaterialTheme.typography.bodyLarge)
-                                if (entry.status != "inProgress" && entry !== completedWork) WorkTimer(entry)
-                                entry.notice?.let { Text(it.message, style = MaterialTheme.typography.bodySmall, color = if (it.retrying) Mocha.Blue else Mocha.Subtext, modifier = Modifier.semantics { contentDescription = "Turn notice: ${it.message}" }) }
-                            }
-                        }
-                    } else if (role == "command" || role == "web" || role == "file_change") CommandCard(entry) else MarkdownMessage(body, selectable = false)
-                    }
+                    ChatTranscriptEntry(entry, showWork = entry !== completedWork, loadAttachment, { preview = it },
+                        onEdit = if (entry.role == "You") ({
+                            if (prompt.isNotBlank() && prompt != entry.text) editing = entry.text else applyEdit(entry.text)
+                        }) else null)
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
                     InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
@@ -462,6 +465,8 @@ internal fun ChatWorkspace(
                 suggestionsEnabled = !drawer.isOpen,
                 mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain, modeEnabled = modeActionEnabled,
                 onMode = onSessionMode, onModeRefresh = onSessionStatus, work = work, workAction = workAction,
+                agentCount = agents.takeIf { it.isNotEmpty() }?.count { it.status == "running" },
+                onAgentActivity = { keyboard?.hide(); showAgentActivity = true },
             ) {
                 if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) }, chosenReferences)) updatePrompt("")
             }
@@ -619,7 +624,8 @@ private fun PromptComposer(
     referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
     suggestionsEnabled: Boolean, mode: String, modeChanging: Boolean, modeUncertain: Boolean, modeEnabled: Boolean,
-    onMode: (String) -> Unit, onModeRefresh: () -> Unit, work: ChatEntry?, workAction: String?, onSend: () -> Unit
+    onMode: (String) -> Unit, onModeRefresh: () -> Unit, work: ChatEntry?, workAction: String?,
+    agentCount: Int?, onAgentActivity: () -> Unit, onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     var editor by remember(draftKey) { mutableStateOf(TextFieldValue(prompt, TextRange(prompt.length))) }
@@ -660,6 +666,12 @@ private fun PromptComposer(
             }
             if (work != null) Box(Modifier.weight(1f).padding(start = 8.dp), contentAlignment = Alignment.CenterEnd) {
                 WorkTimer(work, workAction)
+            } else if (agentCount != null) {
+                Spacer(Modifier.weight(1f))
+            }
+            if (agentCount != null) {
+                Spacer(Modifier.width(8.dp))
+                AgentActivityButton(agentCount, onAgentActivity)
             }
         }
         Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Message input container" }) {

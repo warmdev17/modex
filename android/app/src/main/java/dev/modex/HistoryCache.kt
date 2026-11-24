@@ -26,7 +26,12 @@ internal class HistoryCache(private val maxSessions: Int = 10, private val maxBy
     fun remember(id: String, page: CachedHistory) {
         sessions.remove(id)
         if (JSONObject().put(id, page.toJson()).toString().toByteArray(Charsets.UTF_8).size > maxBytes) return
-        sessions[id] = page
+        // The in-memory cache must age live agent observations like the on-disk cache.
+        val entries = page.entries.map { entry ->
+            val agent = entry.agentActivity
+            if (agent?.live == true) entry.copy(agentActivity = agent.copy(live = false)) else entry
+        }
+        sessions[id] = page.copy(entries = entries)
         while (sessions.isNotEmpty() && (sessions.size > maxSessions || toJson().toString().toByteArray(Charsets.UTF_8).size > maxBytes)) sessions.remove(sessions.keys.first())
     }
     fun toJson() = JSONObject().apply {
