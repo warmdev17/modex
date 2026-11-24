@@ -331,7 +331,7 @@ internal fun ChatWorkspace(
                     }
                 }
             }
-            if (selected.isNotBlank() && !historyLoading && !openAtLatest && !followLatest && scroll.canScrollForward) {
+            if (selected.isNotBlank() && !historyLoading && !openAtLatest && !followLatest && !autoScrolling && scroll.canScrollForward) {
                 val previousPrompt by remember(timeline, scroll) {
                     derivedStateOf {
                         val first = scroll.firstVisibleItemIndex.coerceAtMost(timeline.size)
@@ -453,11 +453,22 @@ internal fun ChatWorkspace(
                 }
                 item(key = "history-bottom") { Spacer(Modifier.height(1.dp)) }
                 }
-                if (!historyLoading && !openAtLatest && scroll.canScrollForward) OutlinedIconButton(
+                if (!historyLoading && !openAtLatest && !autoScrolling && scroll.canScrollForward) OutlinedIconButton(
                     onClick = { scope.launch {
+                        val layout = scroll.layoutInfo
+                        if (autoScrolling || layout.totalItemsCount == 0) return@launch
                         autoScrolling = true
                         try {
-                            scroll.animateScrollToItem((scroll.layoutInfo.totalItemsCount - 1).coerceAtLeast(0))
+                            val bottom = layout.totalItemsCount - 1
+                            val travel = layout.viewportSize.height / 2
+                            val lastVisible = layout.visibleItemsInfo.lastOrNull()
+                            if (lastVisible == null || lastVisible.index < bottom - 1 ||
+                                lastVisible.offset + lastVisible.size > layout.viewportEndOffset + travel
+                            ) {
+                                // Bring the end close before animating, even when one reply spans many screens.
+                                scroll.scrollToItem(bottom, -(layout.viewportEndOffset + travel))
+                            }
+                            scroll.animateScrollToItem(bottom)
                             followLatest = true
                         } finally { autoScrolling = false }
                     } },

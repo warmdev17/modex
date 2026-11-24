@@ -97,11 +97,19 @@ internal fun Instrumentation.autoFollowSmoke() {
         check(previous.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "Previous prompt rejected click" }
         waitForIdleSync()
         check(visible("Past message 29") && previousPrompt() == null) { "Tap did not reveal the original prompt" }
-        var jump = find(root()) { it.contentDescription == "Scroll to latest" } ?: error("No jump button while reading history")
-        while (!jump.isClickable) jump = jump.parent ?: error("Jump button is not clickable")
-        check(jump.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        fun jumpToLatest(label: String) {
+            var jump = find(root()) { it.contentDescription == "Scroll to latest" } ?: error("No jump button while reading history")
+            while (!jump.isClickable) jump = jump.parent ?: error("Jump button is not clickable")
+            check(jump.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            await(label)
+            check(previousPrompt() == null) { "Previous prompt remained visible at the latest message" }
+        }
+        jumpToLatest("STREAM_END_SECOND")
+        val bounds = Rect().also(list()::getBoundsInScreen)
+        val swipe = "input swipe ${bounds.centerX()} ${bounds.centerY()} ${bounds.centerX()} ${bounds.centerY() + bounds.height() / 4} 600"
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand(swipe)).use { it.readBytes() }
         waitForIdleSync()
-        await("STREAM_END_SECOND")
+        jumpToLatest("STREAM_END_SECOND")
         runOnMainSync { messages = messages + (0..5).map { ChatEntry(id = "batch-$it", role = "You", text = if (it == 5) "BATCH_END" else "Batch message $it") } }
         await("BATCH_END")
         runOnMainSync { messages = messages + ChatEntry(id = "next", role = "Codex", text = "Next stream", status = "inProgress") }

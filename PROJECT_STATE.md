@@ -6,6 +6,7 @@ Updated 2026-11-24T08:59:00+07:00. Branch `feat/previous-prompt-preview`, based 
 
 - Verified the milestone with `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --offline` (137 unit tests), and the auto-follow instrumentation at 320 dp with font scales 1.0 and 1.3. The fixture checks header placement, tapping to jump and viewport stability during streaming. The initial signed candidate preserved encrypted synthetic state over dev.34. The final same-signer APK was installed and exercised on the emulator. Physical phone installation remains unverified.
 - Private SFTP preview on the connected host at `.modex/previews/modex-0.1.0-preview.35-previous-prompt.apk`. Version code 36, SHA-256 `cbefeaddb1835c1cb1a5c516ce5c7d8f1a6a024cefa4b72068930c834fa084aa`. SFTP read-back matched the exact tested APK. Include this UI change in a later release batch.
+- Follow-up on 2026-11-24, based on `8a8fdf7`: Scroll to latest jumps close to the end before animating when far away, and hides the prompt preview during the animation. Android unit tests (137), debug lint/build, near/far return and streaming on the 320 dp emulator, and a same-signer upgrade from code 36 to 37 with encrypted fixture state passed. Physical-phone smoothness remains unverified. The new SFTP preview is `.modex/previews/modex-0.1.0-preview.36-scroll-to-bottom.apk`. Its SHA-256 is `75e71f85c04ef9c42cfb6ba1c21df7289733871fa26b8771075e7bd94b07776e`, verified by SFTP read-back.
 
 ## Read-only Subagent Conversations dev.34
 
