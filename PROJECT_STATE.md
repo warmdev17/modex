@@ -1,5 +1,12 @@
 # Modex project state
 
+## Usage dialog refresh
+
+Updated 2026-11-24T09:54:00+07:00 on `feat/previous-prompt-preview`, based on `fec8cdd`. Loading uses the same title icon slot as the idle state, so Usage keeps its layout while refreshing cached data.
+
+- Native session controls smoke on the 412 dp emulator reproduced the bounds change on the old APK and passed with the fix. Android build, lint, 137 unit tests, and the signed code 37 to 38 upgrade with encrypted fixture state passed. Physical phone untested.
+- SFTP preview `.modex/previews/modex-0.1.0-preview.37-usage-refresh.apk`, code 38, SHA-256 `ec88868ae25217a25ece44317aec56ebd007ac390117a9bfad020300c07d0506`. SFTP read-back matched the tested APK.
+
 ## Previous prompt preview
 
 Updated 2026-11-24T08:59:00+07:00. Branch `feat/previous-prompt-preview`, based on `ca07c01`. In the main chat, scrolling into history reveals the nearest preceding hidden prompt below the header. Tap to jump to the original without resuming auto-follow.

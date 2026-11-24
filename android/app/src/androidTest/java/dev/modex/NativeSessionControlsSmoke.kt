@@ -22,6 +22,7 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         val sent = mutableListOf<String>()
         val modeChanges = mutableListOf<String>()
         var statusRefreshes = 0
+        var refreshingStatus by mutableStateOf(false)
         var changing by mutableStateOf(false)
         var uncertain by mutableStateOf(false)
         var working by mutableStateOf(false)
@@ -45,7 +46,7 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
             busy = working, historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture-model", sessionEffort = "medium",
             decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> },
             onSend = { text, _, _, _ -> sent += text; false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {},
-            sessionStatus = status, modeChanging = changing, modeUncertain = uncertain, onSessionStatus = { statusRefreshes++ }, onSessionMode = { mode -> modeChanges += mode; changing = true },
+            sessionStatus = status, sessionStatusLoading = refreshingStatus, modeChanging = changing, modeUncertain = uncertain, onSessionStatus = { statusRefreshes++ }, onSessionMode = { mode -> modeChanges += mode; changing = true },
             permissionProfiles = listOf(SessionPermissionProfile(":workspace", "", true), SessionPermissionProfile("team-policy", "Project policy", true)),
             onSessionPermissions = { permissionRequests += it }, usageWarning = usageWarning,
             models = listOf(ModelOption("fixture-model", "Fixture model", "medium", listOf("medium" to "Balanced")))
@@ -159,6 +160,17 @@ internal fun Instrumentation.nativeSessionControlsSmoke() {
         await("Weekly limit"); await("74% left")
         await("Workspace: /fixture"); shot("native-controls-status.png")
         check(statusRefreshes == 1 && sent.isEmpty() && modeChanges.size == 2) { "Status performed a write" }
+        fun usageBounds() = listOf("Session status", "Context window", "Close").map { label ->
+            Rect().also(await(label)::getBoundsInScreen)
+        }
+        val idleUsageBounds = usageBounds()
+        runOnMainSync { refreshingStatus = true }
+        await("Refreshing session status")
+        check(usageBounds() == idleUsageBounds) { "Refreshing resized the usage dialog or moved its content" }
+        shot("native-controls-status-refreshing.png")
+        runOnMainSync { refreshingStatus = false }
+        waitForIdleSync()
+        check(usageBounds() == idleUsageBounds && nodes("Refreshing session status").isEmpty())
         touch("Close")
         for (draft in listOf("/", "/plan", "/help", "/literal/path")) {
             type(draft)

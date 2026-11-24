@@ -593,12 +593,19 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
         else -> known(value)
     }
     AlertDialog(
-        onDismissRequest = close, title = { Row(verticalAlignment = Alignment.CenterVertically) { ChatGlyph(ChatIcon.Activity); Spacer(Modifier.width(8.dp)); Text("Session status") } },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (loading) Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Refreshing session status" }, strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp)); Text("Refreshing…", color = Mocha.Subtext)
+        onDismissRequest = close,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+                    if (loading) CircularProgressIndicator(
+                        Modifier.size(16.dp).semantics { contentDescription = "Refreshing session status" },
+                        strokeWidth = 2.dp,
+                    ) else ChatGlyph(ChatIcon.Activity)
+                }
+                Text("Session status")
             }
+        },
+        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             if (status == null) Text("No status has been reported for this session.", color = Mocha.Subtext)
             else SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
