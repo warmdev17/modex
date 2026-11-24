@@ -4,7 +4,7 @@
 
 Updated 2026-11-24 on `feat/android-ux-polish`, based on `2947736`. The batch adds Downloads export, inline host validation, remote file browsing, session menus and agent scrolling, and contextual notification permission.
 
-- Candidate dev.35/code 39 passed release unit tests (150), lint and signing identity checks, plus a code 38 to 39 encrypted-state upgrade on Android 13. Smoke checks passed for file preview/export on Android 9 and 13, remote browsing and projects, session actions, child scrolling at 320 dp, auto-follow with reduced motion, and returning to Hosts after failed SSH. Android 9 APK fixture bytes matched the source.
+- Published [dev.35](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.35), code 39, from `26b05d976db3e5430d2cd41c908686d78ed70d9e`. The public APK was downloaded and matched SHA-256 `35e67cbaddf4a0e30fae78333a85084f39f5b500c5b4972f982f9218a81d85ff`. Release unit tests (150), lint and signing identity checks passed, plus a code 38 to 39 encrypted-state upgrade on Android 13. Smoke checks passed for file preview/export on Android 9 and 13, remote browsing and projects, session actions, child scrolling at 320 dp, auto-follow with reduced motion, and returning to Hosts after failed SSH. Android 9 APK fixture bytes matched the source.
 - Independent review findings were handled in the integration worktree after implementer limits interrupted per-task verification. The notification permission decision table has unit coverage. Physical-device use, a full TalkBack walkthrough, and SAF picker rotation remain unverified.
 
 ## Usage dialog refresh
