@@ -4,6 +4,9 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.runBlocking
 
 class AttachmentTest {
     @Test fun oldHostJoinedFileReferencesRestoreClickableFilesWithoutChangingPrompt() {
@@ -65,5 +68,51 @@ class AttachmentTest {
         assertEquals(4L, copyAttachment(ByteArrayInputStream(byteArrayOf(1,2,3,4)),out,4))
         assertArrayEquals(byteArrayOf(1,2,3,4),out.toByteArray())
         try { copyAttachment(ByteArrayInputStream(ByteArray(5)), ByteArrayOutputStream(),4); fail("oversized stream accepted") } catch (_: IllegalArgumentException) { }
+    }
+    @Test fun exportKeepsOriginalBinaryBytesAndPublishesOnlyAfterClose() = runBlocking {
+        val source = java.io.File.createTempFile("modex-export", ".apk")
+        val bytes = byteArrayOf(0, 1, 2, 3, 127, -1)
+        val output = object : ByteArrayOutputStream() { var closed = false; override fun close() { closed = true; super.close() } }
+        try {
+            source.writeBytes(bytes)
+            val destination = exportAttachment(source, { "download-1" }, { output }, { check(output.closed) }, {})
+            assertEquals("download-1", destination)
+            assertArrayEquals(bytes, output.toByteArray())
+            assertEquals("application/vnd.android.package-archive", attachmentMime("app.APK"))
+            assertEquals("application/octet-stream", attachmentMime("archive.unknown"))
+        } finally { source.delete() }
+    }
+    @Test fun eachExportCreatesANewDestinationInsteadOfOverwriting() = runBlocking {
+        val source = java.io.File.createTempFile("modex-export", ".txt").apply { writeText("same bytes") }
+        var next = 0
+        val created = mutableListOf<Int>()
+        try {
+            repeat(2) { exportAttachment(source, { (++next).also(created::add) }, { ByteArrayOutputStream() }, {}, {}) }
+            assertEquals(listOf(1, 2), created)
+        } finally { source.delete() }
+    }
+    @Test fun failedOrCancelledExportCleansOnlyItsOwnedDestination() = runBlocking {
+        val source = java.io.File.createTempFile("modex-export", ".bin").apply { writeBytes(byteArrayOf(4,5,6)) }
+        val cleaned = mutableListOf<String>()
+        var published = false
+        try {
+            try {
+                exportAttachment(source, { "failed" }, { throw IOException("provider failed") }, { published = true }, cleaned::add)
+                fail("write failure accepted")
+            } catch (_: IOException) { }
+            try {
+                exportAttachment(source, { "cancelled" }, { ByteArrayOutputStream() }, {}, cleaned::add) { throw CancellationException() }
+                fail("cancellation accepted")
+            } catch (_: CancellationException) { }
+            assertEquals(listOf("failed", "cancelled"), cleaned)
+            assertFalse(published)
+        } finally { source.delete() }
+    }
+    @Test fun pendingLegacyExportStaysBoundToItsHostAndAttachment() {
+        val original = Attachment("/work/original.bin", "original.bin", "file", 6)
+        val pending = PendingAttachmentExport("host-a", original, "/cache/original.bin", "application/octet-stream")
+        assertEquals("/cache/original.bin", pending.sourceFor("host-a", original)?.path)
+        assertNull(pending.sourceFor("host-b", original))
+        assertNull(pending.sourceFor("host-a", original.copy(path = "/work/other.bin")))
     }
 }

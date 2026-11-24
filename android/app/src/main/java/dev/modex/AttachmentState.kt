@@ -21,10 +21,12 @@ internal class AttachmentState(private val scope: CoroutineScope, private val tr
     var directory by mutableStateOf<RemoteDirectory?>(null); private set
     var working by mutableStateOf(false); private set
     var error by mutableStateOf(""); private set
+    var attemptedPath by mutableStateOf(""); private set
     var progress by mutableStateOf(""); private set
     var generation = 0; private set
+    private var browseContext = ""
 
-    fun clear() { generation++; lastDirectories = emptyMap(); drafts = emptyMap(); directory = null; error = ""; progress = ""; working = false }
+    fun clear() { generation++; lastDirectories = emptyMap(); drafts = emptyMap(); directory = null; error = ""; attemptedPath = ""; progress = ""; working = false; browseContext = "" }
     fun remove(thread: String, path: String) { drafts = drafts + (thread to drafts[thread].orEmpty().filter { it.path != path }) }
     fun sent(thread: String, paths: Set<String>) { drafts = drafts + (thread to drafts[thread].orEmpty().filter { it.path !in paths }) }
     fun addRemote(thread: String, file: RemoteFile) {
@@ -39,19 +41,26 @@ internal class AttachmentState(private val scope: CoroutineScope, private val tr
         drafts = drafts + (thread to (existing + file)); error = ""
     }
     fun browse(path: String, thread: String = "") {
+        val context = if (thread.isBlank()) "project" else "thread:$thread"
+        if (context != browseContext) {
+            browseContext = context
+            directory = null
+            error = ""
+        }
+        attemptedPath = path
         if (working) return
         val current = transport() ?: return
         val revision = generation
-        directory = null; working = true; error = ""; progress = "Loading files…"
+        working = true; error = ""; progress = "Loading files…"
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) { current.listRemoteDirectory(path) }
-                if (generation == revision && transport() === current) {
+                if (generation == revision && browseContext == context && transport() === current) {
                     directory = result
                     if (thread.isNotBlank()) { lastDirectories = lastDirectories + (thread to result.path); changed() }
                 }
             } catch (_: Exception) {
-                if (generation == revision) error = "Could not open this folder. Check its path, read permission and SFTP availability."
+                if (generation == revision && browseContext == context) error = "Could not open this folder. Check its path, read permission and SFTP availability."
             } finally { if (generation == revision) { working = false; progress = "" } }
         }
     }

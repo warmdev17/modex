@@ -16,7 +16,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import android.os.Build
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,8 +48,6 @@ internal fun HostWorkspace(
         if (vm.connected) wasConnected = true
     }
     val settingsState = rememberSaveableStateHolder()
-    val notifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    LaunchedEffect(Unit) { if (Build.VERSION.SDK_INT >= 33) notifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }
     var connectionSettings by rememberSaveable { mutableStateOf(initiallyEditing) }
     var openAfterConnect by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(vm.connected, vm.connecting) {
@@ -61,18 +58,22 @@ internal fun HostWorkspace(
     var phoneGeneration by rememberSaveable { mutableStateOf(0) }
     var phoneTarget by rememberSaveable { mutableStateOf("") }
     var remoteThread by rememberSaveable { mutableStateOf("") }
+    var remotePreview by rememberSaveable(remoteThread, saver = AttachmentPreviewStateSaver) {
+        mutableStateOf<Attachment?>(null)
+    }
     val documentPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (phoneTarget == vm.savedConnection.toString()) vm.attachments.fromPhone(phoneThread, uris, phoneGeneration, context.contentResolver)
     }
     var projectBrowser by rememberSaveable { mutableStateOf(false) }
     var projectFolder by rememberSaveable { mutableStateOf("") }
     var projectNameInput by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(vm.connected) { if (!vm.connected) { projectBrowser = false; projectFolder = "" } }
+    LaunchedEffect(vm.connected) { if (!vm.connected) { projectBrowser = false; projectFolder = ""; remotePreview = null } }
     if (projectBrowser) RemoteFilePicker(
         "~", vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
         0, { vm.attachments.browse(it) }, {}, { projectBrowser = false },
         onChooseDirectory = { path -> projectFolder = path; projectNameInput = projectName(path); projectBrowser = false },
-        onCreateDirectory = vm.attachments::createDirectory
+        onCreateDirectory = vm.attachments::createDirectory,
+        retryPath = vm.attachments.attemptedPath,
     )
     if (projectFolder.isNotBlank()) AlertDialog(
         onDismissRequest = { projectFolder = "" }, title = { Text("New project") },
@@ -86,8 +87,11 @@ internal fun HostWorkspace(
     if (remoteThread.isNotEmpty()) RemoteFilePicker(
         vm.attachments.directoryFor(remoteThread), vm.attachments.directory, vm.attachments.working, vm.attachments.error, vm.connected,
         MAX_ATTACHMENTS - vm.attachments.drafts[remoteThread].orEmpty().size, { vm.attachments.browse(it, remoteThread) },
-        { files -> files.forEach { vm.attachments.addRemote(remoteThread, it) }; remoteThread = "" }, { remoteThread = "" }
+        { files -> files.forEach { vm.attachments.addRemote(remoteThread, it) }; remoteThread = "" }, { remoteThread = "" },
+        retryPath = vm.attachments.attemptedPath,
+        onPreview = { remotePreview = Attachment(it.path, it.name, attachmentKind(it.name), it.size) },
     )
+    remotePreview?.let { file -> AttachmentViewer(file, vm::attachmentFile) { remotePreview = null } }
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
         ChatWorkspace(
             host = hostName, connected = vm.connected, connecting = vm.connecting,

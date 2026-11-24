@@ -1,5 +1,7 @@
 package dev.modex
 
+import androidx.compose.foundation.BorderStroke
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -11,7 +13,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.LocalIndication
@@ -166,8 +167,8 @@ internal fun ChatWorkspace(
         confirmButton = { TextButton(onClick = { showTakeover = false; onTakeover() }) { Text("Close CLI and take over") } },
         dismissButton = { TextButton(onClick = { showTakeover = false }) { Text("Cancel") } }
     )
-    var preview by remember(selected) { mutableStateOf<Attachment?>(null) }
-    preview?.let { file -> AttachmentViewer(file, loadAttachment) { preview = null } }
+    var preview by rememberSaveable(host, selected, saver = AttachmentPreviewStateSaver) { mutableStateOf<Attachment?>(null) }
+    preview?.let { file -> AttachmentViewer(file, loadAttachment, host) { preview = null } }
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     BackHandler(drawer.isOpen) { scope.launch { drawer.close() } }
@@ -226,7 +227,7 @@ internal fun ChatWorkspace(
     var showAgentActivity by remember(host, selected) { mutableStateOf(false) }
     val openedAgent = agentConversation?.agent
     if (openedAgent != null) {
-        AgentConversationScreen(agentConversation, agents.firstOrNull { it.id == openedAgent.id } ?: openedAgent,
+        AgentConversationScreen(host, agentConversation, agents.firstOrNull { it.id == openedAgent.id } ?: openedAgent,
             onAgentHistory, loadAttachment)
     } else if (showAgentActivity && agents.isNotEmpty()) {
         AgentActivitySheet(agents, hasOlderHistory, olderHistoryLoading, onOlderHistory,
@@ -453,29 +454,16 @@ internal fun ChatWorkspace(
                 }
                 item(key = "history-bottom") { Spacer(Modifier.height(1.dp)) }
                 }
-                if (!historyLoading && !openAtLatest && !autoScrolling && scroll.canScrollForward) OutlinedIconButton(
-                    onClick = { scope.launch {
-                        val layout = scroll.layoutInfo
-                        if (autoScrolling || layout.totalItemsCount == 0) return@launch
+                ScrollToLatestButton(!historyLoading && !openAtLatest && !autoScrolling && scroll.canScrollForward) {
+                    scope.launch {
+                        if (autoScrolling) return@launch
                         autoScrolling = true
                         try {
-                            val bottom = layout.totalItemsCount - 1
-                            val travel = layout.viewportSize.height / 2
-                            val lastVisible = layout.visibleItemsInfo.lastOrNull()
-                            if (lastVisible == null || lastVisible.index < bottom - 1 ||
-                                lastVisible.offset + lastVisible.size > layout.viewportEndOffset + travel
-                            ) {
-                                // Bring the end close before animating, even when one reply spans many screens.
-                                scroll.scrollToItem(bottom, -(layout.viewportEndOffset + travel))
-                            }
-                            scroll.animateScrollToItem(bottom)
+                            scroll.returnToLatest()
                             followLatest = true
                         } finally { autoScrolling = false }
-                    } },
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 8.dp).size(48.dp),
-                    shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Mocha.Overlay),
-                    colors = IconButtonDefaults.outlinedIconButtonColors(containerColor = Mocha.Mantle, contentColor = Mocha.Text)
-                ) { ChatGlyph(ChatIcon.Down, "Scroll to latest") }
+                    }
+                }
                 if (hasOlderHistory && (olderHistoryLoading || error.isNotBlank())) Surface(modifier = Modifier.align(Alignment.TopCenter), color = Mocha.Base, shape = RoundedCornerShape(8.dp)) {
                     if (olderHistoryLoading) Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = Mocha.Subtext)
@@ -820,16 +808,26 @@ private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, ena
         onLongClickLabel = actionLabel, onLongClick = openActions,
     )
     Box(modifier.fillMaxWidth()) {
-        Surface(color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth().then(interaction).semantics(mergeDescendants = true) { this.selected = selected }) {
-            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                if (running || working) CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = if (working) "Session action pending" else "Session running" }, strokeWidth = 2.dp, color = if (selected) Mocha.Base else Mocha.Blue)
+        Surface(color = if (selected) Mocha.Blue else Mocha.Mantle, contentColor = if (selected) Mocha.Base else Mocha.Text, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().padding(end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.weight(1f).heightIn(min = 48.dp).then(interaction)
+                    .semantics(mergeDescendants = true) { this.selected = selected }.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    if (running || working) CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = if (working) "Session action pending" else "Session running" }, strokeWidth = 2.dp, color = if (selected) Mocha.Base else Mocha.Blue)
+                }
+                Box {
+                    IconButton(onClick = { menu = true }, enabled = enabled && !working,
+                        modifier = Modifier.semantics { contentDescription = actionLabel }) {
+                        ChatGlyph(ChatIcon.More, color = if (selected) Mocha.Base else Mocha.Subtext)
+                    }
+                    ModexDropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text(if (archived) "Restore" else "Archive") }, leadingIcon = { ChatGlyph(if (archived) ChatIcon.Restore else ChatIcon.Archive) }, enabled = enabled && !working, onClick = { menu = false; onAction(if (archived) "unarchive" else "archive", id) })
+                        if (!archived) DropdownMenuItem(text = { Text("Fork") }, leadingIcon = { ChatGlyph(ChatIcon.Fork) }, enabled = enabled && !working && !running && canFork, onClick = { menu = false; onAction("fork", id) })
+                        DropdownMenuItem(text = { Text("Delete", color = Mocha.Red) }, leadingIcon = { ChatGlyph(ChatIcon.Delete, color = Mocha.Red) }, enabled = enabled && !working, onClick = { menu = false; onAction("delete", id) })
+                    }
+                }
             }
-        }
-        ModexDropdownMenu(menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text(if (archived) "Restore" else "Archive") }, leadingIcon = { ChatGlyph(if (archived) ChatIcon.Restore else ChatIcon.Archive) }, onClick = { menu = false; onAction(if (archived) "unarchive" else "archive", id) })
-            if (!archived) DropdownMenuItem(text = { Text("Fork") }, leadingIcon = { ChatGlyph(ChatIcon.Fork) }, enabled = !running && canFork, onClick = { menu = false; onAction("fork", id) })
-            DropdownMenuItem(text = { Text("Delete", color = Mocha.Red) }, leadingIcon = { ChatGlyph(ChatIcon.Delete, color = Mocha.Red) }, onClick = { menu = false; onAction("delete", id) })
         }
     }
 }
