@@ -2,6 +2,7 @@ package supervisor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -16,10 +17,11 @@ import (
 const MaxFrame = 4 * 1024 * 1024
 
 type Hello struct {
-	Token    string `json:"token"`
-	Instance string `json:"instance,omitempty"`
-	Cursor   uint64 `json:"cursor"`
-	Stop     bool   `json:"stop,omitempty"`
+	Token     string `json:"token"`
+	Instance  string `json:"instance,omitempty"`
+	Cursor    uint64 `json:"cursor"`
+	Stop      bool   `json:"stop,omitempty"`
+	Heartbeat bool   `json:"heartbeat,omitempty"`
 }
 
 type Server struct {
@@ -32,10 +34,25 @@ type Server struct {
 	attached        bool
 	OnAttachment    func(bool) error
 	childMu         sync.Mutex
+	leaseTimeout    time.Duration
+}
+
+type leaseReader struct {
+	net.Conn
+	timeout time.Duration
+	enabled bool
+}
+
+func (r *leaseReader) Read(p []byte) (int, error) {
+	n, err := r.Conn.Read(p)
+	if n > 0 && r.enabled {
+		_ = r.SetReadDeadline(time.Now().Add(r.timeout))
+	}
+	return n, err
 }
 
 func NewServer(ctx context.Context, token, instance string, child io.Writer, stop context.CancelFunc) *Server {
-	return &Server{Journal: NewJournal(1024, 2*bridge.MaxResponseFrame), ctx: ctx, token: token, instance: instance, child: child, stop: stop}
+	return &Server{Journal: NewJournal(1024, 2*bridge.MaxResponseFrame), ctx: ctx, token: token, instance: instance, child: child, stop: stop, leaseTimeout: time.Minute}
 }
 
 func (s *Server) Attached() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.attached }
@@ -45,7 +62,8 @@ func (s *Server) Handle(conn net.Conn) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 	go func() { <-ctx.Done(); _ = conn.Close() }()
-	scanner := bufio.NewScanner(conn)
+	input := &leaseReader{Conn: conn, timeout: s.leaseTimeout}
+	scanner := bufio.NewScanner(input)
 	scanner.Buffer(make([]byte, 4096), MaxFrame)
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	send := func(value any) error {
@@ -117,12 +135,22 @@ func (s *Server) Handle(conn net.Conn) {
 	if send(ready) != nil {
 		return
 	}
-	_ = conn.SetReadDeadline(time.Time{})
+	input.enabled = hello.Heartbeat
+	if hello.Heartbeat {
+		_ = conn.SetReadDeadline(time.Now().Add(s.leaseTimeout))
+	} else {
+		_ = conn.SetReadDeadline(time.Time{})
+	}
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
 		defer cancel()
 		for scanner.Scan() {
+			if hello.Heartbeat {
+				if bytes.Equal(scanner.Bytes(), []byte(`{"heartbeat":true}`)) {
+					continue
+				}
+			}
 			if _, err := bridge.DecodeCommand(scanner.Bytes()); err != nil {
 				return
 			}

@@ -1,5 +1,12 @@
 # Modex project state
 
+## Stale Android attachment lease
+
+Updated 2026-11-25T21:10:57+07:00 on `fix/stale-attach-lease`, source `0068718`. Android attach now negotiates a 15-second application heartbeat. The supervisor releases a negotiated client after one minute without frames or incoming bytes, while legacy CLI attaches retain unlimited idle behavior. This prevents a half-open phone SSH connection from indefinitely causing `another client is attached`; heartbeat frames never reach the Codex bridge, and slow command uploads renew the lease as bytes arrive.
+
+- Regression tests reproduce silent-client eviction, replacement attach, heartbeat renewal, filtering and partial-frame activity beyond the original deadline. `go test -race ./...`, `go vet ./...`, Android unit/lint, isolated supervisor tests and real loopback SSH transport passed. Independent review found and verified the partial-frame correction; GitNexus had no Modex index, so review used direct caller inspection.
+- A paired host activation and Android update are required. The host must activate before the new APK is used because old hosts do not recognize `--heartbeat`. Physical-phone background/Doze behavior remains untested; release, merge and live host activation are pending.
+
 ## Live follow-ups during a Codex turn
 
 Updated 2026-11-25T19:44:00+07:00. [PR #34](https://github.com/warmdev17/modex/pull/34) merged as `77001e2d9165cd2ae83b862677b757b40b74eb9e`. Signed Android [dev.36](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.36), versionCode 40, uses native `turn/steer` during ordinary active turns, with separate Stop and acknowledgments that clear only the submitted draft. Host validates the workspace and follows the CLI's explicit turn-race handling. Native user-message events provide the transcript entry. [Plan](docs/superpowers/plans/2026-11-25-live-steering.md).

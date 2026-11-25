@@ -13,7 +13,7 @@ fun remoteCommand(binary: String, state: String, cursor: Long, instance: String?
     fun quote(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
     val executable = if (binary.isEmpty()) "\"\$HOME\"/.local/bin/modex-host" else quote(binary)
     val stateDirectory = if (state.isEmpty()) "\"\$HOME\"/.local/state/modex-phone" else quote(state)
-    return "exec $executable --attach --state-dir $stateDirectory --cursor $cursor" + (instance?.let { " --instance ${quote(it)}" } ?: "")
+    return "exec $executable --attach --heartbeat --state-dir $stateDirectory --cursor $cursor" + (instance?.let { " --instance ${quote(it)}" } ?: "")
 }
 
 class JournalState(instance: String? = null, cursor: Long = 0) {
