@@ -1,5 +1,35 @@
 # Modex project state
 
+## Live follow-ups during a Codex turn
+
+Updated 2026-11-25T16:25:58+07:00 on `feat/android-live-steering`, source `aedb1af`. [Plan](docs/superpowers/plans/2026-11-25-live-steering.md). Send uses native `turn/steer` during ordinary active turns, with separate Stop and acknowledgments that clear only the submitted draft. Host validates the workspace and follows the CLI's explicit turn-race handling. Native user-message events provide the transcript entry.
+
+- Source checks passed: `go test -race ./...`, `go vet ./...`, Android debug build, instrumentation build, 150 unit tests and lint (zero errors). The disposable Android 13 emulator passed the steering and existing draft safety smoke stages.
+- An isolated supervisor with Codex CLI 0.169.0 and a local synthetic Responses provider verified the same turn ID on admission and the transcript event, and verified that the following model request contained the steer. Reviewer finding on pending draft persistence was addressed. Actual process death with a pending steer and a physical phone remain untested.
+- The feature needs a paired Android and host update. Debug artifacts are local. No signed upgrade, release, merge or host activation was performed. The UI preserves the draft when native steering rejects a turn that cannot be steered. That path does not implement the CLI's separate queue.
+
+## Android UX release batch
+
+Updated 2026-11-24 on `feat/android-ux-polish`, based on `2947736`. The batch adds Downloads export, inline host validation, remote file browsing, session menus and agent scrolling, and contextual notification permission.
+
+- Published [dev.35](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.35), code 39, from `26b05d976db3e5430d2cd41c908686d78ed70d9e`. The public APK was downloaded and matched SHA-256 `35e67cbaddf4a0e30fae78333a85084f39f5b500c5b4972f982f9218a81d85ff`. Release unit tests (150), lint and signing identity checks passed, plus a code 38 to 39 encrypted-state upgrade on Android 13. Smoke checks passed for file preview/export on Android 9 and 13, remote browsing and projects, session actions, child scrolling at 320 dp, auto-follow with reduced motion, and returning to Hosts after failed SSH. Android 9 APK fixture bytes matched the source.
+- Independent review findings were handled in the integration worktree after implementer limits interrupted per-task verification. The notification permission decision table has unit coverage. Physical-device use, a full TalkBack walkthrough, and SAF picker rotation remain unverified.
+
+## Usage dialog refresh
+
+Updated 2026-11-24T09:54:00+07:00 on `feat/previous-prompt-preview`, based on `fec8cdd`. Loading uses the same title icon slot as the idle state, so Usage keeps its layout while refreshing cached data.
+
+- Native session controls smoke on the 412 dp emulator reproduced the bounds change on the old APK and passed with the fix. Android build, lint, 137 unit tests, and the signed code 37 to 38 upgrade with encrypted fixture state passed. Physical phone untested.
+- SFTP preview `.modex/previews/modex-0.1.0-preview.37-usage-refresh.apk`, code 38, SHA-256 `ec88868ae25217a25ece44317aec56ebd007ac390117a9bfad020300c07d0506`. SFTP read-back matched the tested APK.
+
+## Previous prompt preview
+
+Updated 2026-11-24T08:59:00+07:00. Branch `feat/previous-prompt-preview`, based on `ca07c01`. In the main chat, scrolling into history reveals the nearest preceding hidden prompt below the header. Tap to jump to the original without resuming auto-follow.
+
+- Verified the milestone with `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest --offline` (137 unit tests), and the auto-follow instrumentation at 320 dp with font scales 1.0 and 1.3. The fixture checks header placement, tapping to jump and viewport stability during streaming. The initial signed candidate preserved encrypted synthetic state over dev.34. The final same-signer APK was installed and exercised on the emulator. Physical phone installation remains unverified.
+- Private SFTP preview on the connected host at `.modex/previews/modex-0.1.0-preview.35-previous-prompt.apk`. Version code 36, SHA-256 `cbefeaddb1835c1cb1a5c516ce5c7d8f1a6a024cefa4b72068930c834fa084aa`. SFTP read-back matched the exact tested APK. Include this UI change in a later release batch.
+- Follow-up on 2026-11-24, based on `8a8fdf7`: Scroll to latest jumps close to the end before animating when far away, and hides the prompt preview during the animation. Android unit tests (137), debug lint/build, near/far return and streaming on the 320 dp emulator, and a same-signer upgrade from code 36 to 37 with encrypted fixture state passed. Physical-phone smoothness remains unverified. The new SFTP preview is `.modex/previews/modex-0.1.0-preview.36-scroll-to-bottom.apk`. Its SHA-256 is `75e71f85c04ef9c42cfb6ba1c21df7289733871fa26b8771075e7bd94b07776e`, verified by SFTP read-back.
+
 ## Read-only Subagent Conversations dev.34
 
 Updated 2026-11-24T06:52:36+07:00. Feature branch `feat/subagent-activity`. Signed Android [dev.34](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.34), versionCode 35, source `6ffc9a99c9bc6b851d81326187ee2a7775ddddf8`. APK SHA-256 `8c4e4d6f8c268f06707d233a1b1e86cc729be6954361e01fa10b78f0de9220b7`. Public assets were redownloaded and checksum-verified.

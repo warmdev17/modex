@@ -6,6 +6,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -15,14 +16,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import java.io.File
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun AgentConversationScreen(
-    conversation: AgentConversation, agent: AgentTimeline,
+    host: String, conversation: AgentConversation, agent: AgentTimeline,
     onHistory: (Boolean) -> Unit, loadAttachment: suspend (Attachment) -> File,
 ) {
-    var preview by remember(agent.id) { mutableStateOf<Attachment?>(null) }
+    var preview by rememberSaveable(host, agent.id, saver = AttachmentPreviewStateSaver) { mutableStateOf<Attachment?>(null) }
     val timeline = remember(conversation.messages) {
         thinkingTimeline(conversation.messages).filterNot { it.role == "agent_activity" }
     }
@@ -42,19 +45,30 @@ internal fun AgentConversationScreen(
                 }
                 HorizontalDivider(color = Mocha.Surface)
                 val scroll = rememberLazyListState()
-                var following by remember { mutableStateOf(true) }
-                var autoScrolling by remember { mutableStateOf(false) }
-                LaunchedEffect(scroll) {
+                val scope = rememberCoroutineScope()
+                var openAtLatest by remember(agent.id) { mutableStateOf(true) }
+                var following by remember(agent.id) { mutableStateOf(true) }
+                var autoScrolling by remember(agent.id) { mutableStateOf(false) }
+                LaunchedEffect(agent.id) {
                     snapshotFlow { if (autoScrolling) null else scroll.isScrollInProgress to scroll.canScrollForward }.collect {
                         if (it?.first == true) following = !it.second
                     }
                 }
-                LaunchedEffect(timeline, following) {
-                    if (following && timeline.isNotEmpty()) {
-                        withFrameNanos { }
-                        if (scroll.layoutInfo.totalItemsCount > 0 && scroll.canScrollForward && !scroll.isScrollInProgress) {
+                LaunchedEffect(agent.id) {
+                    snapshotFlow { Triple(scroll.layoutInfo, following, scroll.isScrollInProgress) }
+                        .distinctUntilChangedBy { (layout, follow, scrolling) ->
+                            Triple(layout.totalItemsCount to layout.viewportSize,
+                                layout.visibleItemsInfo.map { Triple(it.index, it.offset, it.size) },
+                                follow to scrolling)
+                        }
+                        .collect { (layout, follow, scrolling) ->
+                            if ((openAtLatest || follow) && !scrolling && layout.totalItemsCount > 0 &&
+                                (openAtLatest || scroll.canScrollForward)) {
                             autoScrolling = true
-                            try { scroll.scrollToItem(scroll.layoutInfo.totalItemsCount - 1) }
+                            try {
+                                scroll.scrollToItem(layout.totalItemsCount - 1)
+                                openAtLatest = false
+                            }
                             finally { autoScrolling = false }
                         }
                     }
@@ -63,8 +77,8 @@ internal fun AgentConversationScreen(
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                     }
-                } else {
-                    LazyColumn(state = scroll, modifier = Modifier.weight(1f).fillMaxWidth(),
+                } else Box(Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(state = scroll, modifier = Modifier.fillMaxSize().semantics { contentDescription = "Agent conversation history" },
                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp)) {
                         if (conversation.cursor.isNotBlank()) item(key = "agent-older") {
@@ -85,6 +99,16 @@ internal fun AgentConversationScreen(
                         }
                         item(key = "agent-end") { Spacer(Modifier.height(1.dp)) }
                     }
+                    ScrollToLatestButton(!openAtLatest && !autoScrolling && scroll.canScrollForward) {
+                        scope.launch {
+                            if (autoScrolling) return@launch
+                            autoScrolling = true
+                            try {
+                                scroll.returnToLatest()
+                                following = true
+                            } finally { autoScrolling = false }
+                        }
+                    }
                 }
                 if (conversation.error) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -95,5 +119,5 @@ internal fun AgentConversationScreen(
             }
         }
     }
-    preview?.let { AttachmentViewer(it, loadAttachment) { preview = null } }
+    preview?.let { AttachmentViewer(it, loadAttachment, host) { preview = null } }
 }

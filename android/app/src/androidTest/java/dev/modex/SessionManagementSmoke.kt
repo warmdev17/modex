@@ -125,6 +125,10 @@ internal fun Instrumentation.sessionManagementSmoke() {
             }
             return false
         }
+        fun settle() {
+            // A running session spinner can keep the main looper busy during a menu action.
+            try { uiAutomation.waitForIdle(100, 1500) } catch (_: java.util.concurrent.TimeoutException) { }
+        }
         fun touchNode(target: AccessibilityNodeInfo, holdMs: Long = 0) {
             val bounds = Rect().also(target::getBoundsInScreen)
             val time = SystemClock.uptimeMillis()
@@ -135,7 +139,7 @@ internal fun Instrumentation.sessionManagementSmoke() {
                 val up = MotionEvent.obtain(time, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, bounds.exactCenterX(), bounds.exactCenterY(), 0)
                 sendPointerSync(up); up.recycle()
             } catch (failure: IllegalArgumentException) { error("touchNode ${target.text}/${target.contentDescription} $bounds: ${failure.message}") }
-            waitForIdleSync(); Thread.sleep(200)
+            settle()
         }
         fun longTouchAction(label: String) = touchNode(awaitAction(label, AccessibilityNodeInfo.ACTION_LONG_CLICK), 650)
         fun touch(label: String) {
@@ -145,7 +149,7 @@ internal fun Instrumentation.sessionManagementSmoke() {
                 val event = MotionEvent.obtain(time, SystemClock.uptimeMillis(), action, bounds.exactCenterX(), bounds.exactCenterY(), 0)
                 try { sendPointerSync(event) } catch (failure: IllegalArgumentException) { error("touch $label $bounds: ${failure.message}") } finally { event.recycle() }
             }
-            waitForIdleSync(); Thread.sleep(200)
+            settle()
         }
         fun longTouch(label: String) {
             val bounds = Rect().also(await(label)::getBoundsInScreen)
@@ -154,52 +158,66 @@ internal fun Instrumentation.sessionManagementSmoke() {
             try { sendPointerSync(down) } catch (failure: IllegalArgumentException) { error("longTouch down $label $bounds: ${failure.message}") } finally { down.recycle() }; Thread.sleep(650)
             val up = MotionEvent.obtain(time, SystemClock.uptimeMillis(), MotionEvent.ACTION_UP, bounds.exactCenterX(), bounds.exactCenterY(), 0)
             try { sendPointerSync(up) } catch (failure: IllegalArgumentException) { error("longTouch up $label $bounds: ${failure.message}") } finally { up.recycle() }
-            waitForIdleSync(); Thread.sleep(200)
+            settle()
         }
         fun screenshot(name: String) {
-            waitForIdleSync(); Thread.sleep(600)
+            Thread.sleep(600)
             val bmp = uiAutomation.takeScreenshot() ?: error("No screenshot")
             File(targetContext.filesDir, name).outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; bmp.recycle()
         }
-        fun back() { check(uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)); waitForIdleSync(); Thread.sleep(200) }
+        fun back() { check(uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)); settle() }
         var archived by mutableStateOf(false)
         var running by mutableStateOf(false)
         var action = ""
         var error by mutableStateOf("")
+        val sessionTitle = "Fixture conversation with a deliberately long title for a narrow sidebar"
         var notices by mutableStateOf(listOf(ChatEntry("prompt", "You", "Check interruption", status = "interrupted", turnId = "turn", notice = TurnNotice("stream_disconnected", "Stream disconnected before completion.", false))))
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
-            host = "Fixture host", connected = true, connecting = false, selected = "source", threads = listOf("source"), titles = mapOf("source" to "Fixture conversation"),
+            host = "Fixture host", connected = true, connecting = false, selected = "source", threads = listOf("source"), titles = mapOf("source" to sessionTitle),
             messages = notices, busy = false, historyLoading = false, hasMore = true, error = error, sessionSettings = "", sessionModel = "fixture",
             decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = { action = "select" }, onRefresh = {}, onMore = { action = "more" }, onCreate = { _, _, _ -> },
             onSend = { _, _, _, _ -> false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {}, archived = archived, onArchived = { archived = it },
             runningThreads = if (running) setOf("source") else emptySet(),
             models = listOf(ModelOption("fixture-model", "Fixture model with a deliberately long provider label", "medium", listOf("medium" to "Balanced"))), hostModel = "fixture-model",
             registeredProjects = listOf(RemoteProject("fixture-project", "Fixture project with a deliberately long name", listOf("/fixture/a/deliberately/long/project/root"))),
+            projectMembership = mapOf("source" to "fixture-project"),
             onSessionAction = { kind, target, confirmed -> check(target == "source"); if (kind == "delete") check(confirmed); action = kind; if (kind == "delete") error = "This conversation is needed by a fork. Nothing was deleted." }
         ) } } } }
         await("Interrupted"); await("Turn notice: Stream disconnected before completion."); screenshot("session-notice.png")
         runOnMainSync { notices = notices.map { it.copy(status = "inProgress", notice = TurnNotice("stream_disconnected", "Connection interrupted. Codex is retrying…", true)) } }
         await("Turn notice: Connection interrupted. Codex is retrying…")
         touch("Open sessions")
-        val activeRow = awaitAction("Fixture conversation", AccessibilityNodeInfo.ACTION_LONG_CLICK)
+        val activeRow = awaitAction(sessionTitle, AccessibilityNodeInfo.ACTION_LONG_CLICK)
         check(activeRow.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }) { "Active session row must keep ordinary tap" }
         action = ""; touchNode(activeRow); check(action == "select")
-        touch("Open sessions"); runOnMainSync { running = true }; action = ""; touchNode(awaitAction("Fixture conversation", AccessibilityNodeInfo.ACTION_LONG_CLICK), 650); await("Archive")
+        touch("Open sessions")
+        val actionLabel = "Actions for $sessionTitle"
+        val more = await(actionLabel)
+        action = ""; touchNode(more); await("Archive")
+        check(action.isBlank()) { "Opening session actions must not select the conversation" }
+        back()
+        touch("Collapse project Fixture project with a deliberately long name")
+        val recentMore = await(actionLabel)
+        action = ""; touchNode(recentMore); await("Archive")
+        check(action.isBlank()) { "Recent session actions must not select the conversation" }
+        back()
+        runOnMainSync { running = true }; action = ""; touchNode(awaitAction(sessionTitle, AccessibilityNodeInfo.ACTION_LONG_CLICK), 650); await("Archive")
         check(action.isBlank()) { "Long press must not select the conversation" }
         check(disabled("Fork")) { "Running session must keep Fork disabled" }
-        screenshot("menu-session-actions.png"); back(); runOnMainSync { running = false }
-        longTouchAction("Fixture conversation"); touch("Archive"); check(action == "archive")
-        longTouchAction("Fixture conversation"); touch("Fork"); check(action == "fork")
-        longTouchAction("Fixture conversation"); touch("Delete"); await("Delete conversation?"); screenshot("session-delete.png")
+        screenshot("menu-session-actions.png"); back()
+        runOnMainSync { running = false }
+        longTouchAction(sessionTitle); touch("Archive"); check(action == "archive")
+        longTouchAction(sessionTitle); touch("Fork"); check(action == "fork")
+        longTouchAction(sessionTitle); touch("Delete"); await("Delete conversation?"); screenshot("session-delete.png")
         action = ""; touch("Cancel"); check(action.isBlank())
-        longTouchAction("Fixture conversation"); touch("Delete"); touch("Delete permanently"); check(action == "delete")
-        await("This conversation is needed by a fork. Nothing was deleted."); await("Fixture conversation")
+        longTouchAction(sessionTitle); touch("Delete"); touch("Delete permanently"); check(action == "delete")
+        await("This conversation is needed by a fork. Nothing was deleted."); await(sessionTitle)
         touch("Archived conversations"); await("Back to sessions")
-        val archivedRow = awaitAction("Fixture conversation", AccessibilityNodeInfo.ACTION_LONG_CLICK)
+        val archivedRow = awaitAction(sessionTitle, AccessibilityNodeInfo.ACTION_LONG_CLICK)
         check(archivedRow.actionList.any { it.id == AccessibilityNodeInfo.ACTION_LONG_CLICK } && archivedRow.actionList.none { it.id == AccessibilityNodeInfo.ACTION_CLICK }) { "Archived rows expose long-click actions without a no-op click" }
-        longTouchAction("Fixture conversation"); await("Restore"); check(node("Fork") == null); touch("Restore"); check(action == "unarchive")
+        touchNode(await(actionLabel)); await("Restore"); check(node("Fork") == null); touch("Restore"); check(action == "unarchive")
         touch("Load more"); check(action == "more"); screenshot("session-archived.png")
-        touch("Back to sessions"); await("Sessions"); touchNode(awaitAction("Fixture conversation", AccessibilityNodeInfo.ACTION_CLICK))
+        touch("Back to sessions"); await("Sessions"); touchNode(awaitAction(sessionTitle, AccessibilityNodeInfo.ACTION_CLICK))
         longTouch("Check interruption"); await("Copy"); screenshot("menu-message-actions.png"); sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         touch("Attach files"); await("From this phone"); screenshot("menu-upload.png"); back()
         touch("Connection menu"); await("Connection settings"); screenshot("menu-connection.png"); touch("Connection settings")

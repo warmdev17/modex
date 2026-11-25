@@ -29,22 +29,31 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
         val pin = "SHA256:" + "A".repeat(43)
         val fixture = JSONObject().put("host", "old.invalid").put("port", 22)
             .put("user", "fixture").put("pin", pin).put("binary", "").put("state", "")
-        val fixtureKey = Base64.encodeToString("SYNTHETIC_KEY".toByteArray(), Base64.NO_WRAP)
         if (args.getString("stage") == "seed") {
+            val pair = KeyPair.genKeyPair(JSch(), KeyPair.RSA, 1024)
+            val fixtureKey = java.io.ByteArrayOutputStream().also(pair::writePrivateKey).toByteArray()
+            pair.dispose()
             check(catalog.load()?.let { connectionProfiles(it, false) == listOf(legacy) || connectionProfiles(it, false) == existing } != false)
-            SavedHost(app, saved.id).save(JSONObject().put("connection", fixture).put("key", fixtureKey)
+            SavedHost(app, saved.id).save(JSONObject().put("connection", fixture).put("key", Base64.encodeToString(fixtureKey, Base64.NO_WRAP))
                 .put("cursor", 105).put("instance", "fixture-instance")
                 .put("host_choice", JSONObject().put("model", "fixture-model").put("effort", "high")))
+            fixtureKey.fill(0)
             catalog.save(profilesJson(existing).put("reconnect_on_open", false))
         } else {
             val stored = SavedHost(app, saved.id).load() ?: error("Existing host was lost across upgrade")
-            check(stored.getInt("cursor") == 105 && stored.getString("key") == fixtureKey &&
+            val storedKey = Base64.decode(stored.getString("key"), Base64.NO_WRAP)
+            check(stored.getInt("cursor") == 105 && isUnencryptedSshKey(storedKey) &&
                 stored.getJSONObject("host_choice").getString("model") == "fixture-model")
+            storedKey.fill(0)
             val manager = app.connections
             val stage = args.getString("stage")
             check(if (stage != null) manager.profiles.containsAll(existing) else manager.profiles == existing)
             val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
+            val automation = uiAutomation
+            automation.serviceInfo = automation.serviceInfo.apply {
+                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            }
             fun find(label: String): AccessibilityNodeInfo? {
                 fun walk(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
                     if (node == null) return null
@@ -52,7 +61,7 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
                     for (i in 0 until node.childCount) walk(node.getChild(i))?.let { return it }
                     return null
                 }
-                return walk(uiAutomation.rootInActiveWindow)
+                return walk(automation.rootInActiveWindow) ?: automation.windows.firstNotNullOfOrNull { walk(it.root) }
             }
             fun node(label: String): AccessibilityNodeInfo {
                 val deadline = SystemClock.uptimeMillis() + 5000
@@ -60,7 +69,14 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
                     find(label)?.let { return it }
                     Thread.sleep(80)
                 } while (SystemClock.uptimeMillis() < deadline)
-                error("Missing UI: $label")
+                val visible = mutableListOf<String>()
+                fun collect(current: AccessibilityNodeInfo?) {
+                    if (current == null || visible.size >= 25) return
+                    if (current.isVisibleToUser) (current.text ?: current.contentDescription)?.toString()?.let(visible::add)
+                    for (i in 0 until current.childCount) collect(current.getChild(i))
+                }
+                collect(uiAutomation.rootInActiveWindow)
+                error("Missing UI: $label; visible=$visible")
             }
             fun tap(label: String) {
                 val bounds = Rect().also(node(label)::getBoundsInScreen)
@@ -80,7 +96,25 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value)
                 })) { "Cannot edit $label" }
             }
+            fun focused(label: String): Boolean {
+                val field = node(label)
+                return (if (field.isEditable) field else field.parent).isFocused
+            }
             fun back() = sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            fun reveal(label: String, below: Boolean = true) {
+                repeat(4) {
+                    if (find(label) != null) return
+                    val x = activity.resources.displayMetrics.widthPixels / 2
+                    val height = activity.resources.displayMetrics.heightPixels
+                    val from = if (below) height / 2 else height / 4
+                    val to = if (below) height / 4 else height / 2
+                    android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                        uiAutomation.executeShellCommand("input swipe $x $from $x $to 350"),
+                    ).use { it.readBytes() }
+                    waitForIdleSync()
+                }
+                node(label)
+            }
 
             fun importKey() {
                 val key = KeyPair.genKeyPair(JSch(), KeyPair.RSA, 1024)
@@ -105,19 +139,47 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
                     file.delete()
                 }
             }
-            fun fill(address: String) {
+            fun importInvalidKey(button: String) {
+                val file = File.createTempFile("invalid-add-host-key", ".fixture", app.cacheDir)
+                try {
+                    file.writeText("not a private key")
+                    val picked = Instrumentation.ActivityResult(Activity.RESULT_OK, Intent().setData(Uri.fromFile(file)))
+                    val filter = IntentFilter(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        addDataType("*/*")
+                    }
+                    val monitor = addMonitor(filter, picked, true)
+                    try {
+                        tap(button)
+                        node("Import a supported unencrypted SSH private key.")
+                        check(monitor.hits == 1)
+                    } finally {
+                        removeMonitor(monitor)
+                    }
+                } finally {
+                    check(file.readBytes().contentEquals("not a private key".toByteArray()))
+                    file.delete()
+                }
+            }
+            fun fillFields(address: String) {
                 tap("Add host")
                 set("Hostname or IP", address)
                 set("SSH username", "fixture")
                 set("SSH fingerprint", pin)
+            }
+            fun fill(address: String) {
+                fillFields(address)
                 importKey()
             }
             fun connectUnavailableHost() {
                 fill("127.0.0.1")
                 set("Port", "1")
                 tap("Connect")
+                node("Connection error")
                 node("SSH connection failed. Check the current host IP, port, network, sshd and SSH algorithm compatibility.")
-                tap("Close")
+                val close = node("Close")
+                val closeButton = if (close.isClickable) close else close.parent
+                check(closeButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "Cannot dismiss the connection error dialog" }
                 node("Navigation toolbar")
             }
 
@@ -134,33 +196,18 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
                 return
             }
             if (stage == "connect-issue") {
-                val error = "SSH key could not be loaded. Import a supported unencrypted private key."
-                tap("Connect")
-                node(error)
-                val titleBounds = Rect().also(node("Connection error")::getBoundsInScreen)
-                node("Configured fixture")
-                val screenshot = uiAutomation.takeScreenshot() ?: error("No error dialog screenshot")
-                try {
-                    val pixels = IntArray(titleBounds.width() * titleBounds.height())
-                    screenshot.getPixels(pixels, 0, titleBounds.width(), titleBounds.left, titleBounds.top, titleBounds.width(), titleBounds.height())
-                    check(pixels.any { it and 0xffffff == 0xf38ba8 }) { "Connection error title is missing the red accent" }
-                    File(app.filesDir, "connection-error-dialog.png").outputStream().use {
-                        screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-                    }
-                } finally {
-                    screenshot.recycle()
-                }
+                val error = "SSH connection failed. Check the current host IP, port, network, sshd and SSH algorithm compatibility."
+                tap("Manage Configured fixture")
                 tap("Edit host")
-                node("Host settings")
+                set("Hostname or IP", "127.0.0.1")
                 set("Port", "0")
                 tap("Connect")
-                tap("Check the address, port, fingerprint and any custom paths.")
-                node("Connection error")
-                tap("Close")
-                set("0", "22")
+                node("Enter a port from 1 to 65535.")
+                node("0")
+                set("Port", "1")
                 tap("Connect")
-                node("Connection error")
                 node(error)
+                node("Connection error")
                 tap("Close")
                 node("Navigation toolbar")
                 runOnMainSync {
@@ -264,12 +311,34 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
             node("Navigation toolbar")
             check(manager.profiles == existing)
 
-            fill("fixture.invalid")
-            set("Port", "0")
+            fillFields("fixture.invalid")
+            set("Port", "22          oops")
+            set("SSH fingerprint", "SHA256:not-a-fingerprint")
             tap("Save host")
-            node("Check the address, port, fingerprint and any custom paths.")
+            node("22          oops")
+            node("Enter a port from 1 to 65535.")
+            node("Paste the verified SHA256 fingerprint.")
+            check(focused("Port")) { "The first invalid control was not focused" }
             check(manager.profiles == existing)
-            set("0", "22")
+            set("Port", "22")
+            set("SSH fingerprint", pin)
+            tap("Save host")
+            node("Import an unencrypted SSH private key.")
+            importKey()
+            reveal("Advanced settings")
+            tap("Advanced settings")
+            reveal("Host binary")
+            set("Host binary", "relative/tool")
+            reveal("Advanced settings", below = false)
+            tap("Advanced settings")
+            tap("Save host")
+            node("Use an absolute path or leave blank.")
+            node("relative/tool")
+            check(focused("Host binary")) { "Advanced was not revealed and focused" }
+            set("Host binary", "/fixture/tool")
+            reveal("Replace SSH key", below = false)
+            importInvalidKey("Replace SSH key")
+            node("Replace SSH key")
             val storeDir = app.noBackupFilesDir
             fun encryptedStores() = storeDir.list().orEmpty().filter { it.endsWith(".enc") }.toSet()
             val before = encryptedStores()
@@ -285,8 +354,8 @@ internal fun Instrumentation.addHostSmoke(args: Bundle) {
                 check(blockedCatalogWrite.delete())
                 check(originalCatalog.renameTo(blockedCatalogWrite))
             }
-            node("fixture.invalid")
-            node("Replace SSH key")
+            reveal("fixture.invalid", below = false)
+            reveal("Replace SSH key")
             tap("Save host")
             node("Navigation toolbar")
             check(manager.profiles.size == existing.size + 1)

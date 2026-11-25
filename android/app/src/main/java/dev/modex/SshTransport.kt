@@ -16,10 +16,44 @@ data class Connection(val host: String, val port: Int, val user: String, val pin
 
 internal const val INVALID_CONNECTION = "Check the address, port, fingerprint and any custom paths."
 
+internal data class HostFormErrors(
+    val host: String = "",
+    val port: String = "",
+    val user: String = "",
+    val pin: String = "",
+    val binary: String = "",
+    val state: String = "",
+    val key: String = "",
+) {
+    fun isEmpty() = listOf(host, port, user, pin, binary, state, key).all(String::isEmpty)
+}
+
+internal fun validateHostForm(
+    host: String,
+    port: String,
+    user: String,
+    pin: String,
+    binary: String,
+    state: String,
+    keyLoaded: Boolean,
+): HostFormErrors {
+    fun invalidPath(value: String) = value.isNotEmpty() &&
+        (!value.startsWith('/') || value.any { it == '\n' || it == '\r' || it == '\u0000' })
+    val address = host.trim()
+    val portNumber = port.trim().takeIf { it.all(Char::isDigit) }?.toIntOrNull()
+    return HostFormErrors(
+        host = if (address.isEmpty() || address.length > 253 || address.any { it.isWhitespace() || it.isISOControl() }) "Enter a hostname or IP address without spaces." else "",
+        port = if (portNumber !in 1..65535) "Enter a port from 1 to 65535." else "",
+        user = if (user.trim().isEmpty()) "Enter the SSH username." else "",
+        pin = if (!pin.trim().matches(Regex("SHA256:[A-Za-z0-9+/]{43}"))) "Paste the verified SHA256 fingerprint." else "",
+        binary = if (invalidPath(binary.trim())) "Use an absolute path or leave blank." else "",
+        state = if (invalidPath(state.trim())) "Use an absolute path or leave blank." else "",
+        key = if (keyLoaded) "" else "Import an unencrypted SSH private key.",
+    )
+}
+
 internal fun Connection.isValid(): Boolean =
-    host.isNotBlank() && user.isNotBlank() && port in 1..65535 &&
-        pin.matches(Regex("SHA256:[A-Za-z0-9+/]{43}")) &&
-        runCatching { remoteCommand(binary, state, 0, null) }.isSuccess
+    validateHostForm(host, port.toString(), user, pin, binary, state, true).isEmpty()
 
 private fun JSch.loadIdentity(key: ByteArray) {
     addIdentity("modex-memory-key", key, null, null)
@@ -39,6 +73,12 @@ internal fun isUnencryptedSshKey(key: ByteArray): Boolean {
         copy.fill(0)
         jsch.removeAllIdentity()
     }
+}
+
+internal fun validateImportedKey(key: ByteArray): String? {
+    if (isUnencryptedSshKey(key)) return null
+    key.fill(0)
+    return "Import a supported unencrypted SSH private key."
 }
 
 class SshTransport {

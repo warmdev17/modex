@@ -14,7 +14,7 @@ The current owner installation uses the local development certificate. A develop
 
 A source tag may identify a verified feature commit; this does not merge it to main. Keep every original commit when integration is requested. A later production versionCode must exceed every earlier development release code too.
 
-The existing remote file picker also transfers files using SFTP, and the present APK fits its 20 MiB limit. GitHub/browser delivery is the bootstrap route because the current app does not declare permission to install unknown packages. Opening an APK as an ordinary attachment is not a verified installer workflow. APKs or profiles must never be added to Git as a workaround.
+For private previews, open **From connected computer** in the chat attachment menu, select the preview button beside the APK, then tap **Save to Downloads**. Modex reads the file over SFTP and saves it to Android Downloads. On Android 8–9, use **Save as…** and choose Downloads in the system picker. Then open the APK from Files and confirm the update with Android's package installer. Use the GitHub/browser link for the first upgrade from a release without Downloads support. The picker accepts files up to 20 MiB.
 
 ## Service continuity today
 
