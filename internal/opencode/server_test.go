@@ -335,7 +335,6 @@ func TestUnsupportedMethods(t *testing.T) {
 		"threads/archive", "threads/unarchive", "threads/delete", "threads/fork",
 		"threads/takeover", "threads/mode", "threads/status", "threads/permissions",
 		"plans/respond", "projects/list", "projects/create", "references/list",
-		"decision/respond",
 	}
 	for _, method := range methods {
 		_, err := runCommand(t, client, "/work", method, map[string]any{})
@@ -537,6 +536,107 @@ func TestServeEventsRoutesInterruptAheadOfPendingTurn(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		close(release)
 		t.Fatal("turn/interrupt was starved behind the pending turn/start")
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeEvents did not return")
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"id":2`) || !strings.Contains(lines[1], `"id":1`) {
+		t.Fatalf("output=%q", output.String())
+	}
+}
+
+func TestClientAttachedRoutesThroughSeam(t *testing.T) {
+	called := false
+	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+		if method != callClientAttached {
+			t.Fatalf("method=%s", method)
+		}
+		values, _ := params.(map[string]any)
+		if values["attached"] != true {
+			t.Fatalf("params=%+v", params)
+		}
+		called = true
+		return json.RawMessage(`{"updated":true}`), nil
+	}
+	params, _ := json.Marshal(map[string]any{"attached": true})
+	result, err := HandleEvents(context.Background(), "/work", bridge.Command{ID: 1, Method: "client/attached", Params: params}, call, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("client/attached did not reach the call seam")
+	}
+	assertJSON(t, result, `{"updated":true}`)
+}
+
+func TestDecisionRespondForwardsToStore(t *testing.T) {
+	var forwarded map[string]any
+	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+		if method != callDecisionRespond {
+			t.Fatalf("method=%s", method)
+		}
+		forwarded, _ = params.(map[string]any)
+		return json.RawMessage(`{"delivered":true}`), nil
+	}
+	params, _ := json.Marshal(map[string]any{
+		"decision_id": "per_1",
+		"result":      map[string]any{"decision": "accept"},
+	})
+	result, err := HandleEvents(context.Background(), "/work", bridge.Command{ID: 1, Method: "decision/respond", Params: params}, call, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"delivered":true}`)
+	if forwarded["decisionID"] != "per_1" || string(forwarded["result"].(json.RawMessage)) != `{"decision":"accept"}` {
+		t.Fatalf("forwarded=%+v", forwarded)
+	}
+
+	for _, invalid := range []map[string]any{
+		{"result": map[string]any{"decision": "accept"}},
+		{"decision_id": "per_1"},
+		{"decision_id": "per_1", "result": nil},
+	} {
+		raw, _ := json.Marshal(invalid)
+		if _, err := HandleEvents(context.Background(), "/work", bridge.Command{ID: 1, Method: "decision/respond", Params: raw}, call, nil); err == nil {
+			t.Fatalf("accepted invalid decision respond: %+v", invalid)
+		}
+	}
+}
+
+func TestServeEventsRoutesDecisionInline(t *testing.T) {
+	release := make(chan struct{})
+	answered := make(chan struct{})
+	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+		switch method {
+		case callTurnStart:
+			<-release
+			return json.RawMessage(`{"turn":{"id":"msg_user","status":"inProgress"}}`), nil
+		case callDecisionRespond:
+			close(answered)
+			return json.RawMessage(`{"delivered":true}`), nil
+		default:
+			return json.RawMessage(`{}`), nil
+		}
+	}
+	input := strings.NewReader(
+		"{\"id\":1,\"method\":\"turn/start\",\"params\":{\"thread_id\":\"ses_1\",\"text\":\"hi\"}}\n" +
+			"{\"id\":2,\"method\":\"decision/respond\",\"params\":{\"decision_id\":\"per_1\",\"result\":{\"decision\":\"accept\"}}}\n",
+	)
+	var output bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- ServeEvents(context.Background(), input, &output, "/work", call) }()
+	select {
+	case <-answered:
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("decision/respond was starved behind the pending turn/start")
 	}
 	close(release)
 	select {

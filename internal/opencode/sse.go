@@ -25,16 +25,21 @@ const (
 // terminal states by polling the active session. It reconnects with bounded
 // backoff and dedupes replayed event ids.
 type Stream struct {
-	client *Client
-	synth  *Synthesizer
+	client    *Client
+	synth     *Synthesizer
+	observers []func(typ string, properties json.RawMessage, directory string)
+
+	// OnPermissions receives a session's pending-permission snapshot from the
+	// polling reconciler (nil disables the M4 reconciliation).
+	OnPermissions func(sessionID, directory string, raw json.RawMessage)
 
 	seenMu    sync.Mutex
 	seen      map[string]bool
 	seenOrder []string
 }
 
-func NewStream(client *Client, synth *Synthesizer) *Stream {
-	return &Stream{client: client, synth: synth, seen: map[string]bool{}}
+func NewStream(client *Client, synth *Synthesizer, observers ...func(typ string, properties json.RawMessage, directory string)) *Stream {
+	return &Stream{client: client, synth: synth, observers: observers, seen: map[string]bool{}}
 }
 
 // Run blocks until ctx is canceled. The polling reconciler runs alongside the
@@ -126,6 +131,9 @@ func (s *Stream) dispatch(payload string) {
 		Type       string          `json:"type"`
 		Data       json.RawMessage `json:"data"`
 		Properties json.RawMessage `json:"properties"`
+		Location   struct {
+			Directory string `json:"directory"`
+		} `json:"location"`
 	}
 	if json.Unmarshal([]byte(payload), &envelope) != nil || envelope.Type == "" {
 		return
@@ -143,6 +151,9 @@ func (s *Stream) dispatch(payload string) {
 		properties = json.RawMessage("null")
 	}
 	s.synth.Handle(envelope.Type, properties)
+	for _, observer := range s.observers {
+		observer(envelope.Type, properties, envelope.Location.Directory)
+	}
 }
 
 func (s *Stream) alreadySeen(id string) bool {
@@ -191,8 +202,9 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 	}
 	reverseMessages(page.Data)
 	if inFlight {
-		// M4 projects permission requests; M3 only keeps the seam warm.
-		_, _ = s.client.ListPermissions(ctx, sessionID)
+		if permissions, err := s.client.ListPermissions(ctx, sessionID); err == nil && s.OnPermissions != nil {
+			s.OnPermissions(sessionID, session.Location.Directory, permissions)
+		}
 	}
 	s.synth.Reconcile(session, page.Data)
 }

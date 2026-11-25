@@ -227,6 +227,30 @@ func TestClientPromptSanitizesBusyError(t *testing.T) {
 	}
 }
 
+func TestClientReplyPermission(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session/ses_1/permission/per_1/reply" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	if err := client.ReplyPermission(context.Background(), "ses_1", "per_1", "once"); err != nil {
+		t.Fatal(err)
+	}
+	want := []recordedRequest{{"POST", "/api/session/ses_1/permission/per_1/reply", "", `{"decision":"once"}`}}
+	if !reflect.DeepEqual(*requests, want) {
+		t.Fatalf("requests=%+v want=%+v", *requests, want)
+	}
+	if err := client.ReplyPermission(context.Background(), "ses_1", "per_1", "always"); err != nil {
+		t.Fatalf("always should be accepted by the client seam: %v", err)
+	}
+	if err := client.ReplyPermission(context.Background(), "ses_1", "per_1", "nope"); err == nil {
+		t.Fatal("invalid permission decision accepted")
+	}
+}
+
 func TestClientInterruptReportsFlag(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		if r.URL.Path != "/api/session/ses_1/interrupt" {

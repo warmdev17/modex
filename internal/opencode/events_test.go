@@ -162,6 +162,101 @@ func TestReasoningItemIDIsDistinctFromAgentMessage(t *testing.T) {
 	}
 }
 
+func TestActiveSessionStopsAfterTerminalTurn(t *testing.T) {
+	synth := NewSynthesizer("/work", nil)
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	if id, active := synth.ActiveSession(); id != "ses_1" || !active {
+		t.Fatalf("active=%q,%v", id, active)
+	}
+	synth.Handle("session.execution.succeeded", json.RawMessage(`{"sessionID":"ses_1"}`))
+	if id, active := synth.ActiveSession(); id != "" || active {
+		t.Fatalf("terminal turn still polls: %q,%v", id, active)
+	}
+}
+
+func TestReasoningCompletionDeduped(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	delta := json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":0,"delta":"think"}`)
+	ended := json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":0,"text":"think"}`)
+	synth.Handle("session.reasoning.delta", delta)
+	synth.Handle("session.reasoning.ended", ended)
+	synth.Handle("session.reasoning.ended", ended)
+	synth.Handle("session.execution.succeeded", json.RawMessage(`{"sessionID":"ses_1"}`))
+
+	completed := 0
+	for _, event := range collector.snapshot() {
+		if event.method != "item/completed" {
+			continue
+		}
+		var params struct {
+			Item map[string]any `json:"item"`
+		}
+		_ = json.Unmarshal(event.params, &params)
+		if params.Item["type"] == "reasoning" {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("reasoning completions=%d", completed)
+	}
+}
+
+func TestReasoningNonZeroOrdinalSection(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	synth.Handle("session.reasoning.delta", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":1,"delta":"second"}`))
+	synth.Handle("session.reasoning.ended", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":1,"text":"second"}`))
+
+	var delta, done map[string]any
+	for _, event := range collector.snapshot() {
+		switch event.method {
+		case "item/reasoning/summaryTextDelta":
+			_ = json.Unmarshal(event.params, &delta)
+		case "item/completed":
+			var params struct {
+				Item map[string]any `json:"item"`
+			}
+			_ = json.Unmarshal(event.params, &params)
+			if params.Item["type"] == "reasoning" {
+				done = params.Item
+			}
+		}
+	}
+	// Each OpenCode reasoning part maps to one history-aligned item, so the
+	// item id carries the 1-based part index and summaryIndex stays 0.
+	if delta == nil || delta["itemId"] != "msg_asst/r2" || delta["summaryIndex"] != float64(0) {
+		t.Fatalf("reasoning delta=%v", delta)
+	}
+	summary, _ := done["summary"].([]any)
+	if done == nil || done["id"] != "msg_asst/r2" || len(summary) != 1 || summary[0] != "second" {
+		t.Fatalf("reasoning completion=%v", done)
+	}
+}
+
+func TestEmptyReasoningSectionSuppressed(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	synth.Handle("session.reasoning.started", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":0}`))
+	synth.Handle("session.reasoning.ended", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":0,"text":""}`))
+	synth.Handle("session.execution.succeeded", json.RawMessage(`{"sessionID":"ses_1"}`))
+	for _, event := range collector.snapshot() {
+		if event.method != "item/started" && event.method != "item/completed" {
+			continue
+		}
+		var params struct {
+			Item map[string]any `json:"item"`
+		}
+		_ = json.Unmarshal(event.params, &params)
+		if params.Item["type"] == "reasoning" {
+			t.Fatalf("empty reasoning emitted an item: %s", event.params)
+		}
+	}
+}
+
 func TestToolOnlyTurnSuppressesEmptyAgentMessage(t *testing.T) {
 	collector := &eventCollector{}
 	synth := NewSynthesizer("/work", collector.emit)

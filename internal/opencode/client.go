@@ -88,6 +88,7 @@ const (
 	callClientAttached   = "client/attached"
 	callTurnStart        = "turn/start"
 	callTurnInterrupt    = "turn/interrupt"
+	callDecisionRespond  = "decision/respond"
 )
 
 // promptFile is the v2 prompt attachment input. OpenCode 2.4.x takes the file
@@ -339,12 +340,23 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, files []pro
 	return "", errors.New("opencode did not return the user message")
 }
 
-// ListPermissions is the M4 permission seam. M3 calls it from the reconciler
-// but does not project requests yet.
+// ListPermissions returns the pending permission requests for a session.
 func (c *Client) ListPermissions(ctx context.Context, sessionID string) (json.RawMessage, error) {
 	var response json.RawMessage
 	err := c.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(sessionID)+"/permission", nil, nil, &response)
 	return response, err
+}
+
+// ReplyPermission answers a pending permission. OpenCode v2 accepts
+// once/always/reject; Modex only ever sends once or reject.
+func (c *Client) ReplyPermission(ctx context.Context, sessionID, requestID, decision string) error {
+	switch decision {
+	case "once", "always", "reject":
+	default:
+		return errors.New("invalid opencode permission decision")
+	}
+	body := map[string]string{"decision": decision}
+	return c.request(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/permission/"+url.PathEscape(requestID)+"/reply", nil, body, nil)
 }
 
 func (c *Client) ListModels(ctx context.Context) ([]modelRef, error) {

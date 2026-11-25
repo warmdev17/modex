@@ -29,15 +29,28 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 	writer := opencode.NewWriter(out)
 	synth := opencode.NewSynthesizer(cwd, writer.Emit)
 	client := opencode.NewClient(p.BaseURL(), p.Client(), cwd)
+	decisions := opencode.NewDecisions(cwd, writer.Emit, synth.TurnID, func(replyCtx context.Context, sessionID, requestID, decision string) error {
+		return client.ReplyPermission(replyCtx, sessionID, requestID, decision)
+	})
 
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()
-	stream := opencode.NewStream(client, synth)
+	stream := opencode.NewStream(client, synth, decisions.Handle)
+	stream.OnPermissions = decisions.Reconcile
 	go func() { _ = stream.Run(streamCtx) }()
 
 	call := func(requestCtx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
 		ctx, cancel := context.WithTimeout(requestCtx, 20*time.Second)
 		defer cancel()
+		if method == "decision/respond" {
+			values, _ := params.(map[string]any)
+			decisionID, _ := values["decisionID"].(string)
+			result, _ := values["result"].(json.RawMessage)
+			if err := decisions.Answer(ctx, decisionID, result); err != nil {
+				return nil, err
+			}
+			return json.RawMessage(`{"delivered":true}`), nil
+		}
 		raw, err := client.Call(ctx, method, params, emit)
 		if err == nil {
 			switch method {
@@ -61,6 +74,11 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 					values, _ := params.(map[string]any)
 					sessionID, _ := values["sessionID"].(string)
 					synth.MarkInterrupted(sessionID)
+				}
+			case "client/attached":
+				values, _ := params.(map[string]any)
+				if attached, _ := values["attached"].(bool); attached {
+					decisions.Replay(true)
 				}
 			}
 		}

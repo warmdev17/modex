@@ -94,6 +94,17 @@ func (s *Synthesizer) MarkInterrupted(sessionID string) {
 	}
 }
 
+// TurnID returns the user message id of the session's current/last turn so
+// permission decisions can carry the Codex turn id.
+func (s *Synthesizer) TurnID(sessionID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if state := s.turns[sessionID]; state != nil {
+		return state.userID
+	}
+	return ""
+}
+
 // ActiveSession reports the latest turn and whether it is still running; the
 // polling reconciler uses the former for its idle tick.
 func (s *Synthesizer) ActiveSession() (string, bool) {
@@ -154,7 +165,6 @@ func (s *Synthesizer) Handle(typ string, properties json.RawMessage) {
 		s.finishText(state, data.AssistantMessageID, data.Text)
 	case "session.reasoning.started":
 		s.noteAssistant(state, data.AssistantMessageID)
-		s.ensureReasoningItem(state, data.AssistantMessageID, data.Ordinal)
 		if state.reasoning[data.AssistantMessageID] == nil {
 			state.reasoning[data.AssistantMessageID] = map[int]string{}
 		}
@@ -485,12 +495,18 @@ func (s *Synthesizer) completeReasoning(state *turnState, messageID string, ordi
 	if state.reasoningCompleted[id] {
 		return
 	}
-	s.ensureReasoningItem(state, messageID, ordinal)
-	state.reasoningCompleted[id] = true
 	text := ""
 	if parts := state.reasoning[messageID]; parts != nil {
 		text = parts[ordinal]
 	}
+	if text == "" && !state.reasoningStarted[id] {
+		// Suppress empty reasoning sections, matching the empty agentMessage
+		// behavior: an item with no visible text should not create a bubble.
+		state.reasoningCompleted[id] = true
+		return
+	}
+	s.ensureReasoningItem(state, messageID, ordinal)
+	state.reasoningCompleted[id] = true
 	s.emitEvent("item/completed", map[string]any{
 		"threadId": state.sessionID,
 		"turnId":   state.userID,

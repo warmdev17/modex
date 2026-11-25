@@ -34,7 +34,6 @@ var unsupportedMethods = map[string]bool{
 	"projects/list":       true,
 	"projects/create":     true,
 	"references/list":     true,
-	"decision/respond":    true,
 }
 
 func Handle(ctx context.Context, cwd string, cmd bridge.Command, call Caller) (any, error) {
@@ -81,6 +80,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		allowed["thread_id"] = true
 		allowed["turn_id"] = true
 		allowed["workspace"] = true
+	case "decision/respond":
+		allowed["decision_id"] = true
+		allowed["result"] = true
 	case "threads/read":
 		allowed["workspace"] = true
 		allowed["thread_id"] = true
@@ -293,6 +295,23 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, err
 		}
 		return map[string]any{}, nil
+	case "decision/respond":
+		var id string
+		if raw, ok := p["decision_id"]; !ok || json.Unmarshal(raw, &id) != nil || id == "" || len(id) > 256 || strings.ContainsAny(id, "\r\n\x00") {
+			return nil, errors.New("decision_id is required")
+		}
+		if len(p["result"]) == 0 || string(p["result"]) == "null" {
+			return nil, errors.New("result is required")
+		}
+		raw, err := call(ctx, callDecisionRespond, map[string]any{"decisionID": id, "result": json.RawMessage(p["result"])}, emit)
+		if err != nil {
+			return nil, err
+		}
+		var result map[string]any
+		if json.Unmarshal(raw, &result) != nil {
+			return nil, errors.New("invalid decision response")
+		}
+		return result, nil
 	case "threads/read":
 		id, err := requiredThreadID(p)
 		if err != nil {
@@ -382,10 +401,20 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		}
 		return projectModelList(models), nil
 	case "client/attached":
-		if _, err := boolParam(p["attached"], "attached"); err != nil {
+		attached, err := boolParam(p["attached"], "attached")
+		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"updated": true}, nil
+		// Route through the seam so the host can reset/replay pending decisions.
+		raw, err := call(ctx, callClientAttached, map[string]any{"attached": attached}, emit)
+		if err != nil {
+			return nil, err
+		}
+		var result map[string]any
+		if json.Unmarshal(raw, &result) != nil {
+			return nil, errors.New("invalid attach response")
+		}
+		return result, nil
 	}
 	return nil, fmt.Errorf("%s is unsupported by the opencode backend", cmd.Method)
 }
