@@ -13,7 +13,9 @@ import (
 const maxFrame = 4 * 1024 * 1024
 
 // RPCError is a valid request rejection, not a broken transport.
-type RPCError struct{ category string }
+type RPCError struct{ category, steerTarget string }
+
+func (e *RPCError) SteerTarget() string { return e.steerTarget }
 
 func (*RPCError) Error() string {
 	return "app-server rejected request; raw error suppressed to protect credentials"
@@ -27,19 +29,31 @@ func (e *RPCError) Category() string {
 }
 
 func NewRPCError(raw json.RawMessage) *RPCError {
-	return &RPCError{category: classifyRPCError(raw)}
-}
-
-func classifyRPCError(raw json.RawMessage) string {
 	var detail struct {
 		Code    json.RawMessage `json:"code"`
 		Message string          `json:"message"`
 	}
 	_ = json.Unmarshal(raw, &detail)
-	if isUsageLimitMessage(detail.Message) {
+	category := classifyRPCError(detail.Code, detail.Message)
+	if detail.Message == "no active turn to steer" {
+		category = "no_active_turn_to_steer"
+	}
+	var target string
+	if remainder, ok := strings.CutPrefix(detail.Message, "expected active turn id `"); ok {
+		if _, actual, ok := strings.Cut(remainder, "` but found `"); ok {
+			if id, ok := strings.CutSuffix(actual, "`"); ok && id != "" && len(id) <= 256 && !strings.ContainsAny(id, "`\r\n\x00") {
+				target = id
+			}
+		}
+	}
+	return &RPCError{category: category, steerTarget: target}
+}
+
+func classifyRPCError(code json.RawMessage, message string) string {
+	if isUsageLimitMessage(message) {
 		return "usage_limit_exceeded"
 	}
-	s := string(detail.Code) + " " + detail.Message
+	s := string(code) + " " + message
 	for _, known := range []struct{ key, category string }{
 		{"forked history still references", "thread_has_dependents"},
 		{"attached threads", "thread_has_dependents"},
@@ -103,7 +117,7 @@ func readResponse(reader *bufio.Reader, id int) (json.RawMessage, error) {
 			return nil, errors.New("unexpected app-server response ID")
 		}
 		if len(message.Error) > 0 && !bytes.Equal(message.Error, []byte("null")) {
-			return nil, &RPCError{category: classifyRPCError(message.Error)}
+			return nil, NewRPCError(message.Error)
 		}
 		if len(message.Result) == 0 {
 			return nil, errors.New("app-server response has no result")

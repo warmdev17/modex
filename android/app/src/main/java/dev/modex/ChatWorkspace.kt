@@ -145,7 +145,7 @@ internal fun ChatWorkspace(
     onNewProject: () -> Unit = {},
     onCreateInProject: (String, String, String, String, String) -> Unit = { model, mode, effort, _, _ -> onCreate(model, mode, effort) },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {},
-    promptDrafts: PromptDrafts? = null, activeTurnId: String = "",
+    promptDrafts: PromptDrafts? = null, activeTurnId: String = "", steerSending: Boolean = false,
     agentConversation: AgentConversation? = null, onOpenAgent: (AgentTimeline) -> Unit = {},
     onAgentHistory: (Boolean) -> Unit = {},
 ) {
@@ -197,7 +197,7 @@ internal fun ChatWorkspace(
         else if (text.isEmpty()) localDrafts.remove(selected) else localDrafts[selected] = next
     }
     fun applyEdit(text: String) { updatePrompt(text); scope.launch { focus.requestFocus(); keyboard?.show() } }
-    editing?.let { text -> AlertDialog(onDismissRequest = { editing = null }, title = { Text("Replace draft?") }, text = { Text("Your current draft will be replaced. The message will be sent as a new turn only when you press Send.") }, confirmButton = { TextButton(onClick = { applyEdit(text); editing = null }) { Text("Replace") } }, dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } }) }
+    editing?.let { text -> AlertDialog(onDismissRequest = { editing = null }, title = { Text("Replace draft?") }, text = { Text("Your current draft will be replaced. Press Send when you’re ready.") }, confirmButton = { TextButton(onClick = { applyEdit(text); editing = null }) { Text("Replace") } }, dismissButton = { TextButton(onClick = { editing = null }) { Text("Cancel") } }) }
     var newChat by rememberSaveable { mutableStateOf(false) }
     var newWorkspace by rememberSaveable { mutableStateOf("") }
     var newProjectId by rememberSaveable { mutableStateOf("") }
@@ -480,17 +480,22 @@ internal fun ChatWorkspace(
                 reasoning?.let { reasoningLabel(it.summaryParts.lastOrNull { part -> part.isNotBlank() }.orEmpty().ifBlank { it.text }) }
                     .orEmpty().ifBlank { "Working" }
             }
-            val work = if (running) activeWork ?: ChatEntry(role = "You", status = "inProgress") else completedWork
+            val work = if (running) {
+                activeWork?.let { prompt ->
+                    reasoningTimeline.firstOrNull { it.role == "You" && it.turnId == prompt.turnId && it.startedAtMs != null } ?: prompt
+                } ?: ChatEntry(role = "You", status = "inProgress")
+            } else completedWork
             PromptComposer(
                 prompt, ::updatePrompt, busy,
                 (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank(),
                 ::openModel,
-                connected && !historyLoading && selected.isNotBlank() && !busy && !attachmentWorking && !modeChanging,
+                connected && !historyLoading && selected.isNotBlank() && (!busy || (activeTurnId.isNotBlank() && !stopping)) &&
+                    !steerSending && !attachmentWorking && !modeChanging && !permissionsWorking && !planResponding,
                 attachments, attachmentWorking, attachmentProgress, attachmentError,
-                connected && selected.isNotBlank() && !busy && !attachmentWorking,
+                connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
                 modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) }),
-                focus = focus, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
+                focus = focus, steerSending = steerSending, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
                 referenceEnabled = connected && selected.isNotBlank() && !historyLoading, chosenReferences = chosenReferences,
                 onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
@@ -658,7 +663,7 @@ private fun PromptComposer(
     prompt: String, onChange: (String, PromptReference?) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
     attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
-    modelColor: Color, focus: FocusRequester, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
+    modelColor: Color, focus: FocusRequester, steerSending: Boolean, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
     referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
@@ -739,9 +744,9 @@ private fun PromptComposer(
                         selected = false, onClick = { onPreview(file) },
                         label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         leadingIcon = { ChatGlyph(if (file.kind == "image") ChatIcon.Image else ChatIcon.File) },
-                        trailingIcon = { if (!busy && !attachmentWorking) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
+                        trailingIcon = { if (attachEnabled) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
                         modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp), shape = RoundedCornerShape(6.dp)
-                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (!busy && !attachmentWorking) ({ onRemove(file.path) }) else null)
+                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (attachEnabled) ({ onRemove(file.path) }) else null)
                 }
             }
             if (attachmentWorking) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -780,10 +785,20 @@ private fun PromptComposer(
                         }
                     }
                 }
-                FilledIconButton(onClick = if (busy) onStop else onSend, enabled = if (busy) stopEnabled && !stopping else sendEnabled, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = if (busy) Mocha.Red else modeColor, contentColor = Mocha.Base,
-                        disabledContainerColor = if (busy) Mocha.Red else Mocha.Surface, disabledContentColor = Mocha.Base)) {
-                    if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp, color = Mocha.Base) else if (busy) ChatGlyph(ChatIcon.Stop, "Stop response") else ChatGlyph(ChatIcon.Send,"Send message")
+                if (busy) {
+                    FilledIconButton(onClick = onStop, enabled = stopEnabled && !stopping,
+                        shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Mocha.Red, contentColor = Mocha.Base,
+                            disabledContainerColor = Mocha.Red, disabledContentColor = Mocha.Base)) {
+                        if (stopping) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Stopping" }, strokeWidth = 2.dp, color = Mocha.Base)
+                        else ChatGlyph(ChatIcon.Stop, "Stop response")
+                    }
+                }
+                FilledIconButton(onClick = onSend, enabled = sendEnabled, shape = RoundedCornerShape(10.dp), modifier = Modifier.size(48.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = modeColor, contentColor = Mocha.Base,
+                        disabledContainerColor = Mocha.Surface, disabledContentColor = Mocha.Base)) {
+                    if (steerSending) CircularProgressIndicator(Modifier.size(20.dp).semantics { contentDescription = "Sending follow-up" }, strokeWidth = 2.dp)
+                    else ChatGlyph(ChatIcon.Send, if (busy) "Send follow-up" else "Send message")
                 }
             }
         }

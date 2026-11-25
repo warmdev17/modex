@@ -129,7 +129,14 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
                 val content = item.optJSONArray("content")
                 val body = content?.let { a -> (0 until a.length()).mapNotNull { n -> a.optJSONObject(n)?.takeIf { it.optString("type") == "text" }?.optString("text") }.joinToString("\n") }.orEmpty()
                 val recovered = legacyFileAttachments(body)
-                (previous ?: ChatEntry(id, "You", recovered.first, attachments = recovered.second, status = "inProgress"))
+                val images = if (previous != null || content == null) emptyList() else (0 until content.length()).mapNotNull { n ->
+                    val part = content.optJSONObject(n)?.takeIf { it.optString("type") == "localImage" } ?: return@mapNotNull null
+                    val path = part.optString("path")
+                    if (path.length > 32768 || path.any { it.isISOControl() } ||
+                        !(path.startsWith("/") || Regex("^[A-Za-z]:[\\\\/].*").matches(path))) return@mapNotNull null
+                    Attachment(path, attachmentName(path), "image")
+                }
+                (previous ?: ChatEntry(id, "You", recovered.first, attachments = recovered.second + images, status = "inProgress"))
                     .copy(id = id, turnId = turnId)
             }
             "plan", "agentMessage" -> ChatEntry(id, if (item.optString("type") == "plan") "plan" else "Codex", if (item.has("text")) item.optString("text") else previous?.text.orEmpty(), status = if (event == "item/started") "inProgress" else "completed", turnId = turnId)

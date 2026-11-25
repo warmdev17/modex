@@ -117,7 +117,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["thread_id"] = true
 		allowed["turn_id"] = true
 		allowed["workspace"] = true
-	case "turn/start":
+	case "turn/start", "turn/steer":
+		allowed["turn_id"] = cmd.Method == "turn/steer"
 		allowed["references"] = true
 		allowed["attachments"] = true
 		allowed["thread_id"] = true
@@ -143,17 +144,20 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 		cwd = workspace
 	}
+	safeError := func(err error) error {
+		if err == nil || errors.Is(err, ErrSessionNotOwned) || errors.Is(err, ErrSessionBusy) {
+			return err
+		}
+		var rejection *diagnostic.RPCError
+		if errors.As(err, &rejection) {
+			return errors.New("Codex request failed: " + rejection.Category())
+		}
+		return errors.New("Codex request failed; raw error suppressed")
+	}
 	fetch := func(method string, params any) (json.RawMessage, error) {
 		r, err := call(ctx, method, params, emit)
 		if err != nil {
-			if errors.Is(err, ErrSessionNotOwned) || errors.Is(err, ErrSessionBusy) {
-				return nil, err
-			}
-			var rejection *diagnostic.RPCError
-			if errors.As(err, &rejection) {
-				return nil, errors.New("Codex request failed: " + rejection.Category())
-			}
-			return nil, errors.New("Codex request failed; raw error suppressed")
+			return nil, safeError(err)
 		}
 		return r, nil
 	}
@@ -468,10 +472,13 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 			return nil, errors.New("thread outside workspace")
 		}
 		return fetch("turn/interrupt", map[string]any{"threadId": id, "turnId": turn})
-	case "turn/start":
-		var id, text string
+	case "turn/start", "turn/steer":
+		var id, text, turn string
 		if json.Unmarshal(p["thread_id"], &id) != nil || id == "" {
 			return nil, errors.New("thread_id is required")
+		}
+		if cmd.Method == "turn/steer" && (json.Unmarshal(p["turn_id"], &turn) != nil || strings.TrimSpace(turn) == "" || len(turn) > 256 || strings.ContainsAny(turn, "\r\n\x00")) {
+			return nil, errors.New("turn_id must be a nonempty single-line string")
 		}
 		if string(p["text"]) == "null" || json.Unmarshal(p["text"], &text) != nil {
 			return nil, errors.New("text must be a string")
@@ -508,6 +515,20 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		input, err = appendReferences(fetch, cwd, input, p["references"])
 		if err != nil {
 			return nil, err
+		}
+		if turn != "" {
+			target := map[string]any{"threadId": id, "expectedTurnId": turn, "input": input}
+			raw, err := call(ctx, "turn/steer", target, emit)
+			var rejection *diagnostic.RPCError
+			if errors.As(err, &rejection) && rejection.SteerTarget() != "" && rejection.SteerTarget() != turn {
+				target["expectedTurnId"] = rejection.SteerTarget()
+				rejection = nil
+				raw, err = call(ctx, "turn/steer", target, emit)
+			}
+			// Codex CLI starts a fresh turn only after the native API confirms there is no active turn.
+			if !errors.As(err, &rejection) || rejection.Category() != "no_active_turn_to_steer" {
+				return raw, safeError(err)
+			}
 		}
 		params := map[string]any{"threadId": id, "input": input}
 		if model != "" {

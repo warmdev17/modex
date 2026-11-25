@@ -233,6 +233,12 @@ func (s *threadProcesses) Call(ctx context.Context, method string, params any) (
 		}
 		return json.Marshal(map[string]any{"session": w.session, "token_usage": w.usage})
 	}
+	if method == "turn/steer" {
+		if w := s.workers[id]; w != nil {
+			return w.process.Call(ctx, method, params)
+		}
+		return nil, bridge.ErrSessionNotOwned
+	}
 	if method == "turn/interrupt" {
 		turn, _ := p["turnId"].(string)
 		w := s.workers[id]
