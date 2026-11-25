@@ -17,9 +17,7 @@ import (
 
 func serveHostWithSocket(cwd string, b backendSpec, socket string) error {
 	if b.kind == "opencode" {
-		// The HTTP/SSE read surface, streaming and decision bridge arrive in a
-		// later milestone; never fall through to the Codex stdio path.
-		return fmt.Errorf("open code backend bridge is not implemented yet")
+		return serveOpenCodeHost(cwd, b)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

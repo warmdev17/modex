@@ -56,6 +56,18 @@ func superviseArgs(cwd string, b backendSpec, dir string) []string {
 	return args
 }
 
+// execCommand is an injectable seam so tests can guard the child argv without
+// spawning a process.
+var execCommand = exec.Command
+
+func serveChildCommand(self, cwd string, b backendSpec, nativeSocket string) *exec.Cmd {
+	return execCommand(self, serveArgs(cwd, b, nativeSocket)...)
+}
+
+func superviseChildCommand(self, cwd string, b backendSpec, dir string) *exec.Cmd {
+	return execCommand(self, superviseArgs(cwd, b, dir)...)
+}
+
 func superviseHost(cwd string, b backendSpec, dir string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -80,7 +92,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 	if err != nil {
 		return err
 	}
-	child := exec.Command(self, serveArgs(cwd, b, nativeSocket)...)
+	child := serveChildCommand(self, cwd, b, nativeSocket)
 	child.Env = append(os.Environ(), "MODEX_PLAN_STATE_DIR="+filepath.Join(dir, "plan-receipts"))
 	child.Dir = cwd
 	child.Stderr = io.Discard
@@ -207,7 +219,7 @@ func startBackground(cwd string, b backendSpec, dir string) error {
 	if err != nil {
 		return err
 	}
-	child := exec.Command(self, superviseArgs(cwd, b, dir)...)
+	child := superviseChildCommand(self, cwd, b, dir)
 	child.Dir = cwd
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {

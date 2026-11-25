@@ -1,0 +1,363 @@
+package opencode
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/warmdev/modex/internal/bridge"
+)
+
+func runCommand(t *testing.T, client *Client, cwd, method string, params any) (any, error) {
+	t.Helper()
+	var raw json.RawMessage
+	if params != nil {
+		encoded, err := json.Marshal(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw = encoded
+	}
+	return HandleEvents(context.Background(), cwd, bridge.Command{ID: 1, Method: method, Params: raw}, client.Call, nil)
+}
+
+func assertJSON(t *testing.T, got any, want string) {
+	t.Helper()
+	gotRaw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotValue, wantValue any
+	if json.Unmarshal(gotRaw, &gotValue) != nil || json.Unmarshal([]byte(want), &wantValue) != nil {
+		t.Fatalf("invalid comparison JSON: got=%s want=%s", gotRaw, want)
+	}
+	if !reflect.DeepEqual(gotValue, wantValue) {
+		t.Fatalf("got  %s\nwant %s", gotRaw, want)
+	}
+}
+
+const sessionBody = `{"id":"ses_1","projectID":"p","agent":"builder","model":{"id":"m1","providerID":"p1","variant":"default"},"title":"Thread title","location":{"directory":"/work"},"time":{"created":1,"updated":2}}`
+
+func TestStatusProjectsDefaultAgent(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/info":
+			jsonResponse(w, http.StatusOK, `{"version":"2.4.1","pid":1,"urls":[]}`)
+		case "/api/config":
+			jsonResponse(w, http.StatusOK, `[{"type":"document","path":"/cfg","info":{"default_agent":"builder","agents":{"builder":{"model":{"providerID":"opencode-go","model":"deepseek-v4-pro"}}}}}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "status", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"workspace":"/work","config":{"provider":"opencode-go","model":"deepseek-v4-pro"}}`)
+	for _, request := range *requests {
+		if request.Path == "/api/config" && request.Query != "directory=%2Fwork" {
+			t.Fatalf("config query=%q", request.Query)
+		}
+	}
+}
+
+func TestThreadsListProjectsSessions(t *testing.T) {
+	longTitle := strings.Repeat("t", 200)
+	page, _ := json.Marshal(map[string]any{
+		"data": []map[string]any{
+			{"id": "ses_1", "model": map[string]any{"id": "m1", "providerID": "p1"}, "title": longTitle, "location": map[string]string{"directory": "/work"}},
+			{"id": "ses_2", "title": "", "location": map[string]string{"directory": "/other"}},
+		},
+		"cursor": map[string]any{"previous": nil, "next": nil},
+	})
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session" || r.Method != http.MethodGet {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResponse(w, http.StatusOK, string(page))
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "threads/list", map[string]any{"limit": 20, "all_workspaces": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	title, _ := json.Marshal(safePreview(longTitle))
+	assertJSON(t, result, `{"data":[
+		{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1","preview":`+string(title)+`,"name":`+string(title)+`},
+		{"id":"ses_2","cwd":"/other","modelProvider":"","preview":"","name":""}
+	],"next_cursor":null}`)
+	if len(*requests) != 1 || (*requests)[0].Query != "limit=100&order=desc" {
+		t.Fatalf("requests=%+v", *requests)
+	}
+}
+
+func TestThreadsStartCreatesSessionAndResolvesModel(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/model":
+			jsonResponse(w, http.StatusOK, `{"location":{"directory":"/work"},"data":[{"id":"m1","modelID":"m1","providerID":"p1","name":"M1"}]}`)
+		case "/api/session":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"ses_new","model":{"id":"m1","providerID":"p1"},"location":{"directory":"/work"},"time":{"created":1,"updated":1}}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "threads/start", map[string]any{"workspace": "/work", "model": "m1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"thread":{"id":"ses_new","cwd":"/work","modelProvider":"p1","model":"m1"},"model":"m1"}`)
+	var createBody string
+	for _, request := range *requests {
+		if request.Method == http.MethodPost && request.Path == "/api/session" {
+			createBody = request.Body
+		}
+	}
+	if createBody != `{"location":{"directory":"/work"},"model":{"id":"m1","providerID":"p1"}}` {
+		t.Fatalf("create body=%s", createBody)
+	}
+}
+
+func TestThreadsReadMetadata(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session/ses_1" {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "threads/read", map[string]any{"thread_id": "ses_1", "workspace": "/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1"}}`)
+}
+
+func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
+	messages := `{"data":[
+		{"id":"msg_user","type":"user","text":"hello","time":{"created":1}},
+		{"id":"msg_asst","type":"assistant","content":[
+			{"type":"reasoning","text":"think"},
+			{"type":"text","text":"answer"},
+			{"type":"tool","tool":{"id":"call_1","name":"bash","state":{"status":"completed","input":{},"content":[{"type":"text","text":"out"}]}}}
+		],"time":{"created":2}},
+		{"id":"msg_err","type":"assistant","outcome":"error","content":[{"type":"text","text":"boom"}],"time":{"created":3}},
+		{"id":"msg_run","type":"assistant","content":[{"type":"text","text":"working"}],"time":{"created":4}}
+	],"cursor":{"previous":null,"next":null}}`
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/session/ses_1":
+			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+		case "/api/session/ses_1/message":
+			jsonResponse(w, http.StatusOK, messages)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "threads/read", map[string]any{"thread_id": "ses_1", "workspace": "/work", "include_turns": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notice := `{"category":"turn_failed","message":"OpenCode could not complete this turn. Review the conversation before trying again.","retrying":false}`
+	assertJSON(t, result, `{
+		"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1"},
+		"messages":[
+			{"id":"msg_user","role":"user","text":"hello","display_text":"hello"},
+			{"id":"msg_asst/r1","role":"reasoning","text":"think","display_text":"think"},
+			{"id":"msg_asst","role":"assistant","text":"answer","display_text":"answer"},
+			{"id":"call_1","role":"command","text":"out","command":"bash","cwd":"/work","status":"completed","exit_code":null},
+			{"id":"msg_err","role":"assistant","text":"boom","display_text":"boom","status":"failed","turn_notice":`+notice+`,"notice":`+notice+`},
+			{"id":"msg_run","role":"assistant","text":"working","display_text":"working"}
+		],
+		"active_turn":true,
+		"active_turn_id":"msg_run"
+	}`)
+	for _, request := range *requests {
+		if request.Path == "/api/session/ses_1/message" && request.Query != "order=asc" {
+			t.Fatalf("message query=%q", request.Query)
+		}
+	}
+}
+
+func TestThreadsResumeReturnsModel(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session/ses_1" {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "threads/resume", map[string]any{"thread_id": "ses_1", "workspace": "/work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1"},"model":"m1"}`)
+}
+
+func TestModelsListProjection(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/model" {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResponse(w, http.StatusOK, `{"location":{"directory":"/work"},"data":[
+			{"id":"m1","modelID":"m1","providerID":"p1","name":"M1"},
+			{"id":"m2","modelID":"m2","providerID":"p2","name":"M2"},
+			{"id":"m1","modelID":"m1","providerID":"p1","name":"duplicate"}
+		]}`)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "models/list", map[string]any{"limit": 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"data":[
+		{"id":"p1/m1","model":"m1","displayName":"m1","defaultReasoningEffort":"","supportedReasoningEfforts":[]},
+		{"id":"p2/m2","model":"m2","displayName":"m2","defaultReasoningEffort":"","supportedReasoningEfforts":[]}
+	],"next_cursor":null}`)
+}
+
+func TestClientAttached(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		t.Errorf("client/attached must not call the OpenCode server")
+		http.NotFound(w, r)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "client/attached", map[string]any{"attached": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"updated":true}`)
+	if len(*requests) != 0 {
+		t.Fatalf("unexpected requests: %+v", *requests)
+	}
+}
+
+func TestUnsupportedMethods(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		t.Errorf("unsupported method %s called the server", r.URL.Path)
+		http.NotFound(w, r)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	methods := []string{
+		"threads/archive", "threads/unarchive", "threads/delete", "threads/fork",
+		"threads/takeover", "threads/mode", "threads/status", "threads/permissions",
+		"plans/respond", "projects/list", "projects/create", "references/list",
+		"turn/start", "turn/interrupt", "decision/respond",
+	}
+	for _, method := range methods {
+		_, err := runCommand(t, client, "/work", method, map[string]any{})
+		want := method + " is unsupported by the opencode backend"
+		if err == nil || err.Error() != want {
+			t.Fatalf("%s: err=%v want %q", method, err, want)
+		}
+	}
+	if len(*requests) != 0 {
+		t.Fatalf("unsupported methods made requests: %+v", *requests)
+	}
+}
+
+func TestValidationErrors(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		t.Errorf("validation error reached the server: %s", r.URL.Path)
+		http.NotFound(w, r)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	for _, test := range []struct {
+		method string
+		params any
+		want   string
+	}{
+		{"status", map[string]any{"unexpected": 1}, "unknown parameter"},
+		{"threads/list", map[string]any{"limit": 0}, "limit must be an integer from 1 to 100"},
+		{"threads/list", map[string]any{"archived": true}, "archived is unsupported by the opencode backend"},
+		{"threads/start", map[string]any{"standalone": true}, "standalone is unsupported by the opencode backend"},
+		{"threads/start", map[string]any{"project_id": "p1"}, "project_id is unsupported by the opencode backend"},
+		{"threads/start", map[string]any{"permission_mode": "read-only"}, "permission_mode is unsupported by the opencode backend"},
+		{"threads/start", map[string]any{"model": ""}, "model must be a nonempty single-line string up to 256 bytes"},
+		{"threads/read", map[string]any{"thread_id": ""}, "thread_id must be a nonempty single-line string up to 256 bytes"},
+		{"threads/read", map[string]any{"thread_id": "ses_1", "workspace": "relative"}, "workspace must be an absolute path"},
+		{"threads/read", map[string]any{"thread_id": "ses_1", "limit": 10}, "history limit and cursor require include_turns"},
+		{"client/attached", map[string]any{}, "attached must be boolean"},
+	} {
+		_, err := runCommand(t, client, "/work", test.method, test.params)
+		if err == nil || err.Error() != test.want {
+			t.Fatalf("%s %+v: err=%v want %q", test.method, test.params, err, test.want)
+		}
+	}
+}
+
+func TestThreadOutsideWorkspaceRejected(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session/ses_1" {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResponse(w, http.StatusOK, `{"data":{"id":"ses_1","location":{"directory":"/other"}}}`)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	_, err := runCommand(t, client, "/work", "threads/read", map[string]any{"thread_id": "ses_1", "workspace": "/work"})
+	if err == nil || err.Error() != "thread outside workspace" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestServeEventsSupervisorReadiness(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/info":
+			jsonResponse(w, http.StatusOK, `{"version":"2.4.1","pid":1,"urls":[]}`)
+		case "/api/config":
+			jsonResponse(w, http.StatusOK, `[{"type":"document","info":{"default_agent":"builder","agents":{"builder":{"model":{"providerID":"p1","model":"m1"}}}}}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	input := strings.NewReader(
+		"{\"id\":2147483647,\"method\":\"status\"}\n" +
+			"{\"id\":2147483646,\"method\":\"client/attached\",\"params\":{\"attached\":true}}\n",
+	)
+	var output bytes.Buffer
+	if err := ServeEvents(context.Background(), input, &output, "/work", client.Call); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("output=%q", output.String())
+	}
+	var status struct {
+		ID     int `json:"id"`
+		Result struct {
+			Workspace string `json:"workspace"`
+			Config    struct {
+				Provider string `json:"provider"`
+				Model    string `json:"model"`
+			} `json:"config"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal([]byte(lines[0]), &status) != nil || status.ID != 2147483647 || status.Result.Workspace != "/work" || status.Result.Config.Provider != "p1" || status.Result.Config.Model != "m1" || len(status.Error) != 0 {
+		t.Fatalf("status line=%s", lines[0])
+	}
+	var attached struct {
+		ID     int `json:"id"`
+		Result struct {
+			Updated bool `json:"updated"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	if json.Unmarshal([]byte(lines[1]), &attached) != nil || attached.ID != 2147483646 || !attached.Result.Updated || len(attached.Error) != 0 {
+		t.Fatalf("attached line=%s", lines[1])
+	}
+}

@@ -188,9 +188,24 @@ func TestStartProcessDiscoveryFailureWithHungGrandchild(t *testing.T) {
 		dataFile, pidFile))
 	defer killPID(t, pidFile)
 
+	type startResult struct {
+		p   *Process
+		err error
+	}
+	started := make(chan startResult, 1)
 	start := time.Now()
-	p, err := StartProcess(context.Background(), fake, t.TempDir(), os.Environ())
+	go func() {
+		p, err := StartProcess(context.Background(), fake, t.TempDir(), os.Environ())
+		started <- startResult{p, err}
+	}()
+	var result startResult
+	select {
+	case result = <-started:
+	case <-time.After(25 * time.Second):
+		t.Fatal("StartProcess did not return within 25s; the stdout drain is gated on EOF again")
+	}
 	elapsed := time.Since(start)
+	p, err := result.p, result.err
 	if err == nil {
 		if p != nil {
 			p.Close()
@@ -232,7 +247,16 @@ func TestCloseWithHungGrandchild(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	p.Close()
+	closed := make(chan struct{})
+	go func() {
+		p.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(4 * time.Second):
+		t.Fatal("Close did not return within 4s; the stdout drain is gated on EOF again")
+	}
 	elapsed := time.Since(start)
 	// 2s SIGTERM grace plus reaping; a pipe-EOF gate would hang for 120s.
 	if elapsed > 4*time.Second {

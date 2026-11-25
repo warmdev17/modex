@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os/exec"
 	"reflect"
 	"testing"
 )
@@ -44,5 +45,28 @@ func TestServeArgsOpenCodeHasNoNativeSocket(t *testing.T) {
 	want := []string{"--serve", "--workspace", "/work", "--backend", "opencode", "--opencode", "opencode-bin"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%q", got)
+	}
+}
+
+// TestModeCommandsUseArgHelpers guards the exec seam: a mode handler must pass
+// the shared argv helper's output, not an inlined copy that could drift.
+func TestModeCommandsUseArgHelpers(t *testing.T) {
+	original := execCommand
+	t.Cleanup(func() { execCommand = original })
+
+	var calls [][]string
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		calls = append(calls, append([]string{name}, args...))
+		return exec.Command("true")
+	}
+
+	spec := backendSpec{kind: "codex", codex: "codex-bin", home: "/home/user/.codex"}
+	_ = serveChildCommand("/self", "/work", spec, "/tmp/native.sock")
+	_ = superviseChildCommand("/self", "/work", spec, "/state")
+
+	wantServe := append([]string{"/self"}, serveArgs("/work", spec, "/tmp/native.sock")...)
+	wantSupervise := append([]string{"/self"}, superviseArgs("/work", spec, "/state")...)
+	if len(calls) != 2 || !reflect.DeepEqual(calls[0], wantServe) || !reflect.DeepEqual(calls[1], wantSupervise) {
+		t.Fatalf("commands=%q want %q and %q", calls, wantServe, wantSupervise)
 	}
 }
