@@ -3,6 +3,8 @@ package opencode
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -255,6 +257,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			"active_turn":    active,
 			"active_turn_id": activeID,
 		}
+		if hasLimit {
+			// Android requires an opaque revision on every paged history read.
+			result["history_revision"] = historyRevision(id, messages)
+		}
 		if next != "" {
 			result["next_cursor"] = next
 		} else if hasLimit || cursor != "" {
@@ -325,14 +331,18 @@ func readSession(ctx context.Context, call EventCaller, id, cwd string, emit fun
 	return thread, nil
 }
 
+// fetchMessages mirrors the Codex history page: OpenCode is queried newest
+// first, each page is reversed to chronological order, and cursor.next (which
+// points toward older messages in desc order) becomes the Modex next_cursor.
 func fetchMessages(ctx context.Context, call EventCaller, id string, limit int, hasLimit bool, cursor string, emit func(string, json.RawMessage)) ([]message, string, error) {
 	const maxPages = 32
 	const maxMessages = 2000
 	if hasLimit {
-		page, err := callInto[messagePage](ctx, call, callSessionMessages, map[string]any{"id": id, "limit": limit, "order": "asc", "cursor": cursor}, emit)
+		page, err := callInto[messagePage](ctx, call, callSessionMessages, map[string]any{"id": id, "limit": limit, "order": "desc", "cursor": cursor}, emit)
 		if err != nil {
 			return nil, "", err
 		}
+		reverseMessages(page.Data)
 		next := ""
 		if page.Cursor.Next != nil {
 			next = *page.Cursor.Next
@@ -343,12 +353,13 @@ func fetchMessages(ctx context.Context, call EventCaller, id string, limit int, 
 	seen := map[string]bool{}
 	next := ""
 	for page := 0; page < maxPages; page++ {
-		result, err := callInto[messagePage](ctx, call, callSessionMessages, map[string]any{"id": id, "order": "asc", "cursor": next}, emit)
+		result, err := callInto[messagePage](ctx, call, callSessionMessages, map[string]any{"id": id, "order": "desc", "cursor": next}, emit)
 		if err != nil {
 			return nil, "", err
 		}
 		all = append(all, result.Data...)
 		if result.Cursor.Next == nil || *result.Cursor.Next == "" {
+			reverseMessages(all)
 			return all, "", nil
 		}
 		if seen[*result.Cursor.Next] {
@@ -357,10 +368,34 @@ func fetchMessages(ctx context.Context, call EventCaller, id string, limit int, 
 		seen[*result.Cursor.Next] = true
 		next = *result.Cursor.Next
 		if len(all) >= maxMessages {
+			reverseMessages(all)
 			return all, next, nil
 		}
 	}
+	reverseMessages(all)
 	return all, next, nil
+}
+
+func reverseMessages(messages []message) {
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+}
+
+// historyRevision is an opaque, content-addressed cache token. It is stable
+// for identical pages and changes whenever the thread id or any returned
+// message (text, tool output, outcome, timing) changes.
+func historyRevision(threadID string, messages []message) string {
+	hash := sha256.New()
+	hash.Write([]byte(threadID))
+	hash.Write([]byte{0})
+	for _, item := range messages {
+		if raw, err := json.Marshal(item); err == nil {
+			hash.Write(raw)
+		}
+		hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func requiredThreadID(p map[string]json.RawMessage) (string, error) {

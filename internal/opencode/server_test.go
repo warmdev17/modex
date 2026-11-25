@@ -142,15 +142,16 @@ func TestThreadsReadMetadata(t *testing.T) {
 }
 
 func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
+	// Upstream desc order: newest first, oldest last.
 	messages := `{"data":[
-		{"id":"msg_user","type":"user","text":"hello","time":{"created":1}},
+		{"id":"msg_run","type":"assistant","content":[{"type":"text","text":"working"}],"time":{"created":4}},
+		{"id":"msg_err","type":"assistant","outcome":"error","content":[{"type":"text","text":"boom"}],"time":{"created":3}},
 		{"id":"msg_asst","type":"assistant","content":[
 			{"type":"reasoning","text":"think"},
 			{"type":"text","text":"answer"},
 			{"type":"tool","tool":{"id":"call_1","name":"bash","state":{"status":"completed","input":{},"content":[{"type":"text","text":"out"}]}}}
 		],"time":{"created":2}},
-		{"id":"msg_err","type":"assistant","outcome":"error","content":[{"type":"text","text":"boom"}],"time":{"created":3}},
-		{"id":"msg_run","type":"assistant","content":[{"type":"text","text":"working"}],"time":{"created":4}}
+		{"id":"msg_user","type":"user","text":"hello","time":{"created":1}}
 	],"cursor":{"previous":null,"next":null}}`
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		switch r.URL.Path {
@@ -182,9 +183,89 @@ func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
 		"active_turn_id":"msg_run"
 	}`)
 	for _, request := range *requests {
-		if request.Path == "/api/session/ses_1/message" && request.Query != "order=asc" {
+		if request.Path == "/api/session/ses_1/message" && request.Query != "order=desc" {
 			t.Fatalf("message query=%q", request.Query)
 		}
+	}
+	if _, ok := result.(map[string]any)["history_revision"]; ok {
+		t.Fatal("non-paginated reads should not emit history_revision")
+	}
+}
+
+func TestThreadsReadPagedHistoryRevisionAndCursor(t *testing.T) {
+	// Page 1 is newest-first; cursor.next points at older messages. Following
+	// the cursor must not repeat order (OpenCode encodes it in the cursor).
+	var messageQueries []string
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/session/ses_1":
+			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+		case "/api/session/ses_1/message":
+			messageQueries = append(messageQueries, r.URL.RawQuery)
+			if r.URL.Query().Get("cursor") == "" {
+				jsonResponse(w, http.StatusOK, `{"data":[
+					{"id":"msg_5","type":"user","text":"five","time":{"created":5}},
+					{"id":"msg_4","type":"user","text":"four","time":{"created":4}}
+				],"cursor":{"previous":null,"next":"older-1"}}`)
+				return
+			}
+			jsonResponse(w, http.StatusOK, `{"data":[
+				{"id":"msg_3","type":"user","text":"three","time":{"created":3}},
+				{"id":"msg_2","type":"user","text":"two","time":{"created":2}}
+			],"cursor":{"previous":"newer-1","next":"older-2"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	first, err := runCommand(t, client, "/work", "threads/read", map[string]any{
+		"thread_id": "ses_1", "workspace": "/work", "include_turns": true, "limit": 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstResult := first.(map[string]any)
+	revision, _ := firstResult["history_revision"].(string)
+	if revision == "" {
+		t.Fatal("paged history read did not emit a history_revision")
+	}
+	if firstResult["next_cursor"] != "older-1" {
+		t.Fatalf("next_cursor=%v want older-1", firstResult["next_cursor"])
+	}
+	assertJSON(t, firstResult["messages"], `[
+		{"id":"msg_4","role":"user","text":"four","display_text":"four"},
+		{"id":"msg_5","role":"user","text":"five","display_text":"five"}
+	]`)
+
+	again, err := runCommand(t, client, "/work", "threads/read", map[string]any{
+		"thread_id": "ses_1", "workspace": "/work", "include_turns": true, "limit": 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.(map[string]any)["history_revision"] != revision {
+		t.Fatal("history_revision is not stable for identical content")
+	}
+
+	second, err := runCommand(t, client, "/work", "threads/read", map[string]any{
+		"thread_id": "ses_1", "workspace": "/work", "include_turns": true, "limit": 2, "cursor": "older-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondResult := second.(map[string]any)
+	if secondResult["next_cursor"] != "older-2" {
+		t.Fatalf("next_cursor=%v want older-2", secondResult["next_cursor"])
+	}
+	if secondResult["history_revision"] == revision {
+		t.Fatal("history_revision did not change for an older page")
+	}
+	assertJSON(t, secondResult["messages"], `[
+		{"id":"msg_2","role":"user","text":"two","display_text":"two"},
+		{"id":"msg_3","role":"user","text":"three","display_text":"three"}
+	]`)
+	if len(messageQueries) != 3 || messageQueries[0] != "limit=2&order=desc" || messageQueries[1] != "limit=2&order=desc" || messageQueries[2] != "cursor=older-1&limit=2" {
+		t.Fatalf("message queries=%q", messageQueries)
 	}
 }
 

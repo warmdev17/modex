@@ -98,6 +98,8 @@ func projectThread(s session) map[string]any {
 	return thread
 }
 
+// projectSessionList omits projectId/projectless deliberately: OpenCode has no
+// project concept, so Android falls back to workspace matching.
 func projectSessionList(sessions []session) map[string]any {
 	data := make([]map[string]any, 0, len(sessions))
 	for _, s := range sessions {

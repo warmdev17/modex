@@ -114,7 +114,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 	case callSessionMessages:
 		order := stringParam(values, "order")
 		if order == "" {
-			order = "asc"
+			order = "desc"
 		}
 		value, err = c.ListMessagesPage(ctx, stringParam(values, "id"), intParam(values, "limit", 0), order, stringParam(values, "cursor"))
 	case callSessionInterrupt:
@@ -220,7 +220,9 @@ func (c *Client) ListMessages(ctx context.Context, id string, limit int, order s
 
 func (c *Client) ListMessagesPage(ctx context.Context, id string, limit int, order, cursor string) (messagePage, error) {
 	query := url.Values{}
-	if order != "" {
+	// OpenCode encodes the order in the cursor and rejects a cursor combined
+	// with order, so only the first page may specify one.
+	if order != "" && cursor == "" {
 		query.Set("order", order)
 	}
 	if limit > 0 {

@@ -77,7 +77,10 @@ func TestClientExactRequests(t *testing.T) {
 	if _, err := client.ReadSession(ctx, "ses_1"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.ListMessagesPage(ctx, "ses_1", 10, "asc", "abc"); err != nil {
+	if _, err := client.ListMessagesPage(ctx, "ses_1", 10, "desc", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ListMessagesPage(ctx, "ses_1", 10, "desc", "abc"); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.Abort(ctx, "ses_1"); err != nil {
@@ -92,7 +95,8 @@ func TestClientExactRequests(t *testing.T) {
 		{"GET", "/api/config", "directory=%2Fwork", ""},
 		{"POST", "/api/session", "", `{"agent":"builder","location":{"directory":"/work"},"model":{"id":"m1","providerID":"p1"}}`},
 		{"GET", "/api/session/ses_1", "", ""},
-		{"GET", "/api/session/ses_1/message", "cursor=abc&limit=10&order=asc", ""},
+		{"GET", "/api/session/ses_1/message", "limit=10&order=desc", ""},
+		{"GET", "/api/session/ses_1/message", "cursor=abc&limit=10", ""},
 		{"POST", "/api/session/ses_1/interrupt", "", ""},
 		{"GET", "/api/model", "directory=%2Fwork", ""},
 	}
