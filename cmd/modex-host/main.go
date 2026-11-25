@@ -27,6 +27,42 @@ type backendSpec struct {
 	home     string // codex-home; codex only
 }
 
+// backendFlags captures the flags that decide whether an opencode backend is
+// compatible with the selected host mode.
+type backendFlags struct {
+	backend      string
+	nativeSocket string
+	home         string
+	thread       string
+	cli          bool
+	serve        bool
+	background   bool
+	supervise    bool
+	attach       bool
+	stop         bool
+}
+
+// validateBackendFlags rejects opencode only for modes that spawn or open a
+// backend. attach/stop are backend-agnostic and must ignore --backend entirely.
+func validateBackendFlags(f backendFlags) error {
+	if f.backend != "opencode" || f.attach || f.stop {
+		return nil
+	}
+	switch {
+	case f.cli:
+		return fmt.Errorf("open code backend does not support --cli")
+	case f.nativeSocket != "":
+		return fmt.Errorf("open code backend does not support --native-socket")
+	case f.home != "":
+		return fmt.Errorf("open code backend does not support --codex-home")
+	case f.thread != "":
+		return fmt.Errorf("open code backend does not support --thread")
+	case !f.serve && !f.background && !f.supervise:
+		return fmt.Errorf("open code backend requires --serve, --background, or --supervise")
+	}
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "modex-host:", err)
@@ -84,23 +120,19 @@ func run() error {
 	if *backend == "opencode" && codexExplicit {
 		return fmt.Errorf("--codex requires --backend codex")
 	}
-	if *backend == "opencode" {
-		switch {
-		case *cli:
-			return fmt.Errorf("open code backend does not support --cli")
-		case *nativeSocket != "":
-			return fmt.Errorf("open code backend does not support --native-socket")
-		case *home != "":
-			return fmt.Errorf("open code backend does not support --codex-home")
-		case *thread != "":
-			return fmt.Errorf("open code backend does not support --thread")
-		case *attach:
-			return fmt.Errorf("open code backend does not support --attach")
-		case *stop:
-			return fmt.Errorf("open code backend does not support --stop")
-		case !*serve && !*background && !*supervise:
-			return fmt.Errorf("open code backend requires --serve, --background, or --supervise")
-		}
+	if err := validateBackendFlags(backendFlags{
+		backend:      *backend,
+		nativeSocket: *nativeSocket,
+		home:         *home,
+		thread:       *thread,
+		cli:          *cli,
+		serve:        *serve,
+		background:   *background,
+		supervise:    *supervise,
+		attach:       *attach,
+		stop:         *stop,
+	}); err != nil {
+		return err
 	}
 	if *nativeSocket != "" && (!*serve || !filepath.IsAbs(*nativeSocket)) {
 		return fmt.Errorf("--native-socket requires --serve and an absolute private path")

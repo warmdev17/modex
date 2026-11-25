@@ -158,7 +158,7 @@ func (d *Decisions) failVisible(sessionID, message string) {
 }
 
 func (d *Decisions) failPendingCap(sessionID string) {
-	d.failVisible(sessionID, "OpenCode requested too many pending approvals for this session. Review them on the computer and reconnect.")
+	d.failVisible(sessionID, "OpenCode requested too many pending approvals. Review them on the computer and reconnect.")
 }
 
 func (d *Decisions) add(request permissionRequest, directory string) {
