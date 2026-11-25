@@ -30,7 +30,20 @@ func randomID() string {
 	return hex.EncodeToString(data[:])
 }
 
-func superviseHost(cwd, binary, home, dir string) error {
+// serveArgs builds the child --serve arguments. The Codex form must stay
+// byte-identical to the historical layout; OpenCode has no native TUI socket.
+func serveArgs(cwd string, b backendSpec, nativeSocket string) []string {
+	if b.kind == "opencode" {
+		return []string{"--serve", "--workspace", cwd, "--backend", "opencode", "--opencode", b.opencode}
+	}
+	args := []string{"--serve", "--workspace", cwd, "--codex", b.codex, "--native-socket", nativeSocket}
+	if b.home != "" {
+		args = append(args, "--codex-home", b.home)
+	}
+	return args
+}
+
+func superviseHost(cwd string, b backendSpec, dir string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	release, err := claimSupervisorState(dir)
@@ -54,12 +67,7 @@ func superviseHost(cwd, binary, home, dir string) error {
 	if err != nil {
 		return err
 	}
-	args := []string{"--serve", "--workspace", cwd, "--codex", binary}
-	args = append(args, "--native-socket", nativeSocket)
-	if home != "" {
-		args = append(args, "--codex-home", home)
-	}
-	child := exec.Command(self, args...)
+	child := exec.Command(self, serveArgs(cwd, b, nativeSocket)...)
 	child.Env = append(os.Environ(), "MODEX_PLAN_STATE_DIR="+filepath.Join(dir, "plan-receipts"))
 	child.Dir = cwd
 	child.Stderr = io.Discard
@@ -175,7 +183,7 @@ func superviseHost(cwd, binary, home, dir string) error {
 	return nil
 }
 
-func startBackground(cwd, binary, home, dir string) error {
+func startBackground(cwd string, b backendSpec, dir string) error {
 	// Probe ownership with the same crash-safe protocol as the child.
 	release, err := claimSupervisorState(dir)
 	if err != nil {
@@ -186,9 +194,11 @@ func startBackground(cwd, binary, home, dir string) error {
 	if err != nil {
 		return err
 	}
-	args := []string{"--supervise", "--workspace", cwd, "--codex", binary, "--state-dir", dir}
-	if home != "" {
-		args = append(args, "--codex-home", home)
+	args := []string{"--supervise", "--workspace", cwd, "--codex", b.codex, "--state-dir", dir}
+	if b.kind == "opencode" {
+		args = []string{"--supervise", "--workspace", cwd, "--backend", "opencode", "--opencode", b.opencode, "--state-dir", dir}
+	} else if b.home != "" {
+		args = append(args, "--codex-home", b.home)
 	}
 	child := exec.Command(self, args...)
 	child.Dir = cwd
