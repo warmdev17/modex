@@ -93,6 +93,87 @@ func TestServerAuthReplayAndSingleWriter(t *testing.T) {
 	}
 }
 
+func TestHeartbeatLeaseReleasesSilentClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := NewServer(ctx, "token", "instance", &bytes.Buffer{}, cancel)
+	s.leaseTimeout = 300 * time.Millisecond
+	client, decoder := connect(t, s, Hello{Token: "token", Heartbeat: true})
+	defer client.Close()
+	var reply map[string]any
+	if err := decoder.Decode(&reply); err != nil || reply["ready"] != true {
+		t.Fatalf("reply=%v err=%v", reply, err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for s.Attached() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if s.Attached() {
+		t.Fatal("silent heartbeat client kept the supervisor attachment")
+	}
+	next, nextDecoder := connect(t, s, Hello{Token: "token"})
+	defer next.Close()
+	reply = nil
+	if err := nextDecoder.Decode(&reply); err != nil || reply["ready"] != true {
+		t.Fatalf("replacement reply=%v err=%v", reply, err)
+	}
+}
+
+func TestHeartbeatRenewsLeaseWithoutForwardingCommand(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var child lockedBuffer
+	s := NewServer(ctx, "token", "instance", &child, cancel)
+	s.leaseTimeout = 200 * time.Millisecond
+	client, decoder := connect(t, s, Hello{Token: "token", Heartbeat: true})
+	defer client.Close()
+	var reply map[string]any
+	if err := decoder.Decode(&reply); err != nil || reply["ready"] != true {
+		t.Fatalf("reply=%v err=%v", reply, err)
+	}
+	for range 5 {
+		time.Sleep(80 * time.Millisecond)
+		if _, err := client.Write([]byte("{\"heartbeat\":true}\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !s.Attached() {
+		t.Fatal("heartbeat client lost its lease")
+	}
+	if child.String() != "" {
+		t.Fatalf("heartbeat reached Codex bridge: %q", child.String())
+	}
+}
+
+func TestHeartbeatLeaseTracksPartialFrameActivity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var child lockedBuffer
+	s := NewServer(ctx, "token", "instance", &child, cancel)
+	s.leaseTimeout = 200 * time.Millisecond
+	client, decoder := connect(t, s, Hello{Token: "token", Heartbeat: true})
+	defer client.Close()
+	var reply map[string]any
+	if err := decoder.Decode(&reply); err != nil || reply["ready"] != true {
+		t.Fatalf("reply=%v err=%v", reply, err)
+	}
+	for index, part := range []string{`{"id":1,`, `"method":`, `"status"`, "}\n"} {
+		if index > 0 {
+			time.Sleep(80 * time.Millisecond)
+		}
+		if _, err := client.Write([]byte(part)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(time.Second)
+	for child.String() == "" && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if child.String() != "{\"id\":1,\"method\":\"status\"}\n" {
+		t.Fatalf("partial command was not forwarded: %q", child.String())
+	}
+}
+
 func TestServerRejectsStaleInstanceAndAuthenticatedStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

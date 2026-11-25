@@ -232,7 +232,7 @@ func startBackground(cwd, binary, home, dir string) error {
 	}
 }
 
-func supervisorClient(dir string, cursor uint64, instance string, stop bool) error {
+func supervisorClient(dir string, cursor uint64, instance string, stop, heartbeat bool) error {
 	endpoint, err := readEndpoint(dir)
 	if err != nil {
 		return err
@@ -249,7 +249,7 @@ func supervisorClient(dir string, cursor uint64, instance string, stop bool) err
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = json.NewEncoder(conn).Encode(supervisor.Hello{Token: endpoint.Token, Instance: instance, Cursor: cursor, Stop: stop}); err != nil {
+	if err = json.NewEncoder(conn).Encode(supervisor.Hello{Token: endpoint.Token, Instance: instance, Cursor: cursor, Stop: stop, Heartbeat: heartbeat}); err != nil {
 		return errors.New("supervisor handshake failed")
 	}
 	reader := bufio.NewReader(conn)

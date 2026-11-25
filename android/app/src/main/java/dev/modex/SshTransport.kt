@@ -91,6 +91,7 @@ class SshTransport {
 
     fun open(config: Connection, key: ByteArray, journal: JournalState, onHello: () -> Unit, onFrame: (JSONObject) -> Unit) {
         var stage = "config"
+        var heartbeat: Thread? = null
         val remoteError = object : java.io.OutputStream() {
             private val bytes = ByteArrayOutputStream()
             @Synchronized override fun write(value: Int) { if (bytes.size() < 4096) bytes.write(value) }
@@ -141,12 +142,29 @@ class SshTransport {
                 val first = readFrame(input) ?: error("Supervisor closed before attach")
                 journal.hello(first)
                 stage = "stream"
+                heartbeat = Thread({
+                    try {
+                        while (!closed && exec.isConnected) {
+                            Thread.sleep(15_000)
+                            synchronized(writeLock) {
+                                if (closed || !exec.isConnected) return@synchronized
+                                val output = exec.outputStream
+                                output.write("{\"heartbeat\":true}\n".toByteArray(StandardCharsets.UTF_8))
+                                output.flush()
+                            }
+                        }
+                    } catch (_: InterruptedException) {
+                    } catch (_: Exception) {
+                        exec.disconnect()
+                    }
+                }, "modex-attach-heartbeat").apply { isDaemon = true; start() }
                 onHello()
                 while (!Thread.currentThread().isInterrupted) {
                     val frame = readFrame(input) ?: error("Supervisor stream closed")
                     onFrame(frame)
                 }
             } finally {
+                heartbeat?.interrupt()
                 channel?.disconnect()
                 ssh.disconnect()
                 jsch.removeAllIdentity()

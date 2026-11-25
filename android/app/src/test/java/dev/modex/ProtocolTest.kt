@@ -86,8 +86,8 @@ class ProtocolTest {
     }
 
     @Test fun quotesRemotePaths() {
-        assertEquals("exec '/opt/host'\"'\"'s app' --attach --state-dir '/state $(id)' --cursor 0", remoteCommand("/opt/host's app", "/state $(id)", 0, null))
-        assertEquals("exec \"\$HOME\"/.local/bin/modex-host --attach --state-dir \"\$HOME\"/.local/state/modex-phone --cursor 0", remoteCommand("", "", 0, null))
+        assertEquals("exec '/opt/host'\"'\"'s app' --attach --heartbeat --state-dir '/state $(id)' --cursor 0", remoteCommand("/opt/host's app", "/state $(id)", 0, null))
+        assertEquals("exec \"\$HOME\"/.local/bin/modex-host --attach --heartbeat --state-dir \"\$HOME\"/.local/state/modex-phone --cursor 0", remoteCommand("", "", 0, null))
     }
     @Test fun rejectsInvalidPathAndCursor() {
         for (path in listOf("relative", "/host\ncmd")) {
