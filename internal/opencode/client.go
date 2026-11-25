@@ -86,7 +86,16 @@ const (
 	callSessionInterrupt = "session/interrupt"
 	callModels           = "models"
 	callClientAttached   = "client/attached"
+	callTurnStart        = "turn/start"
+	callTurnInterrupt    = "turn/interrupt"
 )
+
+// promptFile is the v2 prompt attachment input. OpenCode 2.4.x takes the file
+// URI directly; MIME is inferred server-side and is not accepted in this body.
+type promptFile struct {
+	URI  string `json:"uri"`
+	Name string `json:"name,omitempty"`
+}
 
 // Call adapts the typed client to the bridge EventCaller seam. It returns
 // native OpenCode shapes as JSON; server.go performs the Modex projection.
@@ -122,6 +131,34 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 		value = map[string]any{}
 	case callModels:
 		value, err = c.ListModels(ctx)
+	case callTurnStart:
+		rawParams, _ := json.Marshal(params)
+		var input struct {
+			SessionID  string       `json:"sessionID"`
+			Text       string       `json:"text"`
+			Files      []promptFile `json:"files"`
+			ProviderID string       `json:"providerID"`
+			ModelID    string       `json:"modelID"`
+			Agent      string       `json:"agent"`
+		}
+		if json.Unmarshal(rawParams, &input) != nil {
+			return nil, errors.New("invalid turn request")
+		}
+		var model *modelRef
+		if input.ProviderID != "" && input.ModelID != "" {
+			model = &modelRef{ProviderID: input.ProviderID, ModelID: input.ModelID}
+		}
+		userID, err := c.Prompt(ctx, input.SessionID, input.Text, input.Files, model, input.Agent)
+		if err != nil {
+			return nil, err
+		}
+		value = map[string]any{"turn": map[string]any{"id": userID, "status": "inProgress"}}
+	case callTurnInterrupt:
+		interrupted, err := c.Interrupt(ctx, stringParam(values, "sessionID"))
+		if err != nil {
+			return nil, err
+		}
+		value = map[string]any{"interrupted": interrupted}
 	case callClientAttached:
 		return json.RawMessage(`{"updated":true}`), nil
 	default:
@@ -236,10 +273,78 @@ func (c *Client) ListMessagesPage(ctx context.Context, id string, limit int, ord
 	return page, err
 }
 
-// Abort interrupts the active execution. OpenCode v2 exposes /interrupt; the
-// planned /abort path does not exist in 2.4.x.
+// Interrupt stops the active execution and reports whether one was running.
+// OpenCode v2 exposes /interrupt; the planned /abort path does not exist in
+// 2.4.x.
+func (c *Client) Interrupt(ctx context.Context, id string) (bool, error) {
+	var response struct {
+		Interrupted bool `json:"interrupted"`
+	}
+	if err := c.request(ctx, http.MethodPost, "/api/session/"+url.PathEscape(id)+"/interrupt", nil, nil, &response); err != nil {
+		return false, err
+	}
+	return response.Interrupted, nil
+}
+
+// Abort keeps the M2 API; callers that need the result use Interrupt.
 func (c *Client) Abort(ctx context.Context, id string) error {
-	return c.request(ctx, http.MethodPost, "/api/session/"+url.PathEscape(id)+"/interrupt", nil, nil, nil)
+	_, err := c.Interrupt(ctx, id)
+	return err
+}
+
+// Prompt sends a user prompt. The live v2 body is text/files (not the v1
+// parts/model/agent shape); a requested model or agent is applied to the
+// session first. It returns the accepted user message id used as the Modex
+// turn id.
+func (c *Client) Prompt(ctx context.Context, sessionID, text string, files []promptFile, model *modelRef, agent string) (string, error) {
+	path := "/api/session/" + url.PathEscape(sessionID)
+	if model != nil && model.ProviderID != "" && model.ModelID != "" {
+		body := map[string]any{"model": map[string]string{"id": model.ModelID, "providerID": model.ProviderID}}
+		if err := c.request(ctx, http.MethodPost, path+"/model", nil, body, nil); err != nil {
+			return "", err
+		}
+	}
+	if agent != "" {
+		if err := c.request(ctx, http.MethodPost, path+"/agent", nil, map[string]string{"agent": agent}, nil); err != nil {
+			return "", err
+		}
+	}
+	body := map[string]any{"text": text}
+	if len(files) > 0 {
+		body["files"] = files
+	}
+	var response struct {
+		Data struct {
+			ID   string `json:"id"`
+			Type string `json:"type"`
+		} `json:"data"`
+	}
+	if err := c.request(ctx, http.MethodPost, path+"/prompt", nil, body, &response); err != nil {
+		return "", err
+	}
+	if response.Data.ID != "" {
+		return response.Data.ID, nil
+	}
+	// Older or asynchronous prompt responses may omit the message; resolve the
+	// newest user message instead.
+	page, err := c.ListMessagesPage(ctx, sessionID, 5, "desc", "")
+	if err != nil {
+		return "", err
+	}
+	for _, item := range page.Data {
+		if item.Type == "user" && item.ID != "" {
+			return item.ID, nil
+		}
+	}
+	return "", errors.New("opencode did not return the user message")
+}
+
+// ListPermissions is the M4 permission seam. M3 calls it from the reconciler
+// but does not project requests yet.
+func (c *Client) ListPermissions(ctx context.Context, sessionID string) (json.RawMessage, error) {
+	var response json.RawMessage
+	err := c.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(sessionID)+"/permission", nil, nil, &response)
+	return response, err
 }
 
 func (c *Client) ListModels(ctx context.Context) ([]modelRef, error) {

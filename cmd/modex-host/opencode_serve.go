@@ -13,7 +13,7 @@ import (
 )
 
 // serveOpenCodeHost starts an isolated OpenCode server and serves the Modex
-// read surface over stdio for the lifetime of this connection.
+// read/turn surface over stdio for the lifetime of this connection.
 func serveOpenCodeHost(cwd string, b backendSpec) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -26,11 +26,45 @@ func serveOpenCodeHost(cwd string, b backendSpec) error {
 }
 
 func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader, out io.Writer, cwd string) error {
+	writer := opencode.NewWriter(out)
+	synth := opencode.NewSynthesizer(cwd, writer.Emit)
 	client := opencode.NewClient(p.BaseURL(), p.Client(), cwd)
+
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	stream := opencode.NewStream(client, synth)
+	go func() { _ = stream.Run(streamCtx) }()
+
 	call := func(requestCtx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
 		ctx, cancel := context.WithTimeout(requestCtx, 20*time.Second)
 		defer cancel()
-		return client.Call(ctx, method, params, emit)
+		raw, err := client.Call(ctx, method, params, emit)
+		if err == nil {
+			switch method {
+			case "turn/start":
+				var result struct {
+					Turn struct {
+						ID string `json:"id"`
+					} `json:"turn"`
+				}
+				if json.Unmarshal(raw, &result) == nil && result.Turn.ID != "" {
+					values, _ := params.(map[string]any)
+					sessionID, _ := values["sessionID"].(string)
+					dir, _ := values["directory"].(string)
+					synth.StartTurn(sessionID, result.Turn.ID, dir)
+				}
+			case "turn/interrupt":
+				var result struct {
+					Interrupted bool `json:"interrupted"`
+				}
+				if json.Unmarshal(raw, &result) == nil && result.Interrupted {
+					values, _ := params.(map[string]any)
+					sessionID, _ := values["sessionID"].(string)
+					synth.MarkInterrupted(sessionID)
+				}
+			}
+		}
+		return raw, err
 	}
-	return opencode.ServeEvents(ctx, in, out, cwd, call)
+	return opencode.ServeEventsWithWriter(ctx, in, cwd, call, writer)
 }

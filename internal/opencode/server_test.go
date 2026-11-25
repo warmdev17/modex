@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/warmdev/modex/internal/bridge"
 )
@@ -238,7 +239,7 @@ func TestThreadsReadPagedHistoryRevisionAndCursor(t *testing.T) {
 	]`)
 
 	again, err := runCommand(t, client, "/work", "threads/read", map[string]any{
-		"thread_id": "ses_1", "workspace": "/work", "include_turns": true, "limit": 2,
+		"thread_id": "ses_1", "workspace": "/work", "include_turns": true, "limit": 2, "cursor": nil,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -334,7 +335,7 @@ func TestUnsupportedMethods(t *testing.T) {
 		"threads/archive", "threads/unarchive", "threads/delete", "threads/fork",
 		"threads/takeover", "threads/mode", "threads/status", "threads/permissions",
 		"plans/respond", "projects/list", "projects/create", "references/list",
-		"turn/start", "turn/interrupt", "decision/respond",
+		"decision/respond",
 	}
 	for _, method := range methods {
 		_, err := runCommand(t, client, "/work", method, map[string]any{})
@@ -368,7 +369,9 @@ func TestValidationErrors(t *testing.T) {
 		{"threads/start", map[string]any{"model": ""}, "model must be a nonempty single-line string up to 256 bytes"},
 		{"threads/read", map[string]any{"thread_id": ""}, "thread_id must be a nonempty single-line string up to 256 bytes"},
 		{"threads/read", map[string]any{"thread_id": "ses_1", "workspace": "relative"}, "workspace must be an absolute path"},
-		{"threads/read", map[string]any{"thread_id": "ses_1", "limit": 10}, "history limit and cursor require include_turns"},
+		{"threads/read", map[string]any{"thread_id": "ses_1", "limit": 10}, "history limit must be 1..50 with include_turns"},
+		{"threads/read", map[string]any{"thread_id": "ses_1", "include_turns": true, "cursor": "abc"}, "history cursor requires limit"},
+		{"threads/read", map[string]any{"thread_id": "ses_1", "include_turns": true, "limit": 51}, "history limit must be an integer from 1 to 50"},
 		{"client/attached", map[string]any{}, "attached must be boolean"},
 	} {
 		_, err := runCommand(t, client, "/work", test.method, test.params)
@@ -390,6 +393,163 @@ func TestThreadOutsideWorkspaceRejected(t *testing.T) {
 	_, err := runCommand(t, client, "/work", "threads/read", map[string]any{"thread_id": "ses_1", "workspace": "/work"})
 	if err == nil || err.Error() != "thread outside workspace" {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTurnStartSendsPromptAndReturnsUserTurn(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/model":
+			jsonResponse(w, http.StatusOK, `{"location":{"directory":"/work"},"data":[{"id":"m1","modelID":"m1","providerID":"p1","name":"M1"}]}`)
+		case "/api/session/ses_1/model":
+			jsonResponse(w, http.StatusOK, `{}`)
+		case "/api/session/ses_1/prompt":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"msg_user","type":"user"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "turn/start", map[string]any{
+		"thread_id": "ses_1",
+		"workspace": "/work",
+		"text":      "hi",
+		"model":     "m1",
+		"effort":    "high",
+		"attachments": []map[string]string{
+			{"path": "/tmp/a.png", "kind": "image"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"turn":{"id":"msg_user","status":"inProgress"}}`)
+
+	var modelBody, promptBody string
+	for _, request := range *requests {
+		switch request.Path {
+		case "/api/session/ses_1/model":
+			modelBody = request.Body
+		case "/api/session/ses_1/prompt":
+			promptBody = request.Body
+		}
+	}
+	if modelBody != `{"model":{"id":"m1","providerID":"p1"}}` {
+		t.Fatalf("model body=%s", modelBody)
+	}
+	if promptBody != `{"files":[{"uri":"file:///tmp/a.png","name":"a.png"}],"text":"hi"}` {
+		t.Fatalf("prompt body=%s", promptBody)
+	}
+}
+
+func TestTurnStartValidatesReferencesAndAttachments(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		t.Errorf("invalid turn reached the server: %s", r.URL.Path)
+		http.NotFound(w, r)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	for _, test := range []struct {
+		params map[string]any
+		want   string
+	}{
+		{map[string]any{"thread_id": "ses_1", "text": "hi", "references": []any{map[string]any{"path": "x"}}}, "references are unsupported by the opencode backend"},
+		{map[string]any{"thread_id": "ses_1", "text": "hi", "attachments": []any{map[string]any{"path": "relative", "kind": "file"}}}, "attachment path must be an absolute path"},
+		{map[string]any{"thread_id": "ses_1", "text": "hi", "attachments": []any{map[string]any{"path": "/tmp/a", "kind": "other"}}}, "invalid attachment kind"},
+		{map[string]any{"thread_id": "ses_1", "text": nil}, "text must be a string"},
+		{map[string]any{"thread_id": "ses_1", "text": "hi", "effort": ""}, "invalid reasoning effort"},
+	} {
+		_, err := runCommand(t, client, "/work", "turn/start", test.params)
+		if err == nil || err.Error() != test.want {
+			t.Fatalf("%+v: err=%v want %q", test.params, err, test.want)
+		}
+	}
+}
+
+func TestTurnInterruptPostsAndValidatesTurn(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session/ses_1/interrupt" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResponse(w, http.StatusOK, `{"interrupted":false}`)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "turn/interrupt", map[string]any{"thread_id": "ses_1", "turn_id": "msg_user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{}`)
+	if len(*requests) != 1 || (*requests)[0].Path != "/api/session/ses_1/interrupt" {
+		t.Fatalf("requests=%+v", *requests)
+	}
+	if _, err := runCommand(t, client, "/work", "turn/interrupt", map[string]any{"thread_id": "ses_1"}); err == nil || err.Error() != "turn_id must be a nonempty single-line string up to 256 bytes" {
+		t.Fatalf("missing turn_id err=%v", err)
+	}
+}
+
+func TestTurnStartBusyErrorIsSanitized(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path == "/api/session/ses_1/prompt" {
+			jsonResponse(w, http.StatusConflict, `{"error":"SECRET provider detail"}`)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	_, err := runCommand(t, client, "/work", "turn/start", map[string]any{"thread_id": "ses_1", "text": "hi"})
+	if err == nil {
+		t.Fatal("expected a busy error")
+	}
+	if strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "provider detail") {
+		t.Fatalf("error leaked upstream body: %v", err)
+	}
+	if !strings.Contains(err.Error(), "status 409") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestServeEventsRoutesInterruptAheadOfPendingTurn(t *testing.T) {
+	release := make(chan struct{})
+	interrupted := make(chan struct{})
+	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+		switch method {
+		case callTurnStart:
+			<-release
+			return json.RawMessage(`{"turn":{"id":"msg_user","status":"inProgress"}}`), nil
+		case callTurnInterrupt:
+			close(interrupted)
+			return json.RawMessage(`{}`), nil
+		default:
+			return json.RawMessage(`{}`), nil
+		}
+	}
+	input := strings.NewReader(
+		"{\"id\":1,\"method\":\"turn/start\",\"params\":{\"thread_id\":\"ses_1\",\"text\":\"hi\"}}\n" +
+			"{\"id\":2,\"method\":\"turn/interrupt\",\"params\":{\"thread_id\":\"ses_1\",\"turn_id\":\"msg_user\"}}\n",
+	)
+	var output bytes.Buffer
+	done := make(chan error, 1)
+	go func() { done <- ServeEvents(context.Background(), input, &output, "/work", call) }()
+
+	select {
+	case <-interrupted:
+		// turn/interrupt reached the call seam while turn/start was blocked.
+	case <-time.After(2 * time.Second):
+		close(release)
+		t.Fatal("turn/interrupt was starved behind the pending turn/start")
+	}
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeEvents did not return")
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"id":2`) || !strings.Contains(lines[1], `"id":1`) {
+		t.Fatalf("output=%q", output.String())
 	}
 }
 

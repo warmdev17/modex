@@ -154,6 +154,97 @@ func TestClientListModelsRetriesColdCatalog(t *testing.T) {
 	}
 }
 
+func TestClientPromptAppliesSessionSettingsAndSendsV2Body(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/session/ses_1/model", "/api/session/ses_1/agent":
+			jsonResponse(w, http.StatusOK, `{}`)
+		case "/api/session/ses_1/prompt":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"msg_user","type":"user"}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	userID, err := client.Prompt(context.Background(), "ses_1", "hi",
+		[]promptFile{{URI: "file:///tmp/a.png", Name: "a.png"}},
+		&modelRef{ProviderID: "p1", ModelID: "m1"}, "builder")
+	if err != nil || userID != "msg_user" {
+		t.Fatalf("userID=%q err=%v", userID, err)
+	}
+	want := []recordedRequest{
+		{"POST", "/api/session/ses_1/model", "", `{"model":{"id":"m1","providerID":"p1"}}`},
+		{"POST", "/api/session/ses_1/agent", "", `{"agent":"builder"}`},
+		{"POST", "/api/session/ses_1/prompt", "", `{"files":[{"uri":"file:///tmp/a.png","name":"a.png"}],"text":"hi"}`},
+	}
+	if !reflect.DeepEqual(*requests, want) {
+		t.Fatalf("requests=%+v\nwant=%+v", *requests, want)
+	}
+}
+
+func TestClientPromptFetchesLatestUserMessage(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.URL.Path {
+		case "/api/session/ses_1/prompt":
+			jsonResponse(w, http.StatusOK, `{"data":{}}`)
+		case "/api/session/ses_1/message":
+			jsonResponse(w, http.StatusOK, `{"data":[
+				{"id":"msg_latest","type":"user","text":"hi","time":{"created":2}},
+				{"id":"msg_old","type":"user","text":"old","time":{"created":1}}
+			],"cursor":{"previous":null,"next":null}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	userID, err := client.Prompt(context.Background(), "ses_1", "hi", nil, nil, "")
+	if err != nil || userID != "msg_latest" {
+		t.Fatalf("userID=%q err=%v", userID, err)
+	}
+	if len(*requests) != 2 || (*requests)[1].Query != "limit=5&order=desc" {
+		t.Fatalf("requests=%+v", *requests)
+	}
+}
+
+func TestClientPromptSanitizesBusyError(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path == "/api/session/ses_1/prompt" {
+			jsonResponse(w, http.StatusConflict, `{"error":"SECRET prompt text"}`)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	_, err := client.Prompt(context.Background(), "ses_1", "hi", nil, nil, "")
+	if err == nil {
+		t.Fatal("expected a busy error")
+	}
+	if strings.Contains(err.Error(), "SECRET") || strings.Contains(err.Error(), "prompt text") {
+		t.Fatalf("error leaked the upstream body: %v", err)
+	}
+	if !strings.Contains(err.Error(), "status 409") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestClientInterruptReportsFlag(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session/ses_1/interrupt" {
+			http.NotFound(w, r)
+			return
+		}
+		jsonResponse(w, http.StatusOK, `{"interrupted":true}`)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	interrupted, err := client.Interrupt(context.Background(), "ses_1")
+	if err != nil || !interrupted {
+		t.Fatalf("interrupted=%v err=%v", interrupted, err)
+	}
+	if len(*requests) != 1 || (*requests)[0].Method != http.MethodPost {
+		t.Fatalf("requests=%+v", *requests)
+	}
+}
+
 func TestClientSanitizesUpstreamErrors(t *testing.T) {
 	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		jsonResponse(w, http.StatusInternalServerError, `{"error":"SECRET-TOKEN and prompt text"}`)

@@ -11,7 +11,6 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/warmdev/modex/internal/bridge"
 )
@@ -35,8 +34,6 @@ var unsupportedMethods = map[string]bool{
 	"projects/list":       true,
 	"projects/create":     true,
 	"references/list":     true,
-	"turn/start":          true,
-	"turn/interrupt":      true,
 	"decision/respond":    true,
 }
 
@@ -71,6 +68,18 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		allowed["project_id"] = true
 		allowed["model"] = true
 		allowed["permission_mode"] = true
+		allowed["workspace"] = true
+	case "turn/start":
+		allowed["references"] = true
+		allowed["attachments"] = true
+		allowed["thread_id"] = true
+		allowed["text"] = true
+		allowed["model"] = true
+		allowed["effort"] = true
+		allowed["workspace"] = true
+	case "turn/interrupt":
+		allowed["thread_id"] = true
+		allowed["turn_id"] = true
 		allowed["workspace"] = true
 	case "threads/read":
 		allowed["workspace"] = true
@@ -175,25 +184,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			}
 			modelID = parsed
 		}
-		var model *modelRef
-		if modelID != "" {
-			provider, id := splitModel(modelID)
-			if provider == "" {
-				models, err := callInto[[]modelRef](ctx, call, callModels, nil, emit)
-				if err != nil {
-					return nil, err
-				}
-				for _, candidate := range models {
-					if candidate.ModelID == id {
-						provider = candidate.ProviderID
-						break
-					}
-				}
-			}
-			if provider == "" {
-				return nil, errors.New("model is not available for the opencode backend")
-			}
-			model = &modelRef{ProviderID: provider, ModelID: id}
+		model, err := resolveModelChoice(ctx, call, modelID, emit)
+		if err != nil {
+			return nil, err
 		}
 		params := map[string]any{"directory": cwd, "agent": ""}
 		if model != nil {
@@ -208,6 +201,98 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, errors.New("invalid thread response")
 		}
 		return map[string]any{"thread": projectThread(created), "model": created.Model.ID}, nil
+	case "turn/start":
+		id, err := requiredThreadID(p)
+		if err != nil {
+			return nil, err
+		}
+		var text string
+		rawText, ok := p["text"]
+		if !ok || string(rawText) == "null" || json.Unmarshal(rawText, &text) != nil {
+			return nil, errors.New("text must be a string")
+		}
+		if raw, ok := p["references"]; ok && string(raw) != "null" {
+			var references []json.RawMessage
+			if json.Unmarshal(raw, &references) != nil {
+				return nil, errors.New("invalid references")
+			}
+			if len(references) > 0 {
+				return nil, errors.New("references are unsupported by the opencode backend")
+			}
+		}
+		var files []promptFile
+		if raw, ok := p["attachments"]; ok && string(raw) != "null" {
+			var attachments []struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			}
+			if json.Unmarshal(raw, &attachments) != nil || len(attachments) > 32 {
+				return nil, errors.New("invalid attachments")
+			}
+			for _, attachment := range attachments {
+				if !filepath.IsAbs(attachment.Path) || len(attachment.Path) > 32768 || strings.ContainsAny(attachment.Path, "\r\n\x00") {
+					return nil, errors.New("attachment path must be an absolute path")
+				}
+				if attachment.Kind != "" && attachment.Kind != "image" && attachment.Kind != "file" {
+					return nil, errors.New("invalid attachment kind")
+				}
+				// Live v2 PromptInput.FileAttachment takes uri/name; MIME is
+				// inferred by OpenCode and is not accepted in this body.
+				files = append(files, promptFile{URI: "file://" + attachment.Path, Name: filepath.Base(attachment.Path)})
+			}
+		}
+		modelID := ""
+		if raw, ok := p["model"]; ok {
+			parsed, err := modelParam(raw)
+			if err != nil {
+				return nil, err
+			}
+			modelID = parsed
+		}
+		if raw, ok := p["effort"]; ok && string(raw) != "null" {
+			var effort string
+			if json.Unmarshal(raw, &effort) != nil || strings.TrimSpace(effort) == "" || len(effort) > 64 || strings.ContainsAny(effort, "\r\n\x00") {
+				return nil, errors.New("invalid reasoning effort")
+			}
+		}
+		model, err := resolveModelChoice(ctx, call, modelID, emit)
+		if err != nil {
+			return nil, err
+		}
+		params := map[string]any{"sessionID": id, "text": text, "directory": cwd}
+		if len(files) > 0 {
+			params["files"] = files
+		}
+		if model != nil {
+			params["providerID"] = model.ProviderID
+			params["modelID"] = model.ModelID
+		}
+		raw, err := call(ctx, callTurnStart, params, emit)
+		if err != nil {
+			return nil, err
+		}
+		var result struct {
+			Turn struct {
+				ID string `json:"id"`
+			} `json:"turn"`
+		}
+		if json.Unmarshal(raw, &result) != nil || result.Turn.ID == "" {
+			return nil, errors.New("invalid turn response")
+		}
+		return map[string]any{"turn": map[string]any{"id": result.Turn.ID, "status": "inProgress"}}, nil
+	case "turn/interrupt":
+		id, err := requiredThreadID(p)
+		if err != nil {
+			return nil, err
+		}
+		var turn string
+		if raw, ok := p["turn_id"]; !ok || json.Unmarshal(raw, &turn) != nil || strings.TrimSpace(turn) == "" || len(turn) > 256 || strings.ContainsAny(turn, "\r\n\x00") {
+			return nil, errors.New("turn_id must be a nonempty single-line string up to 256 bytes")
+		}
+		if _, err := call(ctx, callTurnInterrupt, map[string]any{"sessionID": id}, emit); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, nil
 	case "threads/read":
 		id, err := requiredThreadID(p)
 		if err != nil {
@@ -223,7 +308,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		limit := 0
 		hasLimit := false
 		if raw, ok := p["limit"]; ok {
-			limit, err = limitParam(raw)
+			limit, err = historyLimitParam(raw)
 			if err != nil {
 				return nil, err
 			}
@@ -236,8 +321,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 				return nil, err
 			}
 		}
-		if !include && (hasLimit || cursor != "") {
-			return nil, errors.New("history limit and cursor require include_turns")
+		if cursor != "" && !hasLimit {
+			return nil, errors.New("history cursor requires limit")
+		}
+		if hasLimit && !include {
+			return nil, errors.New("history limit must be 1..50 with include_turns")
 		}
 		thread, err := readSession(ctx, call, id, cwd, emit)
 		if err != nil {
@@ -387,6 +475,9 @@ func reverseMessages(messages []message) {
 // message (text, tool output, outcome, timing) changes.
 func historyRevision(threadID string, messages []message) string {
 	hash := sha256.New()
+	// Bump the prefix when the projection changes so Android invalidates its
+	// cached pages even if the upstream content is identical.
+	hash.Write([]byte("opencode-history-v1\x00"))
 	hash.Write([]byte(threadID))
 	hash.Write([]byte{0})
 	for _, item := range messages {
@@ -423,9 +514,21 @@ func limitParam(raw json.RawMessage) (int, error) {
 	return limit, nil
 }
 
+// historyLimitParam mirrors bridge history paging (1..50).
+func historyLimitParam(raw json.RawMessage) (int, error) {
+	var limit int
+	if json.Unmarshal(raw, &limit) != nil || limit < 1 || limit > 50 {
+		return 0, errors.New("history limit must be an integer from 1 to 50")
+	}
+	return limit, nil
+}
+
 func cursorParam(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
 	var cursor string
-	if string(raw) == "null" || json.Unmarshal(raw, &cursor) != nil || len(cursor) > 8192 || strings.ContainsAny(cursor, "\r\n\x00") {
+	if json.Unmarshal(raw, &cursor) != nil || len(cursor) > 8192 || strings.ContainsAny(cursor, "\r\n\x00") {
 		return "", errors.New("cursor must be a string")
 	}
 	return cursor, nil
@@ -446,6 +549,31 @@ func splitModel(model string) (provider, id string) {
 	return "", model
 }
 
+// resolveModelChoice accepts either provider/model or a bare model id from the
+// catalogue. An empty value means "use the session/default model".
+func resolveModelChoice(ctx context.Context, call EventCaller, model string, emit func(string, json.RawMessage)) (*modelRef, error) {
+	if model == "" {
+		return nil, nil
+	}
+	provider, id := splitModel(model)
+	if provider == "" {
+		models, err := callInto[[]modelRef](ctx, call, callModels, nil, emit)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range models {
+			if candidate.ModelID == id {
+				provider = candidate.ProviderID
+				break
+			}
+		}
+	}
+	if provider == "" {
+		return nil, errors.New("model is not available for the opencode backend")
+	}
+	return &modelRef{ProviderID: provider, ModelID: id}, nil
+}
+
 func Serve(ctx context.Context, in io.Reader, out io.Writer, cwd string, call Caller) error {
 	return ServeEvents(ctx, in, out, cwd, func(ctx context.Context, method string, params any, _ func(string, json.RawMessage)) (json.RawMessage, error) {
 		return call(ctx, method, params)
@@ -453,55 +581,52 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cwd string, call Ca
 }
 
 // ServeEvents reads Modex commands from in and writes framed replies to out.
-// M2 emits no events; emit is threaded through so M3 can stream without
-// changing the dispatch signature.
 func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, call EventCaller) error {
+	return ServeEventsWithWriter(ctx, in, cwd, call, NewWriter(out))
+}
+
+// ServeEventsWithWriter lets the host share one framed writer between command
+// replies and the SSE event stream. turn/interrupt is handled out-of-band so a
+// long turn/start cannot starve it, mirroring the Codex bridge.
+func ServeEventsWithWriter(ctx context.Context, in io.Reader, cwd string, call EventCaller, writer *Writer) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 4096), 4*1024*1024)
-	var outputMu sync.Mutex
-	var outputErr error
-	write := func(response []byte) {
-		outputMu.Lock()
-		defer outputMu.Unlock()
-		if outputErr == nil {
-			_, outputErr = out.Write(append(response, '\n'))
-		}
-	}
-	emit := func(method string, params json.RawMessage) {
-		if params == nil {
-			params = json.RawMessage("null")
-		}
-		response, err := json.Marshal(struct {
-			Event  string          `json:"event"`
-			Params json.RawMessage `json:"params"`
-		}{method, params})
-		if err == nil {
-			write(response)
-		}
-	}
-	respond := func(cmd bridge.Command, result any, err error) {
-		var response []byte
-		if err == nil {
-			response, err = bridge.EncodeResult(cmd.ID, result)
-		}
+	handle := func(cmd bridge.Command) {
+		result, err := HandleEvents(ctx, cwd, cmd, call, writer.Emit)
 		if err != nil {
-			response, _ = bridge.EncodeError(cmd.ID, err.Error())
+			writer.Error(cmd.ID, err)
+			return
 		}
-		write(response)
+		writer.Result(cmd.ID, result)
 	}
+	commands := make(chan bridge.Command, 16)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for cmd := range commands {
+			handle(cmd)
+		}
+	}()
 	for scanner.Scan() {
 		cmd, err := bridge.DecodeCommand(scanner.Bytes())
 		if err != nil {
-			respond(cmd, nil, err)
+			writer.Error(cmd.ID, err)
 			continue
 		}
-		result, err := HandleEvents(ctx, cwd, cmd, call, emit)
-		respond(cmd, result, err)
+		if cmd.Method == "turn/interrupt" || cmd.Method == "decision/respond" {
+			handle(cmd)
+			continue
+		}
+		select {
+		case commands <- cmd:
+		default:
+			writer.Error(cmd.ID, errors.New("command queue full; request not dispatched"))
+		}
 	}
+	close(commands)
+	<-done
 	if err := scanner.Err(); err != nil {
 		return err
 	}
-	outputMu.Lock()
-	defer outputMu.Unlock()
-	return outputErr
+	return writer.Err()
 }

@@ -24,8 +24,10 @@ type session struct {
 		Directory string `json:"directory"`
 	} `json:"location"`
 	Time struct {
-		Created int64 `json:"created"`
-		Updated int64 `json:"updated"`
+		Created int64  `json:"created"`
+		Updated int64  `json:"updated"`
+		Busy    *int64 `json:"busy"`
+		Idle    *int64 `json:"idle"`
 	} `json:"time"`
 }
 
