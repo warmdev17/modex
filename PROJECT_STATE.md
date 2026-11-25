@@ -2,11 +2,11 @@
 
 ## Live follow-ups during a Codex turn
 
-Updated 2026-11-25T16:25:58+07:00 on `feat/android-live-steering`, source `aedb1af`. [Plan](docs/superpowers/plans/2026-11-25-live-steering.md). Send uses native `turn/steer` during ordinary active turns, with separate Stop and acknowledgments that clear only the submitted draft. Host validates the workspace and follows the CLI's explicit turn-race handling. Native user-message events provide the transcript entry.
+Updated 2026-11-25T19:44:00+07:00. [PR #34](https://github.com/warmdev17/modex/pull/34) merged as `77001e2d9165cd2ae83b862677b757b40b74eb9e`. Signed Android [dev.36](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.36), versionCode 40, uses native `turn/steer` during ordinary active turns, with separate Stop and acknowledgments that clear only the submitted draft. Host validates the workspace and follows the CLI's explicit turn-race handling. Native user-message events provide the transcript entry. [Plan](docs/superpowers/plans/2026-11-25-live-steering.md).
 
-- Source checks passed: `go test -race ./...`, `go vet ./...`, Android debug build, instrumentation build, 150 unit tests and lint (zero errors). The disposable Android 13 emulator passed the steering and existing draft safety smoke stages.
+- Source checks passed: `go test -race ./...`, `go vet ./...`, 150 Android release unit tests, release lint/build and all five hosted PR jobs. The signed Android 13 emulator upgrade from code 39 to 40 preserved encrypted synthetic state, and the distributable passed the steering smoke. Public assets were downloaded anonymously and matched SHA-256 `d7663e1ca68692289d2503ab19df0def5e9356df9b44e5305cce15cfc6d6ec44` and the established signing certificate.
 - An isolated supervisor with Codex CLI 0.169.0 and a local synthetic Responses provider verified the same turn ID on admission and the transcript event, and verified that the following model request contained the steer. Reviewer finding on pending draft persistence was addressed. Actual process death with a pending steer and a physical phone remain untested.
-- The feature needs a paired Android and host update. Debug artifacts are local. No signed upgrade, release, merge or host activation was performed. The UI preserves the draft when native steering rejects a turn that cannot be steered. That path does not implement the CLI's separate queue.
+- The paired host binary is active as PID 574090; the running executable matched tested SHA-256 `108a510bd8b878ec5c1363879a9f476f0cf0328860501ab9e9c26bcfcb50f6ac`. The UI preserves the draft when native steering rejects a turn that cannot be steered. That path does not implement the CLI's separate queue. Physical-phone installation, TalkBack and a real paid-provider steering turn remain untested.
 
 ## Android UX release batch
 
