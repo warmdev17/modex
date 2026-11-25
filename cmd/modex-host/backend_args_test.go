@@ -1,6 +1,9 @@
 package main
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os/exec"
 	"reflect"
 	"testing"
@@ -45,6 +48,61 @@ func TestServeArgsOpenCodeHasNoNativeSocket(t *testing.T) {
 	want := []string{"--serve", "--workspace", "/work", "--backend", "opencode", "--opencode", "opencode-bin"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%q", got)
+	}
+}
+
+// TestHandlersUseCommandBuilders guards the call-site wiring itself: a mutant
+// that inlines exec.Command/execCommand in superviseHost or startBackground
+// fails even though the helper unit tests still pass.
+func TestHandlersUseCommandBuilders(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "supervisor.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted := map[string]string{
+		"superviseHost":   "serveChildCommand",
+		"startBackground": "superviseChildCommand",
+	}
+	seen := map[string]bool{}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		want, ok := wanted[fn.Name.Name]
+		if !ok {
+			continue
+		}
+		seen[fn.Name.Name] = true
+		helper := false
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch fun := call.Fun.(type) {
+			case *ast.Ident:
+				if fun.Name == "execCommand" {
+					t.Errorf("%s calls execCommand directly instead of %s", fn.Name.Name, want)
+				}
+				if fun.Name == want {
+					helper = true
+				}
+			case *ast.SelectorExpr:
+				if pkg, ok := fun.X.(*ast.Ident); ok && pkg.Name == "exec" && fun.Sel.Name == "Command" {
+					t.Errorf("%s calls exec.Command directly instead of %s", fn.Name.Name, want)
+				}
+			}
+			return true
+		})
+		if !helper {
+			t.Errorf("%s does not call %s", fn.Name.Name, want)
+		}
+	}
+	for name := range wanted {
+		if !seen[name] {
+			t.Errorf("handler %s not found", name)
+		}
 	}
 }
 

@@ -128,7 +128,15 @@ func (d *Decisions) unsupportedInput(properties json.RawMessage) {
 	if sessionID == "" {
 		return
 	}
-	message := "OpenCode is waiting for an input form that this Modex build cannot display. Resolve it on the computer and retry."
+	d.failVisible(sessionID, "OpenCode is waiting for an input form that this Modex build cannot display. Resolve it on the computer and retry.")
+}
+
+// failVisible escalates an input/approval state the phone cannot handle so the
+// turn fails with a fixed notice instead of hanging silently.
+func (d *Decisions) failVisible(sessionID, message string) {
+	if sessionID == "" {
+		return
+	}
 	if d.OnUnsupportedInput != nil {
 		d.OnUnsupportedInput(sessionID, message)
 		return
@@ -149,35 +157,44 @@ func (d *Decisions) unsupportedInput(properties json.RawMessage) {
 	d.mu.Unlock()
 }
 
+func (d *Decisions) failPendingCap(sessionID string) {
+	d.failVisible(sessionID, "OpenCode requested too many pending approvals for this session. Review them on the computer and reconnect.")
+}
+
 func (d *Decisions) add(request permissionRequest, directory string) {
 	if request.ID == "" || request.SessionID == "" || request.Action == "" {
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.addLocked(request, directory)
+	capped := d.addLocked(request, directory)
+	d.mu.Unlock()
+	if capped {
+		d.failPendingCap(request.SessionID)
+	}
 }
 
-func (d *Decisions) addLocked(request permissionRequest, directory string) {
+// addLocked reports true only when the pending cap blocked a new request.
+func (d *Decisions) addLocked(request permissionRequest, directory string) bool {
 	if request.ID == "" || request.SessionID == "" || request.Action == "" {
-		return
+		return false
 	}
 	key := decisionKey(request.SessionID, request.ID)
 	if _, exists := d.pending[key]; exists {
-		return
+		return false
 	}
 	if len(d.pending) >= 128 {
-		return
+		return true
 	}
 	if directory == "" {
 		directory = d.defaultDir
 	}
 	decision := buildPermissionDecision(request, directory, d.turnID(request.SessionID))
 	if decision == nil {
-		return
+		return false
 	}
 	d.pending[key] = decision
 	d.emitRequiredLocked(decision)
+	return false
 }
 
 // resolve removes a request after an independent permission.replied event.
@@ -191,11 +208,16 @@ func (d *Decisions) resolve(sessionID, requestID string) {
 	if sessionID != "" {
 		key = decisionKey(sessionID, requestID)
 	} else {
+		// A session-less resolution is only safe when the request id is unique.
+		matches := 0
 		for candidate, decision := range d.pending {
 			if decision.requestID == requestID {
 				key = candidate
-				break
+				matches++
 			}
+		}
+		if matches != 1 {
+			return
 		}
 	}
 	decision, ok := d.pending[key]
@@ -258,6 +280,10 @@ func (d *Decisions) Answer(ctx context.Context, id string, result json.RawMessag
 		d.mu.Unlock()
 		return errors.New("decision must be accept, decline or cancel")
 	}
+	if decision.Method == "item/fileChange/requestApproval" && response.Decision == "accept" {
+		d.mu.Unlock()
+		return errors.New("decision not offered by OpenCode")
+	}
 	if !decisionOffers(decision.Context, response.Decision) {
 		d.mu.Unlock()
 		return errors.New("decision not offered by OpenCode")
@@ -306,8 +332,8 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 		return
 	}
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	current := map[string]bool{}
+	cappedSession := ""
 	for _, request := range response.Data {
 		if request.SessionID == "" {
 			request.SessionID = sessionID
@@ -316,7 +342,9 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 			continue
 		}
 		current[decisionKey(request.SessionID, request.ID)] = true
-		d.addLocked(request, directory)
+		if d.addLocked(request, directory) && cappedSession == "" {
+			cappedSession = request.SessionID
+		}
 	}
 	ids := make([]string, 0, len(d.pending))
 	for id := range d.pending {
@@ -330,6 +358,10 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 		}
 		delete(d.pending, id)
 		d.emitEvent("decision/resolved", map[string]string{"decision_id": id})
+	}
+	d.mu.Unlock()
+	if cappedSession != "" {
+		d.failPendingCap(cappedSession)
 	}
 }
 
@@ -380,35 +412,41 @@ func buildPermissionDecision(request permissionRequest, directory, turnID string
 		available = []string{"decline", "cancel"}
 	}
 	resources := sanitizeResources(request.Resources)
-	context := map[string]json.RawMessage{
-		"kind":               rawDecisionJSON(kind),
-		"availableDecisions": rawDecisionJSON(available),
-	}
-	if command := decisionText(strings.Join(resources, "\n"), 8192); command != "" {
-		context["command"] = rawDecisionJSON(command)
-	}
-	if cwd := decisionText(directory, 4096); cwd != "" {
-		context["cwd"] = rawDecisionJSON(cwd)
-	}
 	reason := decisionText(request.Message, 512)
 	if reason == "" {
 		reason = "OpenCode is waiting for permission to run this action."
 	}
-	context["reason"] = rawDecisionJSON(reason)
-	if len(request.Save) > 0 {
-		saves := sanitizeResources(request.Save)
-		if len(saves) > 16 {
-			saves = saves[:16]
+	context := map[string]json.RawMessage{}
+	if method == "item/fileChange/requestApproval" {
+		// Strict parity with bridge.Decisions: file-change cards carry only
+		// reason/grantRoot. Android hides accept for file mode regardless, so
+		// command/cwd/kind would add noise without enabling an action.
+		context["reason"] = rawDecisionJSON(reason)
+		if grant := grantRoot(resources, kind); grant != "" {
+			context["grantRoot"] = rawDecisionJSON(grant)
 		}
-		if len(saves) > 0 {
-			context["additionalPermissions"] = rawDecisionJSON(saves)
+	} else {
+		context["kind"] = rawDecisionJSON(kind)
+		context["availableDecisions"] = rawDecisionJSON(available)
+		if command := decisionText(strings.Join(resources, "\n"), 8192); command != "" {
+			context["command"] = rawDecisionJSON(command)
 		}
-	}
-	if network := networkApprovalContext(resources); network != nil {
-		context["networkApprovalContext"] = rawDecisionJSON(network)
-	}
-	if grant := grantRoot(resources, kind); grant != "" {
-		context["grantRoot"] = rawDecisionJSON(grant)
+		if cwd := decisionText(directory, 4096); cwd != "" {
+			context["cwd"] = rawDecisionJSON(cwd)
+		}
+		context["reason"] = rawDecisionJSON(reason)
+		if len(request.Save) > 0 {
+			saves := sanitizeResources(request.Save)
+			if len(saves) > 16 {
+				saves = saves[:16]
+			}
+			if len(saves) > 0 {
+				context["additionalPermissions"] = rawDecisionJSON(saves)
+			}
+		}
+		if network := networkApprovalContext(resources); network != nil {
+			context["networkApprovalContext"] = rawDecisionJSON(network)
+		}
 	}
 	itemID := ""
 	if request.Source != nil {

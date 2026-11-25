@@ -179,6 +179,8 @@ func TestStartProcessRemovesIsolatedDirOnDiscoveryFailure(t *testing.T) {
 	}
 }
 
+// Bounded by the select below; run with -timeout 120s (or larger) so a
+// regression reports the explicit 25s message instead of a package panic.
 func TestStartProcessDiscoveryFailureWithHungGrandchild(t *testing.T) {
 	dir := t.TempDir()
 	dataFile := filepath.Join(dir, "data-home")
@@ -234,6 +236,8 @@ func TestStartProcessDiscoveryFailureWithHungGrandchild(t *testing.T) {
 	}
 }
 
+// Bounded by the select below; run with -timeout 120s (or larger) so a
+// regression reports the explicit 4s message instead of a package panic.
 func TestCloseWithHungGrandchild(t *testing.T) {
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "grandchild.pid")

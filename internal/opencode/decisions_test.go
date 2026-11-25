@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -71,12 +72,8 @@ func TestDecisionsFilePermissionContext(t *testing.T) {
 		"turn_id":"msg_user",
 		"item_id":"",
 		"context":{
-			"command":"/srv/work/a.txt",
-			"cwd":"/srv/work",
-			"kind":"write",
 			"reason":"Allow edit?",
-			"grantRoot":"/srv/work",
-			"availableDecisions":["decline","cancel"]
+			"grantRoot":"/srv/work"
 		}
 	}`)
 }
@@ -323,6 +320,78 @@ func TestUnsupportedFormFailsTurnVisibly(t *testing.T) {
 	}
 	if id, active := synth.ActiveSession(); id != "" || active {
 		t.Fatalf("turn still in progress after unsupported input: %q,%v", id, active)
+	}
+}
+
+func TestDecisionCapFailsVisibly(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	store := NewDecisions("/work", collector.emit, synth.TurnID, func(context.Context, string, string, string) error { return nil })
+	synth.OnTurnComplete = store.Resolve
+	store.OnUnsupportedInput = synth.UnsupportedInput
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	for i := 0; i < 128; i++ {
+		store.Handle("permission.asked", perm(fmt.Sprintf("per_%d", i), "bash", "cmd"), "/work")
+	}
+	store.Handle("permission.asked", perm("per_overflow", "bash", "cmd"), "/work")
+
+	required := 0
+	failed := false
+	capNotice := ""
+	for _, event := range collector.snapshot() {
+		switch event.method {
+		case "decision/required":
+			required++
+		case "error":
+			var params struct {
+				Notice struct {
+					Category string `json:"category"`
+					Message  string `json:"message"`
+				} `json:"notice"`
+			}
+			_ = json.Unmarshal(event.params, &params)
+			if params.Notice.Category == "unsupported_input" && strings.Contains(params.Notice.Message, "too many pending approvals") {
+				capNotice = params.Notice.Message
+			}
+		case "turn/completed":
+			var params struct {
+				Turn struct {
+					Status string `json:"status"`
+				} `json:"turn"`
+			}
+			_ = json.Unmarshal(event.params, &params)
+			if params.Turn.Status == "failed" {
+				failed = true
+			}
+		}
+	}
+	if required != 128 || capNotice == "" || !failed {
+		t.Fatalf("cap was silent: required=%d notice=%q failed=%v", required, capNotice, failed)
+	}
+}
+
+func TestPermissionReplyWithoutSessionIsUnambiguous(t *testing.T) {
+	var replies []decisionReply
+	store, collector := decisionStore(t, &replies, nil)
+	store.Handle("permission.asked", json.RawMessage(`{"id":"per_1","sessionID":"ses_1","action":"bash","resources":["one"]}`), "/work")
+	store.Handle("permission.asked", json.RawMessage(`{"id":"per_1","sessionID":"ses_2","action":"bash","resources":["two"]}`), "/work")
+	store.Handle("permission.replied", json.RawMessage(`{"requestID":"per_1"}`), "/work")
+	if len(store.Pending()) != 2 {
+		t.Fatalf("ambiguous reply guessed a session: %v", store.Pending())
+	}
+	resolved := 0
+	for _, event := range collector.snapshot() {
+		if event.method == "decision/resolved" {
+			resolved++
+		}
+	}
+	if resolved != 0 {
+		t.Fatalf("ambiguous reply emitted %d resolutions", resolved)
+	}
+	store.Handle("permission.replied", json.RawMessage(`{"sessionID":"ses_2","requestID":"per_1"}`), "/work")
+	pending := store.Pending()
+	if len(pending) != 1 || pending[0].ID != "ses_1/per_1" {
+		t.Fatalf("wrong session resolved: %v", pending)
 	}
 }
 
