@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -159,6 +160,25 @@ func TestReasoningItemIDIsDistinctFromAgentMessage(t *testing.T) {
 	summary, _ := reasoningDone["summary"].([]any)
 	if len(summary) != 1 || summary[0] != "think" {
 		t.Fatalf("reasoning summary=%v", reasoningDone["summary"])
+	}
+}
+
+func TestTurnCompletionResolvesPendingDecisions(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	store := NewDecisions("/work", collector.emit, synth.TurnID, func(context.Context, string, string, string) error { return nil })
+	synth.OnTurnComplete = store.Resolve
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	store.Handle("permission.asked", json.RawMessage(`{"id":"per_1","sessionID":"ses_1","action":"bash","resources":["one"]}`), "/work")
+	if len(store.Pending()) != 1 {
+		t.Fatalf("pending=%v", store.Pending())
+	}
+	synth.Handle("session.execution.succeeded", json.RawMessage(`{"sessionID":"ses_1"}`))
+	if len(store.Pending()) != 0 {
+		t.Fatalf("turn completion left stale decisions: %v", store.Pending())
+	}
+	if !collector.hasMethod("decision/resolved") {
+		t.Fatal("turn completion did not emit decision/resolved")
 	}
 }
 

@@ -18,6 +18,10 @@ type Synthesizer struct {
 	defaultDir string
 	turns      map[string]*turnState
 	last       string
+
+	// OnTurnComplete drops pending decisions for a finished turn. It is set
+	// before serving starts (single-threaded setup).
+	OnTurnComplete func(sessionID, turnID string)
 }
 
 type turnState struct {
@@ -92,6 +96,32 @@ func (s *Synthesizer) MarkInterrupted(sessionID string) {
 	if state := s.turns[sessionID]; state != nil && !state.completed {
 		state.interrupted = true
 	}
+}
+
+// UnsupportedInput fails a turn visibly when OpenCode asks for a UI this
+// slice cannot render. The caller supplies fixed text; no form data is used.
+func (s *Synthesizer) UnsupportedInput(sessionID, message string) {
+	if message == "" {
+		message = "OpenCode is waiting for an input form that this Modex build cannot display. Resolve it on the computer and retry."
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.turns[sessionID]
+	if state == nil {
+		notice := map[string]any{"category": "unsupported_input", "message": message, "retrying": false}
+		s.emitEvent("error", map[string]any{
+			"threadId":  sessionID,
+			"turnId":    "",
+			"willRetry": false,
+			"notice":    notice,
+			"error":     map[string]string{"message": message},
+		})
+		return
+	}
+	if state.completed {
+		return
+	}
+	s.completeWithNotice(state, "failed", "unsupported_input", message)
 }
 
 // TurnID returns the user message id of the session's current/last turn so
@@ -598,6 +628,10 @@ func (s *Synthesizer) completeTool(state *turnState, toolID, output, status stri
 }
 
 func (s *Synthesizer) complete(state *turnState, status string) {
+	s.completeWithNotice(state, status, "", "")
+}
+
+func (s *Synthesizer) completeWithNotice(state *turnState, status, category, message string) {
 	if state.completed {
 		return
 	}
@@ -624,8 +658,13 @@ func (s *Synthesizer) complete(state *turnState, status string) {
 		}
 	}
 	if status == "failed" {
-		message := "OpenCode could not complete this turn. Review the conversation before trying again."
-		notice := map[string]any{"category": "turn_failed", "message": message, "retrying": false}
+		if category == "" {
+			category = "turn_failed"
+		}
+		if message == "" {
+			message = "OpenCode could not complete this turn. Review the conversation before trying again."
+		}
+		notice := map[string]any{"category": category, "message": message, "retrying": false}
 		s.emitEvent("error", map[string]any{
 			"threadId":  state.sessionID,
 			"turnId":    state.userID,
@@ -642,6 +681,9 @@ func (s *Synthesizer) complete(state *turnState, status string) {
 		"threadId": state.sessionID,
 		"turn":     map[string]any{"id": state.userID, "status": status, "durationMs": duration},
 	})
+	if s.OnTurnComplete != nil {
+		s.OnTurnComplete(state.sessionID, state.userID)
+	}
 }
 
 func (s *Synthesizer) handleLegacyPart(state *turnState, data eventData) {

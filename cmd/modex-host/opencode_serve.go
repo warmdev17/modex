@@ -32,6 +32,8 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 	decisions := opencode.NewDecisions(cwd, writer.Emit, synth.TurnID, func(replyCtx context.Context, sessionID, requestID, decision string) error {
 		return client.ReplyPermission(replyCtx, sessionID, requestID, decision)
 	})
+	synth.OnTurnComplete = decisions.Resolve
+	decisions.OnUnsupportedInput = synth.UnsupportedInput
 
 	streamCtx, cancelStream := context.WithCancel(ctx)
 	defer cancelStream()

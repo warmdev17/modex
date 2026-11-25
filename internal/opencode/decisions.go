@@ -26,6 +26,7 @@ type Decision struct {
 	Context  map[string]json.RawMessage `json:"context"`
 
 	sessionID string
+	requestID string
 }
 
 type permissionRequest struct {
@@ -51,6 +52,11 @@ type Decisions struct {
 	turnID     func(string) string
 	defaultDir string
 	pending    map[string]*Decision
+
+	// OnUnsupportedInput surfaces an input request this slice cannot render
+	// (form.created / unknown *.asked) so the turn fails visibly instead of
+	// hanging. It must not receive raw form data.
+	OnUnsupportedInput func(sessionID, message string)
 }
 
 func NewDecisions(defaultDir string, emit func(string, json.RawMessage), turnID func(string) string, reply func(context.Context, string, string, string) error) *Decisions {
@@ -69,9 +75,9 @@ func NewDecisions(defaultDir string, emit func(string, json.RawMessage), turnID 
 	}
 }
 
-// Handle consumes permission SSE events. Form events are deliberately ignored:
-// OpenCode 2.4.x has no /api/question endpoint, so Codex-shaped questions are
-// unsupported (they are answered with a clear error from Answer).
+// Handle consumes permission SSE events. OpenCode 2.4.x has no /api/question
+// endpoint; form.created and unknown *.asked inputs fail the turn visibly
+// through OnUnsupportedInput instead of stalling it silently.
 func (d *Decisions) Handle(typ string, properties json.RawMessage, directory string) {
 	switch typ {
 	case "permission.asked", "permission.updated":
@@ -82,12 +88,65 @@ func (d *Decisions) Handle(typ string, properties json.RawMessage, directory str
 		d.add(request, directory)
 	case "permission.replied":
 		var event struct {
+			SessionID string `json:"sessionID"`
 			RequestID string `json:"requestID"`
 		}
 		if json.Unmarshal(properties, &event) == nil {
-			d.resolve(event.RequestID)
+			d.resolve(event.SessionID, event.RequestID)
+		}
+	case "form.created", "question.created", "question.asked", "input.asked":
+		d.unsupportedInput(properties)
+	default:
+		if strings.HasSuffix(typ, ".asked") {
+			d.unsupportedInput(properties)
 		}
 	}
+}
+
+// unsupportedInput fails a turn visibly when OpenCode asks for a UI this
+// slice cannot render. Only fixed text is emitted; form fields are discarded.
+func (d *Decisions) unsupportedInput(properties json.RawMessage) {
+	var envelope struct {
+		SessionID string `json:"sessionID"`
+		Form      struct {
+			SessionID string `json:"sessionID"`
+		} `json:"form"`
+		Question struct {
+			SessionID string `json:"sessionID"`
+		} `json:"question"`
+		Input struct {
+			SessionID string `json:"sessionID"`
+		} `json:"input"`
+	}
+	_ = json.Unmarshal(properties, &envelope)
+	sessionID := envelope.SessionID
+	for _, candidate := range []string{envelope.Form.SessionID, envelope.Question.SessionID, envelope.Input.SessionID} {
+		if sessionID == "" {
+			sessionID = candidate
+		}
+	}
+	if sessionID == "" {
+		return
+	}
+	message := "OpenCode is waiting for an input form that this Modex build cannot display. Resolve it on the computer and retry."
+	if d.OnUnsupportedInput != nil {
+		d.OnUnsupportedInput(sessionID, message)
+		return
+	}
+	turnID := ""
+	if d.turnID != nil {
+		turnID = d.turnID(sessionID)
+	}
+	notice := map[string]any{"category": "unsupported_input", "message": message, "retrying": false}
+	d.mu.Lock()
+	d.emitEvent("error", map[string]any{
+		"threadId":  sessionID,
+		"turnId":    turnID,
+		"willRetry": false,
+		"notice":    notice,
+		"error":     map[string]string{"message": message},
+	})
+	d.mu.Unlock()
 }
 
 func (d *Decisions) add(request permissionRequest, directory string) {
@@ -103,7 +162,8 @@ func (d *Decisions) addLocked(request permissionRequest, directory string) {
 	if request.ID == "" || request.SessionID == "" || request.Action == "" {
 		return
 	}
-	if _, exists := d.pending[request.ID]; exists {
+	key := decisionKey(request.SessionID, request.ID)
+	if _, exists := d.pending[key]; exists {
 		return
 	}
 	if len(d.pending) >= 128 {
@@ -116,22 +176,61 @@ func (d *Decisions) addLocked(request permissionRequest, directory string) {
 	if decision == nil {
 		return
 	}
-	d.pending[decision.ID] = decision
+	d.pending[key] = decision
 	d.emitRequiredLocked(decision)
 }
 
 // resolve removes a request after an independent permission.replied event.
-func (d *Decisions) resolve(requestID string) {
+func (d *Decisions) resolve(sessionID, requestID string) {
 	if requestID == "" {
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if _, ok := d.pending[requestID]; !ok {
+	key := ""
+	if sessionID != "" {
+		key = decisionKey(sessionID, requestID)
+	} else {
+		for candidate, decision := range d.pending {
+			if decision.requestID == requestID {
+				key = candidate
+				break
+			}
+		}
+	}
+	decision, ok := d.pending[key]
+	if !ok {
 		return
 	}
-	delete(d.pending, requestID)
-	d.emitEvent("decision/resolved", map[string]string{"decision_id": requestID})
+	delete(d.pending, key)
+	d.emitEvent("decision/resolved", map[string]string{"decision_id": decision.ID})
+}
+
+// Resolve drops pending decisions when their turn completes. Decisions with no
+// turn id are treated as belonging to the completing turn so an unanswered
+// prompt cannot be replayed as a stale card after reconnect.
+func (d *Decisions) Resolve(sessionID, turnID string) {
+	if sessionID == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	keys := make([]string, 0, len(d.pending))
+	for key := range d.pending {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		decision := d.pending[key]
+		if decision.ThreadID != sessionID {
+			continue
+		}
+		if turnID != "" && decision.TurnID != "" && decision.TurnID != turnID {
+			continue
+		}
+		delete(d.pending, key)
+		d.emitEvent("decision/resolved", map[string]string{"decision_id": decision.ID})
+	}
 }
 
 // Answer maps Modex accept/decline/cancel to OpenCode once/reject. always is
@@ -165,6 +264,7 @@ func (d *Decisions) Answer(ctx context.Context, id string, result json.RawMessag
 	}
 	delete(d.pending, id)
 	sessionID := decision.sessionID
+	requestID := decision.requestID
 	d.mu.Unlock()
 
 	reply := "reject"
@@ -174,7 +274,7 @@ func (d *Decisions) Answer(ctx context.Context, id string, result json.RawMessag
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := d.reply(ctx, sessionID, id, reply); err != nil {
+	if err := d.reply(ctx, sessionID, requestID, reply); err != nil {
 		// The decision was consumed before delivery; never replay it.
 		return errors.New("decision delivery failed; do not replay")
 	}
@@ -215,7 +315,7 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 		if request.SessionID != sessionID {
 			continue
 		}
-		current[request.ID] = true
+		current[decisionKey(request.SessionID, request.ID)] = true
 		d.addLocked(request, directory)
 	}
 	ids := make([]string, 0, len(d.pending))
@@ -287,8 +387,8 @@ func buildPermissionDecision(request permissionRequest, directory, turnID string
 	if command := decisionText(strings.Join(resources, "\n"), 8192); command != "" {
 		context["command"] = rawDecisionJSON(command)
 	}
-	if directory != "" {
-		context["cwd"] = rawDecisionJSON(directory)
+	if cwd := decisionText(directory, 4096); cwd != "" {
+		context["cwd"] = rawDecisionJSON(cwd)
 	}
 	reason := decisionText(request.Message, 512)
 	if reason == "" {
@@ -315,14 +415,21 @@ func buildPermissionDecision(request permissionRequest, directory, turnID string
 		itemID = decisionText(request.Source.ID, 256)
 	}
 	return &Decision{
-		ID:        request.ID,
+		ID:        decisionKey(request.SessionID, request.ID),
 		Method:    method,
 		ThreadID:  request.SessionID,
 		TurnID:    turnID,
 		ItemID:    itemID,
 		Context:   context,
 		sessionID: request.SessionID,
+		requestID: request.ID,
 	}
+}
+
+// decisionKey scopes a permission id to its session. Reply URLs are
+// session-scoped, so the same request id in two sessions must not collide.
+func decisionKey(sessionID, requestID string) string {
+	return sessionID + "/" + requestID
 }
 
 func permissionKind(action string) string {
