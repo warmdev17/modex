@@ -40,12 +40,12 @@ var errNotListening = errors.New("opencode server did not report a listening add
 // idempotent; there is no separate flush for OpenCode, so both are symmetric.
 type Process struct {
 	cmd         *exec.Cmd
+	stdout      *os.File
 	baseURL     string
 	password    string
 	client      *http.Client
 	isolatedDir string
 	listening   chan int
-	stdoutDone  chan struct{}
 	waitDone    chan struct{}
 	once        sync.Once
 }
@@ -70,39 +70,41 @@ func StartProcess(ctx context.Context, binary, cwd string, env []string) (*Proce
 			return nil, errors.New("cannot create isolated opencode directory")
 		}
 	}
-	if env == nil {
-		env = os.Environ()
-	}
-	childEnv := append(filterEnv(env),
-		"OPENCODE_PASSWORD="+password,
-		"XDG_DATA_HOME="+dataDir,
-		"XDG_STATE_HOME="+stateDir,
-	)
-
 	cmd := exec.CommandContext(ctx, binary, "serve", "--port", "0")
 	cmd.Dir = cwd
-	cmd.Env = childEnv
+	cmd.Env = childEnvironment(env, password, dataDir, stateDir)
 	// Startup stderr may include credential-bearing URLs; never forward it.
-	cmd.Stderr = io.Discard
-	stdout, err := cmd.StdoutPipe()
+	// Leaving Stderr nil connects it directly to os.DevNull without an exec
+	// copying goroutine, which Wait would otherwise wait for (and a grandchild
+	// inheriting stderr would keep alive indefinitely).
+	stdout, writer, err := os.Pipe()
 	if err != nil {
 		_ = os.RemoveAll(isolatedDir)
 		return nil, errors.New("cannot create opencode output pipe")
 	}
+	// cmd.Stdout is a plain *os.File, so exec passes the descriptor straight to
+	// the child: cmd.Wait only waits for process exit, never for pipe EOF. A
+	// grandchild that inherited the write end therefore cannot block reaping.
+	cmd.Stdout = writer
 	if err = cmd.Start(); err != nil {
 		_ = stdout.Close()
+		_ = writer.Close()
 		_ = os.RemoveAll(isolatedDir)
 		return nil, errors.New("cannot start opencode executable")
 	}
+	// The child owns its descriptor now; drop the parent's write end so the
+	// scanner observes EOF once no writer remains.
+	_ = writer.Close()
 
 	p := &Process{
 		cmd:         cmd,
+		stdout:      stdout,
 		password:    password,
 		isolatedDir: isolatedDir,
 		listening:   make(chan int, 1),
-		stdoutDone:  make(chan struct{}),
 		waitDone:    make(chan struct{}),
 	}
+	go p.wait()
 	go p.scan(stdout)
 
 	var port int
@@ -127,15 +129,15 @@ func StartProcess(ctx context.Context, binary, cwd string, env []string) (*Proce
 		username: authUsername,
 		password: password,
 	}}
-	go p.wait()
 	return p, nil
 }
 
 // scan consumes stdout for the lifetime of the child. Startup waits for the
 // listening line; afterwards lines are drained so the child never blocks on a
-// full pipe.
+// full pipe. Closing the read end (kill/close) unblocks a scanner stuck behind
+// a grandchild that inherited the write end.
 func (p *Process) scan(stdout io.Reader) {
-	defer close(p.stdoutDone)
+	defer p.stdout.Close()
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 4096), 1<<20)
 	reported := false
@@ -153,23 +155,23 @@ func (p *Process) scan(stdout io.Reader) {
 	}
 }
 
-// wait reaps the child only after stdout has been fully drained, as required
-// by exec.Cmd with StdoutPipe.
+// wait reaps the direct child without waiting for stdout EOF, so a surviving
+// grandchild holding the pipe cannot delay Close or startup failure.
 func (p *Process) wait() {
-	<-p.stdoutDone
 	_ = p.cmd.Wait()
 	close(p.waitDone)
 }
 
-// kill terminates a child that failed during startup, reaps it and removes the
-// isolated directory. The success path returns a live *Process whose close()
-// owns its own cleanup, so this is never called twice for one directory.
+// kill terminates a child that failed during startup, unblocks the stdout
+// scanner, reaps the child and removes the isolated directory. The success
+// path returns a live *Process whose close() owns its own cleanup, so this is
+// never called twice for one directory.
 func (p *Process) kill() {
+	_ = p.stdout.Close()
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 	}
-	<-p.stdoutDone
-	_ = p.cmd.Wait()
+	<-p.waitDone
 	_ = os.RemoveAll(p.isolatedDir)
 }
 
@@ -193,6 +195,8 @@ func (p *Process) close() {
 			}
 			<-p.waitDone
 		}
+		// Unblock the scanner even if a grandchild still holds the write end.
+		_ = p.stdout.Close()
 		_ = os.RemoveAll(p.isolatedDir)
 	})
 }
@@ -209,6 +213,21 @@ func randomPassword() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(data[:]), nil
+}
+
+// childEnvironment builds the child environment: the caller's environment
+// (usually os.Environ(), keeping provider auth/config) with the per-process
+// password and isolated XDG data/state directories overriding any inherited
+// values.
+func childEnvironment(env []string, password, dataDir, stateDir string) []string {
+	if env == nil {
+		env = os.Environ()
+	}
+	return append(filterEnv(env),
+		"OPENCODE_PASSWORD="+password,
+		"XDG_DATA_HOME="+dataDir,
+		"XDG_STATE_HOME="+stateDir,
+	)
 }
 
 // filterEnv drops inherited values the host must override to guarantee the

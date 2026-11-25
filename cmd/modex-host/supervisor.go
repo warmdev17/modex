@@ -235,7 +235,11 @@ func startBackground(cwd string, b backendSpec, dir string) error {
 				return nil
 			}
 		case <-done:
-			return errors.New("supervisor exited during startup; check state ownership and Codex configuration")
+			backendName := "Codex"
+			if b.kind == "opencode" {
+				backendName = "opencode"
+			}
+			return fmt.Errorf("supervisor exited during startup; check state ownership and %s configuration", backendName)
 		case <-deadline.C:
 			_ = child.Process.Signal(os.Interrupt)
 			select {

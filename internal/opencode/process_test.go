@@ -9,8 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // writeFake creates a minimal `opencode` replacement. Tests skip on Windows
@@ -98,6 +101,53 @@ func TestStartProcessDoesNotLeakPasswordInError(t *testing.T) {
 	}
 }
 
+func TestChildEnvironmentReplacesParentCredentials(t *testing.T) {
+	got := childEnvironment([]string{
+		"OPENCODE_PASSWORD=parent",
+		"XDG_DATA_HOME=/parent/data",
+		"XDG_STATE_HOME=/parent/state",
+		"NEUTRAL=kept",
+	}, "child-password", "/iso/data", "/iso/state")
+
+	counts := map[string]int{}
+	values := map[string][]string{}
+	for _, kv := range got {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok {
+			continue
+		}
+		counts[key]++
+		values[key] = append(values[key], value)
+	}
+	for _, tt := range []struct{ key, want string }{
+		{"OPENCODE_PASSWORD", "child-password"},
+		{"XDG_DATA_HOME", "/iso/data"},
+		{"XDG_STATE_HOME", "/iso/state"},
+	} {
+		if counts[tt.key] != 1 {
+			t.Fatalf("%s entries=%d want 1", tt.key, counts[tt.key])
+		}
+		if values[tt.key][0] != tt.want {
+			t.Fatalf("%s=%q want %q", tt.key, values[tt.key][0], tt.want)
+		}
+	}
+	if counts["NEUTRAL"] != 1 || values["NEUTRAL"][0] != "kept" {
+		t.Fatalf("neutral variable lost: %v", values["NEUTRAL"])
+	}
+}
+
+func TestFilterEnvRemovesHostOverrides(t *testing.T) {
+	got := filterEnv([]string{
+		"OPENCODE_PASSWORD=parent",
+		"XDG_DATA_HOME=/parent/data",
+		"XDG_STATE_HOME=/parent/state",
+		"NEUTRAL=kept",
+	})
+	if len(got) != 1 || got[0] != "NEUTRAL=kept" {
+		t.Fatalf("env=%q", got)
+	}
+}
+
 func TestStartProcessRemovesIsolatedDirOnDiscoveryFailure(t *testing.T) {
 	dir := t.TempDir()
 	dataEnvFile := filepath.Join(dir, "data-home")
@@ -127,6 +177,85 @@ func TestStartProcessRemovesIsolatedDirOnDiscoveryFailure(t *testing.T) {
 	if _, statErr := os.Stat(isolated); !os.IsNotExist(statErr) {
 		t.Fatalf("isolated directory was not removed after failure: %v", statErr)
 	}
+}
+
+func TestStartProcessDiscoveryFailureWithHungGrandchild(t *testing.T) {
+	dir := t.TempDir()
+	dataFile := filepath.Join(dir, "data-home")
+	pidFile := filepath.Join(dir, "grandchild.pid")
+	fake := writeFake(t, fmt.Sprintf(
+		"printenv XDG_DATA_HOME > '%s'\nsleep 120 &\necho $! > '%s'\nexit 0\n",
+		dataFile, pidFile))
+	defer killPID(t, pidFile)
+
+	start := time.Now()
+	p, err := StartProcess(context.Background(), fake, t.TempDir(), os.Environ())
+	elapsed := time.Since(start)
+	if err == nil {
+		if p != nil {
+			p.Close()
+		}
+		t.Fatal("expected a discovery failure")
+	}
+	// Without a bounded stdout drain this would wait for the grandchild (120s).
+	if elapsed > 25*time.Second {
+		t.Fatalf("StartProcess was blocked by inherited stdout for %v", elapsed)
+	}
+	// The grandchild must still be alive, otherwise the scenario is not
+	// exercising the inherited-descriptor path.
+	if elapsed < 10*time.Second {
+		t.Fatalf("returned before the discovery deadline (%v); grandchild did not hold stdout", elapsed)
+	}
+	raw, readErr := os.ReadFile(dataFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	isolated := filepath.Dir(strings.TrimSpace(string(raw)))
+	if !strings.HasPrefix(filepath.Base(isolated), "modex-opencode-") {
+		t.Fatalf("unexpected isolated directory %q", isolated)
+	}
+	if _, statErr := os.Stat(isolated); !os.IsNotExist(statErr) {
+		t.Fatalf("isolated directory was not removed after failure: %v", statErr)
+	}
+}
+
+func TestCloseWithHungGrandchild(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "grandchild.pid")
+	fake := writeFake(t, fmt.Sprintf(
+		"trap '' TERM\nsleep 120 &\necho $! > '%s'\nprintf 'server listening on http://127.0.0.1:41236\\n'\nwait\n",
+		pidFile))
+	defer killPID(t, pidFile)
+
+	p, err := StartProcess(context.Background(), fake, t.TempDir(), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	p.Close()
+	elapsed := time.Since(start)
+	// 2s SIGTERM grace plus reaping; a pipe-EOF gate would hang for 120s.
+	if elapsed > 4*time.Second {
+		t.Fatalf("Close was blocked by inherited stdout for %v", elapsed)
+	}
+	if _, statErr := os.Stat(p.isolatedDir); !os.IsNotExist(statErr) {
+		t.Fatalf("isolated directory was not removed: %v", statErr)
+	}
+}
+
+// killPID removes a grandchild a fake opencode left behind so tests do not
+// accumulate long-lived sleep processes.
+func killPID(t *testing.T, path string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return
+	}
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }
 
 func TestCloseIdleRemovesIsolatedDirectory(t *testing.T) {

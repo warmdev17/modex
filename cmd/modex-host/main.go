@@ -69,6 +69,21 @@ func run() error {
 	if *backend != "codex" && *backend != "opencode" {
 		return fmt.Errorf("--backend must be codex or opencode")
 	}
+	codexExplicit, opencodeExplicit := false, false
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "codex":
+			codexExplicit = true
+		case "opencode":
+			opencodeExplicit = true
+		}
+	})
+	if *backend == "codex" && opencodeExplicit {
+		return fmt.Errorf("--opencode requires --backend opencode")
+	}
+	if *backend == "opencode" && codexExplicit {
+		return fmt.Errorf("--codex requires --backend codex")
+	}
 	if *backend == "opencode" {
 		switch {
 		case *cli:

@@ -29,8 +29,11 @@ func TestSuperviseArgsKeepsCodexContract(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%q", got)
 	}
-	got = superviseArgs("/work", backendSpec{kind: "opencode", opencode: "opencode-bin", home: "/ignored"}, "/state")
-	want = []string{"--supervise", "--workspace", "/work", "--backend", "opencode", "--opencode", "opencode-bin", "--state-dir", "/state"}
+}
+
+func TestSuperviseArgsOpenCodeHasNoCodexHome(t *testing.T) {
+	got := superviseArgs("/work", backendSpec{kind: "opencode", opencode: "opencode-bin", home: "/ignored"}, "/state")
+	want := []string{"--supervise", "--workspace", "/work", "--backend", "opencode", "--opencode", "opencode-bin", "--state-dir", "/state"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("args=%q", got)
 	}
