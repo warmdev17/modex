@@ -210,6 +210,36 @@ python3 scripts/live_supervisor_smoke.py --host /tmp/modex-host --model gpt-6.1-
 
 The first uses a fake Codex process and checks auth, exclusive ownership, disconnect/replay, CLI attach, orphan cleanup and stop. The second makes a paid real-provider turn, detaches after acknowledgement, reconnects by instance/cursor, verifies exact streamed output, then stops the fixture supervisor.
 
+## OpenCode backend (optional)
+
+Codex remains the default agent backend. An installed OpenCode 2.4.x can be used
+instead:
+
+```sh
+/tmp/modex-host --background --workspace /absolute/path/to/project \
+  --state-dir /private/path/modex-state \
+  --backend opencode --opencode /path/to/opencode
+```
+
+`--backend` defaults to `codex`; `--opencode` defaults to `opencode`. OpenCode
+requires `--serve`, `--background` or `--supervise`; `--cli`, `--native-socket`,
+`--codex-home` and `--thread` are rejected with it. Attach and stop ignore
+`--backend`. `make host` still starts the Codex form because it passes
+`--codex`; use the binary directly for OpenCode. `make host-attach` and
+`make host-stop` are backend-agnostic.
+
+The host starts an isolated loopback `opencode serve` child with a random
+per-process password. Provider auth is inherited through `XDG_CONFIG_HOME`,
+while data and state use a temporary directory removed on close. Existing Modex
+methods return projected OpenCode sessions, messages, turns, models and
+permissions, so the current Android UI needs no changes in this slice. Plan
+mode, projects, references, fork/takeover/archive/delete, persistent approvals
+and Codex questions/forms are unsupported; file-change approvals are
+decline/cancel-only.
+
+See [OpenCode backend](docs/opencode-backend.md) for flags, the protocol
+mapping, event/decision behavior, the unsupported matrix and limitations.
+
 ## Shared desktop CLI and phone sessions (Linux/macOS)
 
 For a local development build, run `./scripts/build.sh` from this checkout.

@@ -1,5 +1,57 @@
 # Modex project state
 
+## OpenCode backend
+
+Updated 2026-11-26. Branch `feat/opencode-backend`. `modex-host` can now drive
+OpenCode 2.4.x behind the existing Modex protocol; Codex remains the default
+backend.
+
+Milestone commits in order: `d43fbe7`, `6d97255`, `57d7bc3`, `67488cd`,
+`a1b1ed2`, `6006d5a`, `71e9624`, `d42fd5d`, `0c5c1db`, `1291100`, `4588aca`.
+
+- Backend selection: `--backend codex|opencode` (default `codex`) and
+  `--opencode <binary>` (default `opencode`). OpenCode requires `--serve`,
+  `--background` or `--supervise`; `--cli`, `--native-socket`, `--codex-home`
+  and `--thread` are rejected. Attach and stop ignore `--backend`.
+- Isolated child: the host spawns `opencode serve --port 0` with a random
+  64-hex password via `OPENCODE_PASSWORD`, temporary `XDG_DATA_HOME` and
+  `XDG_STATE_HOME` removed on close, inherited `XDG_CONFIG_HOME` for provider
+  auth, and loopback-only HTTP. Credentials are never logged or placed in SSH
+  arguments.
+- Read surface: `status`, `threads/list`, `threads/start`, `threads/read`,
+  `threads/resume` and `models/list` are projected to the existing result
+  shapes, including chronological paged history with an opaque
+  `history_revision`.
+- Turn lifecycle: `turn/start` sends text and file attachments and applies the
+  selected model; `turn/interrupt` stops the active execution. Turn ids are the
+  accepted user message ids.
+- Streaming: OpenCode v2 SSE (`GET /api/event`) is synthesized into Codex-shaped
+  `turn/started`, item text/reasoning/tool events, `turn/completed`, decision
+  events and fixed `error` notices, with reconnect backoff, event dedupe and a
+  polling reconciler for dropped streams.
+- Permissions: `permission.asked`/`permission.replied` are projected into
+  `decision/required`, `decision/resolved` and `decision/reset`. Reply mapping is
+  `accept`→`once`, `decline`/`cancel`→`reject`; `always` is not exposed. Pending
+  approvals are capped at 128, and unsupported forms fail the turn visibly.
+- Explicitly unsupported methods return clear errors: `threads/archive`,
+  `threads/unarchive`, `threads/delete`, `threads/fork`, `threads/takeover`,
+  `threads/mode`, `threads/status`, `threads/permissions`, `plans/respond`,
+  `projects/list`, `projects/create` and `references/list`.
+
+Verified with the full Go suite, race detector, `go vet`, cross-builds, and a
+real isolated supervisor end-to-end run against OpenCode 2.4.1.
+
+Known limitations: no persistent `always` grants; file-change approvals are
+decline/cancel-only without a diff viewer; no plan mode, projects, references,
+fork, takeover or archive; `threads/list` does not surface server pagination;
+questions/forms are unsupported; a session model/provider is empty until a model
+is set; native CLI/TUI remains Codex-only; OpenCode data/state is temporary, so
+cross-restart session continuity is not claimed.
+
+Android is unchanged in this slice; no service restart was performed and no
+push/merge was executed. User-facing documentation is
+[docs/opencode-backend.md](docs/opencode-backend.md), linked from `README.md`.
+
 ## Usage dialog refresh
 
 Updated 2026-11-24T09:54:00+07:00 on `feat/previous-prompt-preview`, based on `fec8cdd`. Loading uses the same title icon slot as the idle state, so Usage keeps its layout while refreshing cached data.
