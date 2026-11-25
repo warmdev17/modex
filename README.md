@@ -27,9 +27,17 @@ Output contains workspace, provider, configured model and thread IDs/directories
 - Background completion/decision notifications through a minimal push relay.
 - API keys and execution stay on the target machine.
 
+### Future commercial direction: Modex Cloud
+
+- **Basic (free):** Modex Cloud relays the phone connection to the user's own computer, with no VPN setup or router port forwarding. The computer must remain on and run the agent; users bring their own agent account/API key. Limit to one connected host and one active agent, with file upload limits and basic notifications.
+- **Plus:** the same relay model, with up to three connected hosts and five active agents, higher upload limits and more notification customization. Users continue to bring their own agent account/API key.
+- **Pro:** Modex provides and operates a cloud machine for agent execution, so the user's personal computer can be off. Cross-agent workflows such as one agent planning, another implementing, and another reviewing or deploying are part of the intended value.
+
+For Basic/Plus, Modex Cloud is a connection relay; the user's computer remains the execution host. For Pro, Modex operates the execution machine. Exact pricing, resource quotas, upload allowances, and Pro provider-account/API-key handling and model billing remain undecided.
+
 Shared live ownership with the official CLI/Desktop is an unresolved compatibility requirement. Stored history listing is not live attachment. No automatic fork, lock deletion, uncertain-message replay or automatic approval is allowed.
 
-See [design](docs/design.md), [first milestone plan](docs/plan.md) and [current state](PROJECT_STATE.md). No license or commercial model has been selected yet.
+See [design](docs/design.md), [first milestone plan](docs/plan.md) and [current state](PROJECT_STATE.md). This is a future product direction, not an implemented cloud service or finalized commercial plan.
 
 ## Connection-scoped host bridge
 
