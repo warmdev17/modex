@@ -98,6 +98,37 @@ func TestStartProcessDoesNotLeakPasswordInError(t *testing.T) {
 	}
 }
 
+func TestStartProcessRemovesIsolatedDirOnDiscoveryFailure(t *testing.T) {
+	dir := t.TempDir()
+	dataEnvFile := filepath.Join(dir, "data-home")
+	fake := writeFake(t, fmt.Sprintf(
+		"printenv XDG_DATA_HOME > '%s'\nexit 1\n", dataEnvFile))
+
+	p, err := StartProcess(context.Background(), fake, t.TempDir(), os.Environ())
+	if err == nil {
+		if p != nil {
+			p.Close()
+		}
+		t.Fatal("expected a discovery failure")
+	}
+	raw, readErr := os.ReadFile(dataEnvFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	dataDir := strings.TrimSpace(string(raw))
+	if dataDir == "" {
+		t.Fatal("child did not report XDG_DATA_HOME")
+	}
+	// XDG_DATA_HOME points at <isolated>/data; its parent is the isolated dir.
+	isolated := filepath.Dir(dataDir)
+	if !strings.HasPrefix(filepath.Base(isolated), "modex-opencode-") {
+		t.Fatalf("unexpected isolated directory %q", isolated)
+	}
+	if _, statErr := os.Stat(isolated); !os.IsNotExist(statErr) {
+		t.Fatalf("isolated directory was not removed after failure: %v", statErr)
+	}
+}
+
 func TestCloseIdleRemovesIsolatedDirectory(t *testing.T) {
 	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41235\\n'\nexec sleep 60\n")
 	p, err := StartProcess(context.Background(), fake, t.TempDir(), os.Environ())

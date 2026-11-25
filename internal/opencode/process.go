@@ -161,13 +161,16 @@ func (p *Process) wait() {
 	close(p.waitDone)
 }
 
-// kill terminates a child that failed during startup and reaps it.
+// kill terminates a child that failed during startup, reaps it and removes the
+// isolated directory. The success path returns a live *Process whose close()
+// owns its own cleanup, so this is never called twice for one directory.
 func (p *Process) kill() {
 	if p.cmd.Process != nil {
 		_ = p.cmd.Process.Kill()
 	}
 	<-p.stdoutDone
 	_ = p.cmd.Wait()
+	_ = os.RemoveAll(p.isolatedDir)
 }
 
 // Close terminates the child with SIGTERM, then SIGKILL after a short grace,

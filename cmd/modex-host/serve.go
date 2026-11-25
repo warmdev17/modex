@@ -15,10 +15,6 @@ import (
 	"github.com/warmdev/modex/internal/bridge"
 )
 
-func serveHost(cwd string, b backendSpec, socket string) error {
-	return serveHostWithSocket(cwd, b, socket)
-}
-
 func serveHostWithSocket(cwd string, b backendSpec, socket string) error {
 	if b.kind == "opencode" {
 		// The HTTP/SSE read surface, streaming and decision bridge arrive in a

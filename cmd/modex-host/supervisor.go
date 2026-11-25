@@ -43,6 +43,19 @@ func serveArgs(cwd string, b backendSpec, nativeSocket string) []string {
 	return args
 }
 
+// superviseArgs builds the detached supervisor's arguments. The Codex form is
+// byte-identical to the historical layout; OpenCode has no codex home.
+func superviseArgs(cwd string, b backendSpec, dir string) []string {
+	if b.kind == "opencode" {
+		return []string{"--supervise", "--workspace", cwd, "--backend", "opencode", "--opencode", b.opencode, "--state-dir", dir}
+	}
+	args := []string{"--supervise", "--workspace", cwd, "--codex", b.codex, "--state-dir", dir}
+	if b.home != "" {
+		args = append(args, "--codex-home", b.home)
+	}
+	return args
+}
+
 func superviseHost(cwd string, b backendSpec, dir string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -194,13 +207,7 @@ func startBackground(cwd string, b backendSpec, dir string) error {
 	if err != nil {
 		return err
 	}
-	args := []string{"--supervise", "--workspace", cwd, "--codex", b.codex, "--state-dir", dir}
-	if b.kind == "opencode" {
-		args = []string{"--supervise", "--workspace", cwd, "--backend", "opencode", "--opencode", b.opencode, "--state-dir", dir}
-	} else if b.home != "" {
-		args = append(args, "--codex-home", b.home)
-	}
-	child := exec.Command(self, args...)
+	child := exec.Command(self, superviseArgs(cwd, b, dir)...)
 	child.Dir = cwd
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {

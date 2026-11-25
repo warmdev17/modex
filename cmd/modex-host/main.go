@@ -79,7 +79,11 @@ func run() error {
 			return fmt.Errorf("open code backend does not support --codex-home")
 		case *thread != "":
 			return fmt.Errorf("open code backend does not support --thread")
-		case !*serve && !*background && !*supervise && !*attach && !*stop:
+		case *attach:
+			return fmt.Errorf("open code backend does not support --attach")
+		case *stop:
+			return fmt.Errorf("open code backend does not support --stop")
+		case !*serve && !*background && !*supervise:
 			return fmt.Errorf("open code backend requires --serve, --background, or --supervise")
 		}
 	}
