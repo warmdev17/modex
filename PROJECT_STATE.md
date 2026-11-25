@@ -1,5 +1,13 @@
 # Modex project state
 
+## Live follow-ups during a Codex turn
+
+Updated 2026-11-25T16:25:58+07:00 on `feat/android-live-steering`, source `aedb1af`. [Plan](docs/superpowers/plans/2026-11-25-live-steering.md). Send uses native `turn/steer` during ordinary active turns, with separate Stop and acknowledgments that clear only the submitted draft. Host validates the workspace and follows the CLI's explicit turn-race handling. Native user-message events provide the transcript entry.
+
+- Source checks passed: `go test -race ./...`, `go vet ./...`, Android debug build, instrumentation build, 150 unit tests and lint (zero errors). The disposable Android 13 emulator passed the steering and existing draft safety smoke stages.
+- An isolated supervisor with Codex CLI 0.169.0 and a local synthetic Responses provider verified the same turn ID on admission and the transcript event, and verified that the following model request contained the steer. Reviewer finding on pending draft persistence was addressed. Actual process death with a pending steer and a physical phone remain untested.
+- The feature needs a paired Android and host update. Debug artifacts are local. No signed upgrade, release, merge or host activation was performed. The UI preserves the draft when native steering rejects a turn that cannot be steered. That path does not implement the CLI's separate queue.
+
 ## Android UX release batch
 
 Updated 2026-11-24 on `feat/android-ux-polish`, based on `2947736`. The batch adds Downloads export, inline host validation, remote file browsing, session menus and agent scrolling, and contextual notification permission.
