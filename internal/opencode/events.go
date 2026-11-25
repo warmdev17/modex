@@ -2,6 +2,8 @@ package opencode
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -24,14 +26,16 @@ type turnState struct {
 	dir       string
 	startedAt time.Time
 
-	assistantID      string
-	assistantStarted map[string]bool
-	text             map[string]string
-	finalText        map[string]string
-	reasoning        map[string]map[int]string
-	toolName         map[string]string
-	toolsStarted     map[string]bool
-	toolsCompleted   map[string]bool
+	assistantID        string
+	assistantStarted   map[string]bool
+	text               map[string]string
+	finalText          map[string]string
+	reasoning          map[string]map[int]string
+	reasoningStarted   map[string]bool
+	reasoningCompleted map[string]bool
+	toolName           map[string]string
+	toolsStarted       map[string]bool
+	toolsCompleted     map[string]bool
 
 	completed   bool
 	failed      bool
@@ -60,17 +64,19 @@ func (s *Synthesizer) StartTurn(sessionID, userID, dir string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := &turnState{
-		sessionID:        sessionID,
-		userID:           userID,
-		dir:              dir,
-		startedAt:        time.Now(),
-		assistantStarted: map[string]bool{},
-		text:             map[string]string{},
-		finalText:        map[string]string{},
-		reasoning:        map[string]map[int]string{},
-		toolName:         map[string]string{},
-		toolsStarted:     map[string]bool{},
-		toolsCompleted:   map[string]bool{},
+		sessionID:          sessionID,
+		userID:             userID,
+		dir:                dir,
+		startedAt:          time.Now(),
+		assistantStarted:   map[string]bool{},
+		text:               map[string]string{},
+		finalText:          map[string]string{},
+		reasoning:          map[string]map[int]string{},
+		reasoningStarted:   map[string]bool{},
+		reasoningCompleted: map[string]bool{},
+		toolName:           map[string]string{},
+		toolsStarted:       map[string]bool{},
+		toolsCompleted:     map[string]bool{},
 	}
 	s.turns[sessionID] = state
 	s.last = sessionID
@@ -97,10 +103,12 @@ func (s *Synthesizer) ActiveSession() (string, bool) {
 		return "", false
 	}
 	state := s.turns[s.last]
-	if state == nil {
+	if state == nil || state.completed {
+		// Stop issuing idle reconciliation requests once the turn is terminal;
+		// a later StartTurn re-arms the poller.
 		return "", false
 	}
-	return s.last, !state.completed
+	return s.last, true
 }
 
 type eventData struct {
@@ -135,42 +143,51 @@ func (s *Synthesizer) Handle(typ string, properties json.RawMessage) {
 	case "session.execution.started":
 		// turn/started is emitted by StartTurn once the prompt is accepted.
 	case "session.text.started":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		// Defer the agentMessage item until text actually arrives so an empty
+		// or tool-only turn does not render an empty "Codex" bubble.
+		s.noteAssistant(state, data.AssistantMessageID)
 	case "session.text.delta":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.ensureAssistantItem(state, data.AssistantMessageID)
 		s.appendText(state, data.AssistantMessageID, data.Delta)
 	case "session.text.ended":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.ensureAssistantItem(state, data.AssistantMessageID)
 		s.finishText(state, data.AssistantMessageID, data.Text)
 	case "session.reasoning.started":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.noteAssistant(state, data.AssistantMessageID)
+		s.ensureReasoningItem(state, data.AssistantMessageID, data.Ordinal)
 		if state.reasoning[data.AssistantMessageID] == nil {
 			state.reasoning[data.AssistantMessageID] = map[int]string{}
 		}
+		// Track the started section even before its first delta so turn
+		// completion can finalize it.
+		if _, ok := state.reasoning[data.AssistantMessageID][data.Ordinal]; !ok {
+			state.reasoning[data.AssistantMessageID][data.Ordinal] = ""
+		}
 	case "session.reasoning.delta":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.noteAssistant(state, data.AssistantMessageID)
 		s.appendReasoning(state, data.AssistantMessageID, data.Ordinal, data.Delta)
 	case "session.reasoning.ended":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.noteAssistant(state, data.AssistantMessageID)
 		s.finishReasoning(state, data.AssistantMessageID, data.Ordinal, data.Text)
+		s.completeReasoning(state, data.AssistantMessageID, data.Ordinal)
 	case "session.tool.input.started":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.noteAssistant(state, data.AssistantMessageID)
 		if data.ID != "" && data.Name != "" {
 			state.toolName[data.ID] = data.Name
 		}
 		s.ensureToolStarted(state, data.ID, data.Name)
 	case "session.tool.called":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.noteAssistant(state, data.AssistantMessageID)
 		name := state.toolName[data.ID]
 		if name == "" {
 			name = "tool"
 		}
 		s.ensureToolStarted(state, data.ID, name)
 	case "session.tool.success":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.noteAssistant(state, data.AssistantMessageID)
 		s.completeTool(state, data.ID, joinToolContent(data.Content), "completed")
 	case "session.tool.failed":
-		s.ensureAssistant(state, data.AssistantMessageID)
+		s.noteAssistant(state, data.AssistantMessageID)
 		s.completeTool(state, data.ID, joinToolContent(data.Content), "failed")
 	case "session.execution.succeeded":
 		s.complete(state, "completed")
@@ -236,7 +253,7 @@ func (s *Synthesizer) Reconcile(session session, messages []message) {
 		if item.Type != "assistant" {
 			continue
 		}
-		s.ensureAssistant(state, item.ID)
+		s.noteAssistant(state, item.ID)
 		if text := assistantText(item); text != "" {
 			s.finishText(state, item.ID, text)
 		}
@@ -326,11 +343,20 @@ func (s *Synthesizer) emitEvent(method string, params any) {
 	s.emit(method, raw)
 }
 
-func (s *Synthesizer) ensureAssistant(state *turnState, messageID string) {
+// noteAssistant records the assistant message without creating a visible
+// agentMessage item. Tool-only and reasoning-only turns must not emit an empty
+// "Codex" bubble.
+func (s *Synthesizer) noteAssistant(state *turnState, messageID string) {
+	if messageID != "" {
+		state.assistantID = messageID
+	}
+}
+
+func (s *Synthesizer) ensureAssistantItem(state *turnState, messageID string) {
 	if messageID == "" {
 		return
 	}
-	state.assistantID = messageID
+	s.noteAssistant(state, messageID)
 	if state.assistantStarted[messageID] {
 		return
 	}
@@ -346,6 +372,7 @@ func (s *Synthesizer) appendText(state *turnState, messageID, delta string) {
 	if messageID == "" || delta == "" {
 		return
 	}
+	s.ensureAssistantItem(state, messageID)
 	state.text[messageID] += delta
 	s.emitEvent("item/agentMessage/delta", map[string]any{
 		"threadId": state.sessionID,
@@ -359,6 +386,7 @@ func (s *Synthesizer) finishText(state *turnState, messageID, full string) {
 	if messageID == "" || full == "" {
 		return
 	}
+	s.ensureAssistantItem(state, messageID)
 	state.finalText[messageID] = full
 	emitted := state.text[messageID]
 	switch {
@@ -425,12 +453,80 @@ func (s *Synthesizer) finishReasoning(state *turnState, messageID string, ordina
 	}
 }
 
+// reasoningItemID matches project.go's 1-based reasoning part id. OpenCode's
+// event ordinal is 0-based, so live and reloaded timelines share the same id.
+func reasoningItemID(messageID string, ordinal int) string {
+	return fmt.Sprintf("%s/r%d", messageID, ordinal+1)
+}
+
+func (s *Synthesizer) ensureReasoningItem(state *turnState, messageID string, ordinal int) {
+	if messageID == "" {
+		return
+	}
+	id := reasoningItemID(messageID, ordinal)
+	if state.reasoningStarted[id] {
+		return
+	}
+	state.reasoningStarted[id] = true
+	s.emitEvent("item/started", map[string]any{
+		"threadId": state.sessionID,
+		"turnId":   state.userID,
+		"item":     map[string]any{"id": id, "type": "reasoning", "summary": []string{}},
+	})
+}
+
+// completeReasoning finalizes one summary section with the Codex-shaped
+// summary array Android uses to replace in-progress deltas.
+func (s *Synthesizer) completeReasoning(state *turnState, messageID string, ordinal int) {
+	if messageID == "" {
+		return
+	}
+	id := reasoningItemID(messageID, ordinal)
+	if state.reasoningCompleted[id] {
+		return
+	}
+	s.ensureReasoningItem(state, messageID, ordinal)
+	state.reasoningCompleted[id] = true
+	text := ""
+	if parts := state.reasoning[messageID]; parts != nil {
+		text = parts[ordinal]
+	}
+	s.emitEvent("item/completed", map[string]any{
+		"threadId": state.sessionID,
+		"turnId":   state.userID,
+		"item":     map[string]any{"id": id, "type": "reasoning", "summary": []string{text}},
+	})
+}
+
+// flushReasoning finalizes any summary sections left open when the turn ends
+// without an explicit reasoning.ended event.
+func (s *Synthesizer) flushReasoning(state *turnState) {
+	messageIDs := make([]string, 0, len(state.reasoning))
+	for messageID := range state.reasoning {
+		messageIDs = append(messageIDs, messageID)
+	}
+	sort.Strings(messageIDs)
+	for _, messageID := range messageIDs {
+		ordinals := make([]int, 0, len(state.reasoning[messageID]))
+		for ordinal := range state.reasoning[messageID] {
+			ordinals = append(ordinals, ordinal)
+		}
+		sort.Ints(ordinals)
+		for _, ordinal := range ordinals {
+			s.completeReasoning(state, messageID, ordinal)
+		}
+	}
+}
+
 func (s *Synthesizer) emitReasoningDelta(state *turnState, messageID string, ordinal int, delta string) {
+	s.ensureReasoningItem(state, messageID, ordinal)
+	// Each reasoning part is its own item aligned with project.go; therefore
+	// this item carries exactly one summary section at index 0.
 	s.emitEvent("item/reasoning/summaryTextDelta", map[string]any{
 		"threadId":     state.sessionID,
 		"turnId":       state.userID,
-		"itemId":       messageID,
-		"summaryIndex": ordinal,
+		"itemId":       reasoningItemID(messageID, ordinal),
+		"summaryIndex": 0,
 		"delta":        delta,
 	})
 }
@@ -496,16 +592,20 @@ func (s *Synthesizer) complete(state *turnState, status string) {
 	case "interrupted":
 		state.interrupted = true
 	}
+	s.flushReasoning(state)
 	if state.assistantID != "" {
 		text := state.finalText[state.assistantID]
 		if text == "" {
 			text = state.text[state.assistantID]
 		}
-		s.emitEvent("item/completed", map[string]any{
-			"threadId": state.sessionID,
-			"turnId":   state.userID,
-			"item":     map[string]any{"id": state.assistantID, "type": "agentMessage", "text": text},
-		})
+		if text != "" {
+			s.ensureAssistantItem(state, state.assistantID)
+			s.emitEvent("item/completed", map[string]any{
+				"threadId": state.sessionID,
+				"turnId":   state.userID,
+				"item":     map[string]any{"id": state.assistantID, "type": "agentMessage", "text": text},
+			})
+		}
 	}
 	if status == "failed" {
 		message := "OpenCode could not complete this turn. Review the conversation before trying again."
@@ -546,16 +646,16 @@ func (s *Synthesizer) handleLegacyPart(state *turnState, data eventData) {
 	}
 	switch part.Type {
 	case "text":
-		s.ensureAssistant(state, messageID)
 		if data.Delta != "" {
 			s.appendText(state, messageID, data.Delta)
 		} else {
 			s.finishText(state, messageID, part.Text)
 		}
 	case "reasoning":
-		s.ensureAssistant(state, messageID)
+		s.noteAssistant(state, messageID)
 		s.finishReasoning(state, messageID, data.Ordinal, part.Text)
 	case "tool":
+		s.noteAssistant(state, messageID)
 		id := part.Tool.CallID
 		if id == "" {
 			id = part.Tool.ID
@@ -586,7 +686,7 @@ func (s *Synthesizer) handleLegacyMessage(state *turnState, properties json.RawM
 	if item.ID == "" || item.Type != "assistant" {
 		return
 	}
-	s.ensureAssistant(state, item.ID)
+	s.noteAssistant(state, item.ID)
 	if text := assistantText(item); text != "" {
 		s.finishText(state, item.ID, text)
 	}

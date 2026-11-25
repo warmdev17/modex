@@ -72,8 +72,10 @@ func TestSynthesizerEmitsTextToolReasoningTurn(t *testing.T) {
 		"item/started",
 		"item/agentMessage/delta",
 		"item/agentMessage/delta",
+		"item/started",
 		"item/reasoning/summaryTextDelta",
 		"item/started",
+		"item/completed",
 		"item/completed",
 		"item/completed",
 		"turn/completed",
@@ -85,10 +87,12 @@ func TestSynthesizerEmitsTextToolReasoningTurn(t *testing.T) {
 	assertJSON(t, events[1].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"msg_asst","type":"agentMessage"}}`)
 	assertJSON(t, events[2].params, `{"threadId":"ses_1","turnId":"msg_user","itemId":"msg_asst","delta":"Hel"}`)
 	assertJSON(t, events[3].params, `{"threadId":"ses_1","turnId":"msg_user","itemId":"msg_asst","delta":"lo"}`)
-	assertJSON(t, events[4].params, `{"threadId":"ses_1","turnId":"msg_user","itemId":"msg_asst","summaryIndex":0,"delta":"think"}`)
-	assertJSON(t, events[5].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"call_1","type":"commandExecution","command":"bash","cwd":"/work","status":"inProgress"}}`)
-	assertJSON(t, events[6].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"call_1","type":"commandExecution","command":"bash","cwd":"/work","status":"completed","aggregatedOutput":"out","exitCode":null}}`)
-	assertJSON(t, events[7].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"msg_asst","type":"agentMessage","text":"Hello"}}`)
+	assertJSON(t, events[4].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"msg_asst/r1","type":"reasoning","summary":[]}}`)
+	assertJSON(t, events[5].params, `{"threadId":"ses_1","turnId":"msg_user","itemId":"msg_asst/r1","summaryIndex":0,"delta":"think"}`)
+	assertJSON(t, events[6].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"call_1","type":"commandExecution","command":"bash","cwd":"/work","status":"inProgress"}}`)
+	assertJSON(t, events[7].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"call_1","type":"commandExecution","command":"bash","cwd":"/work","status":"completed","aggregatedOutput":"out","exitCode":null}}`)
+	assertJSON(t, events[8].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"msg_asst/r1","type":"reasoning","summary":["think"]}}`)
+	assertJSON(t, events[9].params, `{"threadId":"ses_1","turnId":"msg_user","item":{"id":"msg_asst","type":"agentMessage","text":"Hello"}}`)
 
 	var completed struct {
 		ThreadID string `json:"threadId"`
@@ -98,8 +102,88 @@ func TestSynthesizerEmitsTextToolReasoningTurn(t *testing.T) {
 			DurationMs float64 `json:"durationMs"`
 		} `json:"turn"`
 	}
-	if json.Unmarshal(events[8].params, &completed) != nil || completed.ThreadID != "ses_1" || completed.Turn.ID != "msg_user" || completed.Turn.Status != "completed" || completed.Turn.DurationMs < 0 {
-		t.Fatalf("turn/completed=%s", events[8].params)
+	if json.Unmarshal(events[10].params, &completed) != nil || completed.ThreadID != "ses_1" || completed.Turn.ID != "msg_user" || completed.Turn.Status != "completed" || completed.Turn.DurationMs < 0 {
+		t.Fatalf("turn/completed=%s", events[10].params)
+	}
+}
+
+// TestReasoningItemIDIsDistinctFromAgentMessage guards the Android collision:
+// reasoning deltas/completions must use <msgID>/r<N>, never the assistant id.
+func TestReasoningItemIDIsDistinctFromAgentMessage(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	synth.Handle("session.text.started", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst"}`))
+	synth.Handle("session.text.delta", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","delta":"answer"}`))
+	synth.Handle("session.reasoning.delta", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":0,"delta":"think"}`))
+	synth.Handle("session.reasoning.ended", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","ordinal":0,"text":"think"}`))
+	synth.Handle("session.execution.succeeded", json.RawMessage(`{"sessionID":"ses_1"}`))
+
+	var reasoningDelta, reasoningDone map[string]any
+	var agentStarted bool
+	for _, event := range collector.snapshot() {
+		switch event.method {
+		case "item/agentMessage/delta":
+			agentStarted = true
+		case "item/reasoning/summaryTextDelta":
+			_ = json.Unmarshal(event.params, &reasoningDelta)
+		case "item/completed":
+			var params struct {
+				Item map[string]any `json:"item"`
+			}
+			_ = json.Unmarshal(event.params, &params)
+			if params.Item["type"] == "reasoning" {
+				reasoningDone = params.Item
+			}
+		}
+	}
+	if !agentStarted {
+		t.Fatal("assistant text item was not emitted")
+	}
+	if reasoningDelta == nil {
+		t.Fatal("reasoning delta was not emitted")
+	}
+	reasoningID, _ := reasoningDelta["itemId"].(string)
+	if reasoningID == "" || reasoningID == "msg_asst" {
+		t.Fatalf("reasoning itemId=%q must differ from the agentMessage id", reasoningID)
+	}
+	if reasoningID != "msg_asst/r1" {
+		t.Fatalf("reasoning itemId=%q want msg_asst/r1", reasoningID)
+	}
+	if reasoningDone == nil {
+		t.Fatal("reasoning item/completed was not emitted")
+	}
+	if reasoningDone["id"] != reasoningID || reasoningDone["type"] != "reasoning" {
+		t.Fatalf("reasoning completion=%v", reasoningDone)
+	}
+	summary, _ := reasoningDone["summary"].([]any)
+	if len(summary) != 1 || summary[0] != "think" {
+		t.Fatalf("reasoning summary=%v", reasoningDone["summary"])
+	}
+}
+
+func TestToolOnlyTurnSuppressesEmptyAgentMessage(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "msg_user", "/work")
+	synth.Handle("session.tool.input.started", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","id":"call_1","name":"bash"}`))
+	synth.Handle("session.tool.success", json.RawMessage(`{"sessionID":"ses_1","assistantMessageID":"msg_asst","id":"call_1","content":[{"type":"text","text":"out"}]}`))
+	synth.Handle("session.execution.succeeded", json.RawMessage(`{"sessionID":"ses_1"}`))
+
+	for _, event := range collector.snapshot() {
+		if event.method != "item/started" && event.method != "item/completed" {
+			continue
+		}
+		var params struct {
+			Item map[string]any `json:"item"`
+		}
+		_ = json.Unmarshal(event.params, &params)
+		if params.Item["type"] == "agentMessage" {
+			t.Fatalf("tool-only turn emitted an empty agentMessage item: %s", event.params)
+		}
+	}
+	if !collector.hasMethod("turn/completed") {
+		t.Fatal("tool-only turn did not complete")
 	}
 }
 

@@ -173,11 +173,15 @@ func projectAssistant(m message, dir string) []map[string]any {
 			}
 		case "reasoning":
 			reasoning++
+			// The live synthesizer emits one reasoning item per part with the
+			// same <msgID>/r<N> id. summary_parts keeps a later live delta
+			// appending to this section instead of replacing it after reload.
 			entries = append(entries, map[string]any{
-				"id":           fmt.Sprintf("%s/r%d", m.ID, reasoning),
-				"role":         "reasoning",
-				"text":         p.Text,
-				"display_text": p.Text,
+				"id":            fmt.Sprintf("%s/r%d", m.ID, reasoning),
+				"role":          "reasoning",
+				"text":          p.Text,
+				"display_text":  p.Text,
+				"summary_parts": []string{p.Text},
 			})
 		case "tool":
 			tools++

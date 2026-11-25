@@ -174,7 +174,7 @@ func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
 		"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1"},
 		"messages":[
 			{"id":"msg_user","role":"user","text":"hello","display_text":"hello"},
-			{"id":"msg_asst/r1","role":"reasoning","text":"think","display_text":"think"},
+			{"id":"msg_asst/r1","role":"reasoning","text":"think","display_text":"think","summary_parts":["think"]},
 			{"id":"msg_asst","role":"assistant","text":"answer","display_text":"answer"},
 			{"id":"call_1","role":"command","text":"out","command":"bash","cwd":"/work","status":"completed","exit_code":null},
 			{"id":"msg_err","role":"assistant","text":"boom","display_text":"boom","status":"failed","turn_notice":`+notice+`,"notice":`+notice+`},
