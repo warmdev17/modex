@@ -88,6 +88,7 @@ func run() error {
 	background := flag.Bool("background", false, "Start a detached supervisor (Linux/macOS)")
 	supervise := flag.Bool("supervise", false, "Run a persistent foreground supervisor (Linux/macOS)")
 	attach := flag.Bool("attach", false, "Attach to a running supervisor using stdin/stdout")
+	heartbeat := flag.Bool("heartbeat", false, "Require attach heartbeats to release stale clients")
 	stop := flag.Bool("stop", false, "Stop the authenticated supervisor")
 	stateDir := flag.String("state-dir", "", "Private supervisor state directory (required for supervisor modes)")
 	cursor := flag.Uint64("cursor", 0, "Last observed supervisor sequence number")
@@ -162,11 +163,14 @@ func run() error {
 	if *thread != "" && !*cli {
 		return fmt.Errorf("--thread requires --cli")
 	}
+	if *heartbeat && !*attach {
+		return fmt.Errorf("--heartbeat requires --attach")
+	}
 	if *profile != "" {
 		return fmt.Errorf("named profiles are not supported by this diagnostic; no profile was applied")
 	}
 	if *attach || *stop {
-		return supervisorClient(*stateDir, *cursor, *instance, *stop)
+		return supervisorClient(*stateDir, *cursor, *instance, *stop, *heartbeat)
 	}
 	if *workspace == "" {
 		if !*cli {

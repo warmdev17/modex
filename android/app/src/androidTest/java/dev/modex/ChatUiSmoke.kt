@@ -387,6 +387,7 @@ fun Instrumentation.remoteFilePickerSmoke() {
     try {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var attached = emptyList<RemoteFile>()
+        var previewed: RemoteFile? = null
         var browsed = ""
         runOnMainSync { activity.setContent { ModexTheme {
             RemoteFilePicker("/work", RemoteDirectory("/work", "/", listOf(
@@ -394,7 +395,8 @@ fun Instrumentation.remoteFilePickerSmoke() {
                 RemoteFile("notes.txt", "/work/notes.txt", false, 48),
                 RemoteFile("photo.png", "/work/photo.png", false, 1024),
                 RemoteFile("huge.zip", "/work/huge.zip", false, MAX_ATTACHMENT_BYTES + 1)
-            ), false), false, "", true, 8, { browsed = it }, { attached = it }, {})
+            ), false), false, "Could not open fixture.", true, 8, { browsed = it }, { attached = it }, {},
+                retryPath = "/work/missing", onPreview = { previewed = it })
         } } }
         fun node(label: String): AccessibilityNodeInfo? {
             fun walk(n: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
@@ -409,12 +411,22 @@ fun Instrumentation.remoteFilePickerSmoke() {
             val deadline = System.currentTimeMillis() + 5000
             var n = node(label)
             while (n == null && System.currentTimeMillis() < deadline) { Thread.sleep(100); n = node(label) }
-            while (n != null && !n.isClickable) n = n.parent
-            check(n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) { "Cannot click $label" }
+            val rect = android.graphics.Rect().also((n ?: error("Missing $label"))::getBoundsInScreen)
+            val time = android.os.SystemClock.uptimeMillis()
+            for (action in listOf(android.view.MotionEvent.ACTION_DOWN, android.view.MotionEvent.ACTION_UP)) {
+                android.view.MotionEvent.obtain(time, android.os.SystemClock.uptimeMillis(), action,
+                    rect.exactCenterX(), rect.exactCenterY(), 0).also { sendPointerSync(it); it.recycle() }
+            }
             waitForIdleSync(); Thread.sleep(400)
         }
-        click("notes.txt"); click("photo.png")
-        check(node("Attach (2)") != null)
+        click("Preview notes.txt")
+        check(previewed?.path == "/work/notes.txt" && attached.isEmpty()) { "Preview changed the draft selection" }
+        check(node("Attach (0)") != null)
+        click("Retry"); check(browsed == "/work/missing")
+        click("notes.txt")
+        check(node("Attach (1)") != null) { "Selecting notes.txt did not select exactly one file" }
+        click("photo.png")
+        check(node("Attach (2)") != null) { "Selecting photo.png did not select a second file" }
         check(node("Over 20 MiB limit") != null)
         click("src"); check(browsed == "/work/src")
         click("Up"); check(browsed == "/")
@@ -424,5 +436,5 @@ fun Instrumentation.remoteFilePickerSmoke() {
         check(attached.map { it.name } == listOf("notes.txt","photo.png"))
         result.putString("result","PASS: remote picker multi-selection, folder navigation, oversized-file state and attachment confirmation")
         finish(-1,result)
-    } catch(e: Throwable) { result.putString("result","FAIL: remote picker: ${e.message}"); finish(0,result) }
+    } catch(e: Throwable) { result.putString("result","FAIL: remote picker: ${e.message} at ${e.stackTrace.firstOrNull { it.fileName == "ChatUiSmoke.kt" }}"); finish(0,result) }
 }

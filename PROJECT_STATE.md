@@ -52,6 +52,28 @@ Android is unchanged in this slice; no service restart was performed and no
 push/merge was executed. User-facing documentation is
 [docs/opencode-backend.md](docs/opencode-backend.md), linked from `README.md`.
 
+## Stale Android attachment lease
+
+Updated 2026-11-25T21:10:57+07:00 on `fix/stale-attach-lease`, source `0068718`. Android attach now negotiates a 15-second application heartbeat. The supervisor releases a negotiated client after one minute without frames or incoming bytes, while legacy CLI attaches retain unlimited idle behavior. This prevents a half-open phone SSH connection from indefinitely causing `another client is attached`; heartbeat frames never reach the Codex bridge, and slow command uploads renew the lease as bytes arrive.
+
+- Regression tests reproduce silent-client eviction, replacement attach, heartbeat renewal, filtering and partial-frame activity beyond the original deadline. `go test -race ./...`, `go vet ./...`, Android unit/lint, isolated supervisor tests and real loopback SSH transport passed. Independent review found and verified the partial-frame correction; GitNexus had no Modex index, so review used direct caller inspection.
+- A paired host activation and Android update are required. The host must activate before the new APK is used because old hosts do not recognize `--heartbeat`. Physical-phone background/Doze behavior remains untested; release, merge and live host activation are pending.
+
+## Live follow-ups during a Codex turn
+
+Updated 2026-11-25T19:44:00+07:00. [PR #34](https://github.com/warmdev17/modex/pull/34) merged as `77001e2d9165cd2ae83b862677b757b40b74eb9e`. Signed Android [dev.36](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.36), versionCode 40, uses native `turn/steer` during ordinary active turns, with separate Stop and acknowledgments that clear only the submitted draft. Host validates the workspace and follows the CLI's explicit turn-race handling. Native user-message events provide the transcript entry. [Plan](docs/superpowers/plans/2026-11-25-live-steering.md).
+
+- Source checks passed: `go test -race ./...`, `go vet ./...`, 150 Android release unit tests, release lint/build and all five hosted PR jobs. The signed Android 13 emulator upgrade from code 39 to 40 preserved encrypted synthetic state, and the distributable passed the steering smoke. Public assets were downloaded anonymously and matched SHA-256 `d7663e1ca68692289d2503ab19df0def5e9356df9b44e5305cce15cfc6d6ec44` and the established signing certificate.
+- An isolated supervisor with Codex CLI 0.169.0 and a local synthetic Responses provider verified the same turn ID on admission and the transcript event, and verified that the following model request contained the steer. Reviewer finding on pending draft persistence was addressed. Actual process death with a pending steer and a physical phone remain untested.
+- The paired host binary is active as PID 574090; the running executable matched tested SHA-256 `108a510bd8b878ec5c1363879a9f476f0cf0328860501ab9e9c26bcfcb50f6ac`. The UI preserves the draft when native steering rejects a turn that cannot be steered. That path does not implement the CLI's separate queue. Physical-phone installation, TalkBack and a real paid-provider steering turn remain untested.
+
+## Android UX release batch
+
+Updated 2026-11-24 on `feat/android-ux-polish`, based on `2947736`. The batch adds Downloads export, inline host validation, remote file browsing, session menus and agent scrolling, and contextual notification permission.
+
+- Published [dev.35](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.35), code 39, from `26b05d976db3e5430d2cd41c908686d78ed70d9e`. The public APK was downloaded and matched SHA-256 `35e67cbaddf4a0e30fae78333a85084f39f5b500c5b4972f982f9218a81d85ff`. Release unit tests (150), lint and signing identity checks passed, plus a code 38 to 39 encrypted-state upgrade on Android 13. Smoke checks passed for file preview/export on Android 9 and 13, remote browsing and projects, session actions, child scrolling at 320 dp, auto-follow with reduced motion, and returning to Hosts after failed SSH. Android 9 APK fixture bytes matched the source.
+- Independent review findings were handled in the integration worktree after implementer limits interrupted per-task verification. The notification permission decision table has unit coverage. Physical-device use, a full TalkBack walkthrough, and SAF picker rotation remain unverified.
+
 ## Usage dialog refresh
 
 Updated 2026-11-24T09:54:00+07:00 on `feat/previous-prompt-preview`, based on `fec8cdd`. Loading uses the same title icon slot as the idle state, so Usage keeps its layout while refreshing cached data.

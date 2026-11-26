@@ -109,6 +109,21 @@ internal fun Instrumentation.attachmentTransportSmoke(args: Bundle) {
             restored.restoreDirectories(drafts.directoriesJson())
             check(restored.directoryFor("origin-thread") == root) { "Folder snapshot not restored" }
         }
+        val missing = "$root/missing"
+        runOnMainSync {
+            drafts.browse(missing, "origin-thread")
+            check(drafts.directory?.path == root) { "Current listing disappeared during refresh" }
+        }
+        browsing = true
+        while (browsing && System.currentTimeMillis() < deadline + 20000) { runOnMainSync { browsing = drafts.working }; Thread.sleep(100) }
+        runOnMainSync {
+            check(drafts.error.isNotEmpty() && drafts.attemptedPath == missing) { "Failed listing cannot retry its exact path" }
+            drafts.browse(root, "other-thread")
+            check(drafts.directory == null) { "Previous thread directory leaked into another browser context" }
+        }
+        browsing = true
+        while (browsing && System.currentTimeMillis() < deadline + 30000) { runOnMainSync { browsing = drafts.working }; Thread.sleep(100) }
+        runOnMainSync { check(drafts.directoryFor("other-thread") == root) { "New browser context did not load" } }
         transport.send(JSONObject().put("id",900003).put("method","turn/start").put("params",turnStartParams("fixture-thread","Inspect files","",attachments = listOf(note, Attachment("$root/image.png","image.png","image")))))
         check(response.await(15,TimeUnit.SECONDS) && failure.get() == null) { "Attachment turn failed: ${failure.get()?.message}" }
         result.putString("result","PASS: SFTP browsing, private atomic upload, stream failure cleanup, phone URI stream, origin-thread isolation and native image/file turn")

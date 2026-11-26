@@ -103,6 +103,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
     val activeTurnId: String get() = sessions.activeTurnId
+    val steerSending: Boolean get() = steeringDrafts.values.any { it.first == selected }
+    private val steeringDrafts = androidx.compose.runtime.mutableStateMapOf<Long, Pair<String, PromptDraft?>>()
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
     internal var sessionStatus by mutableStateOf<SessionStatus?>(null); private set
@@ -172,6 +174,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 val requests = data.optJSONArray("pending") ?: JSONArray()
                 for (i in 0 until requests.length()) {
                     val r = requests.getJSONObject(i); pending[r.getLong("id")] = r.getString("method") to r.getString("tag")
+                    if (r.getString("method") == "turn/steer") {
+                        val draft = r.optJSONObject("steering_draft")?.let { PromptDraft(it.getString("text"), readReferenceDraft(it.optString("references"))) }
+                        steeringDrafts[r.getLong("id")] = r.getString("tag") to draft
+                    }
                     if (r.getString("method") == "plans/respond") handledPlans += r.getString("tag")
                     if (r.getString("method") == "decision/respond") answeringDecisionIds += r.getString("tag")
                     if (r.getString("method") == "threads/mode") modeChanging = true
@@ -195,7 +201,16 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 .put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)).put("instance", journal.instance.orEmpty()).put("cursor", journal.cursor).put("selected", selected)
                 .put("model_choices", modelChoicesJson(modelChoices)).put("host_choice", hostChoice.toJson()).put("selected_workspace", selectedWorkspace).put("attachment_directories", attachments.directoriesJson())
                 .put("active_turns", sessions.activityJson()).put("last_thread", lastThread)
-                .put("handled_plans", JSONArray(handledPlans.toList())).put("decisions", JSONArray(decisions)).put("pending", JSONArray().apply { pending.forEach { (id, op) -> put(JSONObject().put("id", id).put("method", op.first).put("tag", op.second)) } })
+                .put("handled_plans", JSONArray(handledPlans.toList())).put("decisions", JSONArray(decisions))
+                .put("pending", JSONArray().apply {
+                    pending.forEach { (id, op) ->
+                        val entry = JSONObject().put("id", id).put("method", op.first).put("tag", op.second)
+                        steeringDrafts[id]?.second?.let { draft ->
+                            entry.put("steering_draft", JSONObject().put("text", draft.text).put("references", referenceDraftJson(draft.references)))
+                        }
+                        put(entry)
+                    }
+                })
             withContext(Dispatchers.IO) {
                 try {
                     val bounded = HistoryCache()
@@ -233,7 +248,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     fun forget() {
         promptDrafts.clear()
-        attachments.clear(); sentAttachmentPaths.clear(); modelChoices = emptyMap(); hostChoice = ModelChoice()
+        attachments.clear(); sentAttachmentPaths.clear(); steeringDrafts.clear(); modelChoices = emptyMap(); hostChoice = ModelChoice()
         sessionSettings = ""
         disconnect(); transport = null; connected = false; connecting = false; projectCreating = false; reconnectAllowed = false; saveJob?.cancel()
         historyCache.clear(); lastThread = ""; ownedThread = ""
@@ -301,7 +316,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         leaveSession()
         journal = replacement
         pending.clear()
-        sentAttachmentPaths.clear()
+        sentAttachmentPaths.clear(); steeringDrafts.clear()
         threadListLoading = false
         titles = emptyMap()
         threads = emptyList()
@@ -352,7 +367,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     kotlinx.coroutines.runBlocking { withContext(Dispatchers.Main) {
                         check(transport === current)
                         if (recovering) {
-                            val uncertain = pending.values.any { it.first in setOf("turn/start", "turn/interrupt", "decision/respond", "plans/respond", "threads/permissions") }
+                            val uncertain = pending.values.any { it.first in setOf("turn/start", "turn/steer", "turn/interrupt", "decision/respond", "plans/respond", "threads/permissions") }
                             invalidateSessionRequests()
                             clearJournalState(targetJournal)
                             if (uncertain) error = "Session reconnected. Review the conversation before repeating any action whose result was unclear."
@@ -481,10 +496,17 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
-        if (!connected || busy || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
+        if (!connected || steerSending || (busy && (activeTurnId.isBlank() || stopping)) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
+        val target = activeTurnId
+        val params = withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace)
+        if (target.isNotEmpty()) {
+            val id = request("turn/steer", params.put("turn_id", target), selected) ?: return false
+            steeringDrafts[id] = selected to promptDrafts[selected]
+            sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
+            return false // Clear the draft only after Codex confirms receipt.
+        }
+        val id = request("turn/start", params, selected) ?: return false
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
-        val id = request("turn/start", withWorkspace(turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace), selected)
-        if (id == null) return false
         sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         return true
     }
@@ -562,6 +584,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (frame.has("id")) {
             val id = frame.getLong("id")
             val sentAttachments = sentAttachmentPaths.remove(id)
+            val steeringDraft = steeringDrafts.remove(id)
             val operation = pending.remove(id) ?: return
             if (operation.first == "threads/read" && operation.second == "agent-history") {
                 agentConversation.result(id, frame.optJSONObject("result"))
@@ -654,6 +677,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     val target = JSONObject(operation.second)
                     sessions.interruptRejected(target.getString("thread_id"), target.getString("turn_id"))
                     if (target.getString("thread_id") != selected) return
+                }
+                if (operation.first == "turn/steer") {
+                    if (operation.second == selected) error = "Follow-up was not confirmed. Check the conversation before sending it again. Update modex-host if needed."
+                    return
                 }
                 if (operation.first == "turn/start") {
                     sessions.rejectTurn(operation.second)
@@ -824,6 +851,19 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 "decision/respond" -> {
                     answeringDecisionIds -= operation.second
                     decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
+                }
+                "turn/steer" -> {
+                    if (result.optString("turnId").isBlank() && result.optJSONObject("turn")?.optString("id").isNullOrBlank()) {
+                        if (operation.second == selected) error = "Follow-up was not confirmed. Check the conversation before sending it again."
+                        return
+                    }
+                    steeringDraft?.let { (thread, submitted) ->
+                        if (submitted != null && promptDrafts[thread] == submitted) {
+                            promptDrafts.update(thread, PromptDraft())
+                            promptDrafts.flush()
+                        }
+                    }
+                    sentAttachments?.let { attachments.sent(it.first, it.second) }
                 }
                 "turn/start" -> { result.optJSONObject("turn")?.let { sessions.acknowledgeTurn(operation.second, it) }; sentAttachments?.let { attachments.sent(it.first, it.second) } }
             }

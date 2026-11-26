@@ -12,6 +12,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun Instrumentation.agentActivitySmoke() {
@@ -21,6 +22,11 @@ internal fun Instrumentation.agentActivitySmoke() {
         val selected = mutableStateOf("agents")
         val conversation = AgentConversation()
         val state = SessionState().apply { open("agents") }
+        var olderLoads = 0
+        fun childMessages(prefix: String, range: IntRange) = JSONArray().apply {
+            range.forEach { index -> put(JSONObject().put("id", "$prefix-$index").put("role", "assistant")
+                .put("turn_id", "$prefix-turn-$index").put("text", "${if (prefix == "older") "Earlier agent message" else "Read-only agent response"} $index")) }
+        }
         fun event(id: String, action: String, targets: String) = state.event("item/completed", JSONObject(
             """{"threadId":"agents","turnId":"turn","item":{"id":"$id","type":"agentActivity","action":"$action","targets":$targets}}"""
         ))
@@ -36,7 +42,16 @@ internal fun Instrumentation.agentActivitySmoke() {
                 onOpenAgent = { agent ->
                     conversation.open(agent)
                     conversation.begin(1, older = false)
-                    conversation.result(1, JSONObject("""{"thread":{"id":"${agent.id}"},"messages":[{"id":"task","role":"user","text":"Inspect sample.kt"},{"id":"read","role":"command","command":"cat sample.kt","text":"sample"},{"id":"answer","role":"assistant","text":"Read-only agent response"}]}"""))
+                    conversation.result(1, JSONObject().put("thread", JSONObject().put("id", agent.id))
+                        .put("messages", childMessages("current", 0..29)).put("next_cursor", "older-page"))
+                },
+                onAgentHistory = { older ->
+                    check(older)
+                    olderLoads++
+                    conversation.begin(2, older = true)
+                    conversation.event("item/agentMessage/delta", JSONObject("""{"threadId":"one","turnId":"live-older","itemId":"live-older-answer","delta":"Live during older page"}"""))
+                    conversation.result(2, JSONObject().put("thread", JSONObject().put("id", "one"))
+                        .put("messages", childMessages("older", 0..9)))
                 },
                 historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "fixture",
                 decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {},
@@ -59,6 +74,23 @@ internal fun Instrumentation.agentActivitySmoke() {
                 Thread.sleep(100)
             }
             error("Missing $label")
+        }
+        fun list() = await("Agent conversation history")
+        fun scrollOlder() {
+            val bounds = Rect().also(list()::getBoundsInScreen)
+            val x = bounds.centerX()
+            val start = bounds.top + bounds.height() / 4
+            val end = bounds.bottom - bounds.height() / 4
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                uiAutomation.executeShellCommand("input swipe $x $start $x $end 380"),
+            ).use { it.readBytes() }
+            waitForIdleSync(); Thread.sleep(500)
+        }
+        fun viewport(): android.graphics.Bitmap {
+            val bounds = Rect().also(list()::getBoundsInScreen)
+            val screen = checkNotNull(uiAutomation.takeScreenshot())
+            bounds.intersect(0, 0, screen.width, screen.height)
+            return android.graphics.Bitmap.createBitmap(screen, bounds.left, bounds.top, bounds.width(), bounds.height()).also { screen.recycle() }
         }
         fun tap(target: AccessibilityNodeInfo): Rect {
             val bounds = Rect().also(target::getBoundsInScreen)
@@ -122,12 +154,35 @@ internal fun Instrumentation.agentActivitySmoke() {
         await("Error")
         screenshot("agents-sheet.png")
         tap(await("reviewer"))
-        await("Read-only agent response")
-        await("Inspect sample.kt")
+        await("Read-only agent response 29")
+        scrollOlder()
+        await("Scroll to latest")
+        val before = viewport()
         runOnMainSync {
             conversation.event("item/agentMessage/delta", JSONObject("""{"threadId":"one","turnId":"child-turn","itemId":"live-answer","delta":"Live agent update"}"""))
         }
+        Thread.sleep(1000)
+        val after = viewport()
+        check(before.sameAs(after)) { "Live child updates moved the reading viewport" }
+        before.recycle(); after.recycle()
+        check(node("Live agent update") == null) { "Live update pulled the child transcript to the bottom" }
+        tap(await("Scroll to latest"))
         await("Live agent update")
+        runOnMainSync {
+            conversation.event("item/agentMessage/delta", JSONObject().put("threadId", "one").put("turnId", "child-turn")
+                .put("itemId", "live-answer").put("delta", "\n\n" + (0..39).joinToString("\n\n") { "Child stream paragraph $it" } + "\n\nCHILD_STREAM_END"))
+        }
+        await("CHILD_STREAM_END")
+        for (page in 1..40) {
+            if (node("Load earlier activity")?.isVisibleToUser == true) break
+            scrollOlder()
+        }
+        tap(await("Load earlier activity"))
+        check(olderLoads == 1)
+        await("Read-only agent response 0")
+        check(node("Live during older page") == null) { "Older pagination pulled the viewport to a live update" }
+        tap(await("Scroll to latest"))
+        await("Live during older page")
         check(node("Message Codex") == null && node("Send message") == null && node("Stop response") == null)
         screenshot("agent-conversation.png")
         tap(await("Back to agents"))
@@ -139,7 +194,7 @@ internal fun Instrumentation.agentActivitySmoke() {
         runOnMainSync { state.open("other"); selected.value = "other" }
         await("Message Codex")
         check(node("Agent activity") == null && node("Agents") == null)
-        result.putString("result", "PASS: compact Agents button with IME, accessible counts, live timeline, read-only transcript, Back and isolated chat")
+        result.putString("result", "PASS: compact Agents button with IME, accessible counts, live timeline, read-only transcript scroll/pagination, Back and isolated chat")
         finish(-1, result)
     } catch (failure: Throwable) {
         result.putString("result", "FAIL: ${failure.javaClass.simpleName}: ${failure.message}")

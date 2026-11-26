@@ -74,6 +74,56 @@ internal fun Instrumentation.promptDraftSmoke(args: Bundle) {
             error("Draft did not survive navigation or relaunch")
         }
 
+        if (args.getString("stage") == "steering") {
+            val thread = "steer-test"
+            open(first, thread)
+            val vmClass = ModexViewModel::class.java
+            val sessions = vmClass.getDeclaredField("sessions").apply { isAccessible = true }.get(first) as SessionState
+            val apply = vmClass.getDeclaredMethod("apply", org.json.JSONObject::class.java).apply { isAccessible = true }
+            fun reply(id: Long, key: String, body: org.json.JSONObject) {
+                runOnMainSync { apply.invoke(first, org.json.JSONObject().put("id", id).put(key, body)) }
+                waitForIdleSync()
+            }
+            fun click(label: String) {
+                fun find(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+                    if (node?.contentDescription?.toString() == label) return node
+                    if (node != null) for (i in 0 until node.childCount) find(node.getChild(i))?.let { return it }
+                    return null
+                }
+                var action = find(uiAutomation.rootInActiveWindow) ?: error("Missing $label")
+                while (!action.isClickable) action = action.parent ?: error("$label is not actionable")
+                check(action.isEnabled && action.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+                waitForIdleSync()
+            }
+            runOnMainSync {
+                vmClass.getDeclaredField("ownedThread").apply { isAccessible = true }.set(first, thread)
+                sessions.event("turn/started", org.json.JSONObject("""{"threadId":"steer-test","turn":{"id":"exact-turn","status":"inProgress"}}"""))
+            }
+            type("first follow-up")
+            click("Send follow-up")
+            expect("first follow-up")
+            fun requestId(): Long {
+                @Suppress("UNCHECKED_CAST")
+                val pending = vmClass.getDeclaredField("pending").apply { isAccessible = true }.get(first) as Map<Long, Pair<String, String>>
+                return pending.entries.single { it.value == ("turn/steer" to thread) }.key
+            }
+            reply(requestId(), "error", org.json.JSONObject().put("message", "fixture rejection"))
+            expect("first follow-up")
+            click("Send follow-up")
+            type("newer draft")
+            reply(requestId(), "result", org.json.JSONObject().put("turnId", "exact-turn"))
+            expect("newer draft")
+            click("Send follow-up")
+            reply(requestId(), "result", org.json.JSONObject().put("turnId", "exact-turn"))
+            expect("")
+            click("Stop response")
+            check(first.stopping && first.activeTurnId == "exact-turn")
+            runOnMainSync { first.forget(); second.forget() }
+            result.putString("result", "PASS: follow-up sent during active turn, draft held until confirmation, newer draft preserved, Stop remains available")
+            finish(-1, result)
+            return
+        }
+
         if (args.getString("stage") == "safety") {
             open(first, "send-test")
             type("SEND TEST")
