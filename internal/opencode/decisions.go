@@ -165,8 +165,9 @@ func (d *Decisions) add(request permissionRequest, directory string) {
 	if request.ID == "" || request.SessionID == "" || request.Action == "" {
 		return
 	}
+	turnID := d.turnID(request.SessionID)
 	d.mu.Lock()
-	capped := d.addLocked(request, directory)
+	capped := d.addLocked(request, directory, turnID)
 	d.mu.Unlock()
 	if capped {
 		d.failPendingCap(request.SessionID)
@@ -174,7 +175,7 @@ func (d *Decisions) add(request permissionRequest, directory string) {
 }
 
 // addLocked reports true only when the pending cap blocked a new request.
-func (d *Decisions) addLocked(request permissionRequest, directory string) bool {
+func (d *Decisions) addLocked(request permissionRequest, directory, turnID string) bool {
 	if request.ID == "" || request.SessionID == "" || request.Action == "" {
 		return false
 	}
@@ -188,7 +189,7 @@ func (d *Decisions) addLocked(request permissionRequest, directory string) bool 
 	if directory == "" {
 		directory = d.defaultDir
 	}
-	decision := buildPermissionDecision(request, directory, d.turnID(request.SessionID))
+	decision := buildPermissionDecision(request, directory, turnID)
 	if decision == nil {
 		return false
 	}
@@ -331,6 +332,13 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 	if json.Unmarshal(raw, &response) != nil {
 		return
 	}
+	turnID := ""
+	for _, request := range response.Data {
+		if request.ID != "" && request.Action != "" && sessionID != "" && (request.SessionID == "" || request.SessionID == sessionID) {
+			turnID = d.turnID(sessionID)
+			break
+		}
+	}
 	d.mu.Lock()
 	current := map[string]bool{}
 	cappedSession := ""
@@ -342,7 +350,7 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 			continue
 		}
 		current[decisionKey(request.SessionID, request.ID)] = true
-		if d.addLocked(request, directory) && cappedSession == "" {
+		if d.addLocked(request, directory, turnID) && cappedSession == "" {
 			cappedSession = request.SessionID
 		}
 	}

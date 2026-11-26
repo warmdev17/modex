@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type decisionReply struct {
@@ -411,5 +412,50 @@ func TestDecisionsReconcile(t *testing.T) {
 	methods := eventMethods(collector.snapshot())
 	if methods[len(methods)-2] != "decision/resolved" || methods[len(methods)-1] != "decision/required" {
 		t.Fatalf("events=%v", methods)
+	}
+}
+
+func TestDecisionsTurnLookupDoesNotBlockCompletion(t *testing.T) {
+	for _, path := range []string{"event", "reconcile"} {
+		t.Run(path, func(t *testing.T) {
+			synth := NewSynthesizer("/work", nil)
+			synth.StartTurn("ses_1", "msg_user", "/work")
+			lookup := make(chan struct{})
+			store := NewDecisions("/work", nil, func(session string) string {
+				close(lookup)
+				return synth.TurnID(session)
+			}, nil)
+			synth.OnTurnComplete = store.Resolve
+			synth.mu.Lock()
+			admitted := make(chan struct{})
+			go func() {
+				defer close(admitted)
+				if path == "event" {
+					store.Handle("permission.asked", perm("per_1", "bash", "cmd"), "/work")
+				} else {
+					store.Reconcile("ses_1", "/work", json.RawMessage(`{"data":[{"id":"per_1","sessionID":"ses_1","action":"bash"}]}`))
+				}
+			}()
+			<-lookup
+			resolved := make(chan struct{})
+			go func() {
+				synth.OnTurnComplete("ses_1", "msg_user")
+				close(resolved)
+			}()
+			select {
+			case <-resolved:
+			case <-time.After(time.Second):
+				synth.mu.Unlock()
+				<-admitted
+				<-resolved
+				t.Fatal("completion blocked by a turn lookup holding the decision lock")
+			}
+			synth.mu.Unlock()
+			<-admitted
+			pending := store.Pending()
+			if len(pending) != 1 || pending[0].TurnID != "msg_user" {
+				t.Fatalf("pending=%+v", pending)
+			}
+		})
 	}
 }
