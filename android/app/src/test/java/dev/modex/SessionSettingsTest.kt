@@ -5,6 +5,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SessionSettingsTest {
+    @Test fun unsupportedOptionalFieldsAreOmittedWithoutChangingTextFilesOrDraftReferences() {
+        val skill = PromptReference("skill", "review", "/skill", "Review", "", "user", true, "\$review")
+        val file = Attachment("/tmp/report.txt", "report.txt", "file", 12)
+        val capabilities = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"open","backend":"opencode","capabilities":[]}"""))
+
+        val start = capabilities.supportedNewThreadParams("open-model", "full-access", "/cached/project", "cached-project")
+        assertEquals("open-model", start.getString("model"))
+        assertTrue(start.getBoolean("standalone"))
+        assertFalse(start.has("permission_mode"))
+        assertFalse(start.has("workspace"))
+        assertFalse(start.has("project_id"))
+
+        val turn = capabilities.supportedTurnStartParams("thread", "Use \$review as ordinary text", "open-model", files = listOf(file), references = listOf(skill))
+        assertEquals("Use \$review as ordinary text", turn.getString("text"))
+        assertEquals("/tmp/report.txt", turn.getJSONArray("attachments").getJSONObject(0).getString("path"))
+        assertFalse(turn.has("references"))
+    }
+
     @Test fun defaultInheritsHostWithoutPermissionOverride() {
         val params = newThreadParams("", "host-default")
         assertEquals(0, params.length())

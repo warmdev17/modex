@@ -39,6 +39,24 @@ internal fun turnStartParams(thread: String, text: String, model: String, effort
         if (effort.isNotBlank()) put("effort", effort)
     }
 
+internal fun BackendCapabilities.supportedNewThreadParams(model: String, mode: String, workspace: String = "", projectId: String = ""): JSONObject =
+    newThreadParams(
+        model,
+        if (permissionProfiles) mode else "host-default",
+        if (projects) workspace else "",
+        if (projects) projectId else "",
+        standalone = !projects || (workspace.isBlank() && projectId.isBlank()),
+    )
+
+internal fun BackendCapabilities.supportedTurnStartParams(
+    thread: String,
+    text: String,
+    model: String,
+    effort: String = "",
+    files: List<Attachment> = emptyList(),
+    references: List<PromptReference> = emptyList(),
+): JSONObject = turnStartParams(thread, text, model, effort, files, if (this.references) references else emptyList())
+
 internal fun validModelId(value: String): Boolean = value.isEmpty() ||
     (value.isNotBlank() && value.toByteArray(Charsets.UTF_8).size <= 256 && value.none { it == '\r' || it == '\n' || it == '\u0000' })
 
