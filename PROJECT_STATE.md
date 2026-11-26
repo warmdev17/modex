@@ -67,8 +67,27 @@ the current model.
   with 155 tests and zero lint errors. An isolated OpenCode 2.4.1 supervisor
   passed catalogue, qualified session creation, resume and read.
 - Work is local. Phone/emulator UI and real inference were not exercised
-  for this milestone. Next, verify OpenCode attachment parity and implement
-  native permission and question behavior.
+  for this milestone.
+
+Stage 2 attachment projection verified 2026-11-26T21:00:26+07:00 on
+`feat/opencode-attachments`, source `ddcc0ab`, based on model milestone
+`2950f50`. Confirmations and history expose local file and image metadata,
+including file-only messages. History decodes OpenCode's persisted file URI
+without forwarding embedded bytes. Android still accepts legacy attachment
+formats. The history projection revision was bumped.
+
+- `umask 022; go test -race ./... -timeout=90s`, `go vet ./...`, 156
+  Android JVM tests, debug lint (0 errors), and independent review passed.
+  An earlier race-suite run failed the interrupt reply order assertion;
+  a baseline 100-run focused check and the full rerun passed without changing
+  that test or interrupt behavior.
+- With isolated OpenCode 2.4.1 and a null native default model, the real
+  client/bridge admitted a text file with an escaped name and a PNG with
+  blank prompt text. The confirmation and persisted history matched.
+- A native 7 MiB file produced a response above Modex's existing 8 MiB HTTP
+  cap. This can prevent confirmation/history even after admission. Next,
+  handle large attachment responses, then native permissions and questions.
+  No physical/emulator UI test, APK release, or service activation.
 
 ## Stale Android attachment lease
 
