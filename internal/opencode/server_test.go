@@ -748,3 +748,40 @@ func TestServeEventsSupervisorReadiness(t *testing.T) {
 		t.Fatalf("attached line=%s", lines[1])
 	}
 }
+
+func TestTurnControlCarriesExpectedTurn(t *testing.T) {
+	for _, method := range []string{"turn/interrupt", "turn/steer"} {
+		t.Run(method, func(t *testing.T) {
+			params := map[string]any{"thread_id": "ses_1", "turn_id": "turn_1", "text": "follow up"}
+			if method == "turn/interrupt" {
+				delete(params, "text")
+			}
+			raw, _ := json.Marshal(params)
+			_, err := HandleEvents(context.Background(), "/work", bridge.Command{Method: method, Params: raw}, func(_ context.Context, got string, p any, _ func(string, json.RawMessage)) (json.RawMessage, error) {
+				values := p.(map[string]any)
+				if got != method || values["turnID"] != "turn_1" {
+					t.Errorf("call=%s params=%v", got, values)
+				}
+				return json.RawMessage(`{"turn":{"id":"turn_1"}}`), nil
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestTurnSteerSendsDeliveryAndReturnsActiveTurn(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		jsonResponse(w, http.StatusOK, `{"data":{"id":"followup_id","type":"user"}}`)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "turn/steer", map[string]any{"thread_id": "ses_1", "turn_id": "turn_1", "text": "follow up", "attachments": []map[string]string{{"path": "/tmp/a.png", "kind": "image"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"turn":{"id":"turn_1","status":"inProgress"}}`)
+	if len(*requests) != 1 || (*requests)[0].Path != "/api/session/ses_1/prompt" || (*requests)[0].Body != `{"delivery":"steer","files":[{"uri":"file:///tmp/a.png","name":"a.png"}],"text":"follow up"}` {
+		t.Fatalf("requests=%+v", *requests)
+	}
+}

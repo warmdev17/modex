@@ -132,7 +132,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 		value = map[string]any{}
 	case callModels:
 		value, err = c.ListModels(ctx)
-	case callTurnStart:
+	case callTurnStart, "turn/steer":
 		rawParams, _ := json.Marshal(params)
 		var input struct {
 			SessionID  string       `json:"sessionID"`
@@ -149,9 +149,16 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 		if input.ProviderID != "" && input.ModelID != "" {
 			model = &modelRef{ProviderID: input.ProviderID, ModelID: input.ModelID}
 		}
-		userID, err := c.Prompt(ctx, input.SessionID, input.Text, input.Files, model, input.Agent)
+		delivery := ""
+		if method == "turn/steer" {
+			delivery = "steer"
+		}
+		userID, err := c.prompt(ctx, input.SessionID, input.Text, input.Files, model, input.Agent, delivery)
 		if err != nil {
 			return nil, err
+		}
+		if method == "turn/steer" {
+			userID = stringParam(values, "turnID")
 		}
 		value = map[string]any{"turn": map[string]any{"id": userID, "status": "inProgress"}}
 	case callTurnInterrupt:
@@ -298,6 +305,10 @@ func (c *Client) Abort(ctx context.Context, id string) error {
 // session first. It returns the accepted user message id used as the Modex
 // turn id.
 func (c *Client) Prompt(ctx context.Context, sessionID, text string, files []promptFile, model *modelRef, agent string) (string, error) {
+	return c.prompt(ctx, sessionID, text, files, model, agent, "")
+}
+
+func (c *Client) prompt(ctx context.Context, sessionID, text string, files []promptFile, model *modelRef, agent, delivery string) (string, error) {
 	path := "/api/session/" + url.PathEscape(sessionID)
 	if model != nil && model.ProviderID != "" && model.ModelID != "" {
 		body := map[string]any{"model": map[string]string{"id": model.ModelID, "providerID": model.ProviderID}}
@@ -311,6 +322,9 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, files []pro
 		}
 	}
 	body := map[string]any{"text": text}
+	if delivery != "" {
+		body["delivery"] = delivery
+	}
 	if len(files) > 0 {
 		body["files"] = files
 	}
@@ -322,6 +336,9 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, files []pro
 	}
 	if err := c.request(ctx, http.MethodPost, path+"/prompt", nil, body, &response); err != nil {
 		return "", err
+	}
+	if delivery == "steer" {
+		return response.Data.ID, nil
 	}
 	if response.Data.ID != "" {
 		return response.Data.ID, nil

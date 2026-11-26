@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/signal"
@@ -53,38 +54,52 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 			}
 			return json.RawMessage(`{"delivered":true}`), nil
 		}
-		raw, err := client.Call(ctx, method, params, emit)
-		if err == nil {
-			switch method {
-			case "turn/start":
-				var result struct {
-					Turn struct {
-						ID string `json:"id"`
-					} `json:"turn"`
-				}
-				if json.Unmarshal(raw, &result) == nil && result.Turn.ID != "" {
-					values, _ := params.(map[string]any)
-					sessionID, _ := values["sessionID"].(string)
-					dir, _ := values["directory"].(string)
-					synth.StartTurn(sessionID, result.Turn.ID, dir)
-				}
-			case "turn/interrupt":
-				var result struct {
-					Interrupted bool `json:"interrupted"`
-				}
-				if json.Unmarshal(raw, &result) == nil && result.Interrupted {
-					values, _ := params.(map[string]any)
-					sessionID, _ := values["sessionID"].(string)
-					synth.MarkInterrupted(sessionID)
-				}
-			case "client/attached":
-				values, _ := params.(map[string]any)
-				if attached, _ := values["attached"].(bool); attached {
-					decisions.Replay(true)
-				}
+		raw, err := openCodeTurnCall(ctx, client, synth, method, params, emit)
+		if err == nil && method == "client/attached" {
+			values, _ := params.(map[string]any)
+			if attached, _ := values["attached"].(bool); attached {
+				decisions.Replay(true)
 			}
 		}
 		return raw, err
 	}
 	return opencode.ServeEventsWithWriter(ctx, in, cwd, call, writer)
+}
+
+func openCodeTurnCall(ctx context.Context, client *opencode.Client, synth *opencode.Synthesizer, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
+	if method == "turn/interrupt" || method == "turn/steer" {
+		values, _ := params.(map[string]any)
+		sessionID, _ := values["sessionID"].(string)
+		expected, _ := values["turnID"].(string)
+		id, active := synth.ActiveTurn(sessionID)
+		if !active || id != expected {
+			return nil, errors.New("turn is no longer active")
+		}
+	}
+	raw, err := client.Call(ctx, method, params, emit)
+	if err != nil {
+		return nil, err
+	}
+	values, _ := params.(map[string]any)
+	sessionID, _ := values["sessionID"].(string)
+	switch method {
+	case "turn/start":
+		var result struct {
+			Turn struct {
+				ID string `json:"id"`
+			} `json:"turn"`
+		}
+		if json.Unmarshal(raw, &result) == nil && result.Turn.ID != "" {
+			dir, _ := values["directory"].(string)
+			synth.StartTurn(sessionID, result.Turn.ID, dir)
+		}
+	case "turn/interrupt":
+		var result struct {
+			Interrupted bool `json:"interrupted"`
+		}
+		if json.Unmarshal(raw, &result) == nil && result.Interrupted {
+			synth.MarkInterrupted(sessionID)
+		}
+	}
+	return raw, nil
 }

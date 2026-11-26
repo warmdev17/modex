@@ -69,7 +69,10 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		allowed["model"] = true
 		allowed["permission_mode"] = true
 		allowed["workspace"] = true
-	case "turn/start":
+	case "turn/start", "turn/steer":
+		if cmd.Method == "turn/steer" {
+			allowed["turn_id"] = true
+		}
 		allowed["references"] = true
 		allowed["attachments"] = true
 		allowed["thread_id"] = true
@@ -218,10 +221,16 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, errors.New("invalid thread response")
 		}
 		return map[string]any{"thread": projectThread(created), "model": created.Model.ID}, nil
-	case "turn/start":
+	case "turn/start", "turn/steer":
 		id, err := requiredThreadID(p)
 		if err != nil {
 			return nil, err
+		}
+		var turn string
+		if cmd.Method == "turn/steer" {
+			if raw, ok := p["turn_id"]; !ok || json.Unmarshal(raw, &turn) != nil || strings.TrimSpace(turn) == "" || len(turn) > 256 || strings.ContainsAny(turn, "\r\n\x00") {
+				return nil, errors.New("turn_id must be a nonempty single-line string up to 256 bytes")
+			}
 		}
 		var text string
 		rawText, ok := p["text"]
@@ -272,11 +281,17 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 				return nil, errors.New("invalid reasoning effort")
 			}
 		}
-		model, err := resolveModelChoice(ctx, call, modelID, emit)
-		if err != nil {
-			return nil, err
+		var model *modelRef
+		if cmd.Method == "turn/start" {
+			model, err = resolveModelChoice(ctx, call, modelID, emit)
+			if err != nil {
+				return nil, err
+			}
 		}
 		params := map[string]any{"sessionID": id, "text": text, "directory": cwd}
+		if turn != "" {
+			params["turnID"] = turn
+		}
 		if len(files) > 0 {
 			params["files"] = files
 		}
@@ -284,7 +299,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			params["providerID"] = model.ProviderID
 			params["modelID"] = model.ModelID
 		}
-		raw, err := call(ctx, callTurnStart, params, emit)
+		raw, err := call(ctx, cmd.Method, params, emit)
 		if err != nil {
 			return nil, err
 		}
@@ -306,7 +321,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		if raw, ok := p["turn_id"]; !ok || json.Unmarshal(raw, &turn) != nil || strings.TrimSpace(turn) == "" || len(turn) > 256 || strings.ContainsAny(turn, "\r\n\x00") {
 			return nil, errors.New("turn_id must be a nonempty single-line string up to 256 bytes")
 		}
-		if _, err := call(ctx, callTurnInterrupt, map[string]any{"sessionID": id}, emit); err != nil {
+		if _, err := call(ctx, callTurnInterrupt, map[string]any{"sessionID": id, "turnID": turn}, emit); err != nil {
 			return nil, err
 		}
 		return map[string]any{}, nil

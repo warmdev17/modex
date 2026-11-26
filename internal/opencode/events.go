@@ -135,6 +135,17 @@ func (s *Synthesizer) TurnID(sessionID string) string {
 	return ""
 }
 
+// ActiveTurn returns the currently running turn for a session.
+func (s *Synthesizer) ActiveTurn(sessionID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.turns[sessionID]
+	if state == nil || state.completed {
+		return "", false
+	}
+	return state.userID, true
+}
+
 // ActiveSession reports the latest turn and whether it is still running; the
 // polling reconciler uses the former for its idle tick.
 func (s *Synthesizer) ActiveSession() (string, bool) {
