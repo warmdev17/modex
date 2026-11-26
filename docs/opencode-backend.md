@@ -7,9 +7,8 @@ explicitly with `--backend opencode`.
 
 The backend keeps the existing Modex protocol for the implemented surface: the
 same method names, result shapes and event names that the Codex bridge already
-returns. OpenCode's native session/message/permission API is projected into those
-shapes inside `internal/opencode`, so the Android client needs no new protocol
-handling in this slice. Android is unchanged.
+returns. The adapter in `internal/opencode` maps OpenCode sessions, messages,
+and permission prompts to those shapes.
 
 ## Prerequisites
 
@@ -42,6 +41,14 @@ Use an explicit binary path when `opencode` is not on the host service's `PATH`:
 
 Those two commands accept `--backend opencode` but ignore it; they operate on
 the supervisor selected by the state directory.
+
+After successful SSH attach, the supervisor's ready frame identifies its
+backend and optional conversation capabilities. OpenCode currently sends
+`"backend":"opencode","capabilities":[]`. Android offers chat, model
+selection, attachments, and permission approvals. The optional Codex controls
+for Usage, Plan mode, permission profiles, session actions, projects,
+references, and takeover are hidden when their capabilities are absent.
+Ready frames from older hosts use the legacy Codex defaults.
 
 ### Flags and validation
 
@@ -380,8 +387,8 @@ with the fixed `unsupported_input` notice instead of leaving it stalled. A
   gateway in this slice.
 - Session state lives in a temporary isolated data directory, so cross-restart
   OpenCode session continuity is not claimed.
-- Android has not been changed for this backend; it consumes the projected
-  shapes through the existing UI.
+- Model selection still uses the existing model IDs. Providers that expose the
+  same model ID need a provider-qualified selection, which is pending.
 
 ## Operational limits
 

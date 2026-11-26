@@ -31,8 +31,28 @@ build, scoped re-review and isolated OpenCode session creation passed. The
 earlier isolated supervisor run at `771c518` verified standalone creation,
 same-turn steer admission and exact-turn interrupt. The final live steer
 transcript, paid-provider completion, physical Android and production
-activation were not exercised. No release or merge. Next is Stage 2
-capability gating and conversation parity.
+activation were not exercised. [PR #36](https://github.com/warmdev17/modex/pull/36)
+merged Stage 1 as `ebe7825` after all five GitHub Verify jobs passed.
+
+Stage 2 capability milestone verified 2026-11-26T20:15:12+07:00 on
+`feat/opencode-capabilities`, source `88c7a7c`. The
+[capabilities plan](docs/superpowers/plans/2026-11-26-opencode-capabilities.md)
+covers authenticated SSH backend identity, compatible legacy Codex defaults,
+and Android controls and requests gated to the current connection.
+
+- Host `8ad1cab` and test cleanup `b37e8d0` passed independent review and
+  isolated OpenCode 2.4.1 attach, session creation and history read.
+  `umask 022; go test -race ./... -timeout=90s` and `go vet ./...` passed.
+- Android `b24779e` plus fix `88c7a7c` passed scoped re-review, 154 JVM
+  tests, both debug APK builds and debug lint (0 errors). On API 33,
+  `skill-picker` at 412 dp reproduced the missing Codex menu before
+  the fix and passed after it. `opencode-capabilities` passed at 320 dp
+  after the fix. Earlier checks at `b24779e` passed native Codex controls,
+  loopback SSH reconnect/wrong pin and attachment transfer.
+- Capability branch is local. No delivery build, service activation,
+  physical device check or live provider inference. Next, preserve
+  provider-qualified model selections, then verify OpenCode attachment
+  parity and implement native permission and question behavior.
 
 ## Stale Android attachment lease
 
