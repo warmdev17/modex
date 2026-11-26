@@ -90,10 +90,10 @@ func (s *Synthesizer) StartTurn(sessionID, userID, dir string) {
 // MarkInterrupted records an accepted user interrupt so a subsequent idle
 // event finishes the turn as interrupted even if execution.interrupted was
 // missed on the stream.
-func (s *Synthesizer) MarkInterrupted(sessionID string) {
+func (s *Synthesizer) MarkInterrupted(sessionID, turnID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if state := s.turns[sessionID]; state != nil && !state.completed {
+	if state := s.turns[sessionID]; state != nil && !state.completed && state.userID == turnID {
 		state.interrupted = true
 	}
 }

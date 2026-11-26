@@ -51,3 +51,46 @@ func TestOpenCodeTurnControl(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenCodeDelayedInterruptDoesNotMarkReplacementTurn(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+		_, _ = w.Write([]byte(`{"interrupted":true}`))
+	}))
+	defer server.Close()
+	events := make(chan json.RawMessage, 4)
+	synth := opencode.NewSynthesizer("/work", func(method string, params json.RawMessage) {
+		if method == "turn/completed" {
+			events <- params
+		}
+	})
+	client := opencode.NewClient(server.URL, server.Client(), "/work")
+	synth.StartTurn("ses_1", "turn_1", "/work")
+	done := make(chan error, 1)
+	go func() {
+		_, err := openCodeTurnCall(context.Background(), client, synth, "turn/interrupt", map[string]any{"sessionID": "ses_1", "turnID": "turn_1"}, nil)
+		done <- err
+	}()
+	<-entered
+	synth.Handle("session.idle", json.RawMessage(`{"sessionID":"ses_1"}`))
+	synth.StartTurn("ses_1", "turn_2", "/work")
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	synth.Handle("session.idle", json.RawMessage(`{"sessionID":"ses_1"}`))
+	<-events
+	var completed struct {
+		Turn struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"turn"`
+	}
+	raw := <-events
+	if err := json.Unmarshal(raw, &completed); err != nil || completed.Turn.ID != "turn_2" || completed.Turn.Status != "completed" {
+		t.Fatalf("replacement completion=%s err=%v", raw, err)
+	}
+}

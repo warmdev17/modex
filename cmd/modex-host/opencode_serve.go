@@ -98,7 +98,8 @@ func openCodeTurnCall(ctx context.Context, client *opencode.Client, synth *openc
 			Interrupted bool `json:"interrupted"`
 		}
 		if json.Unmarshal(raw, &result) == nil && result.Interrupted {
-			synth.MarkInterrupted(sessionID)
+			expected, _ := values["turnID"].(string)
+			synth.MarkInterrupted(sessionID, expected)
 		}
 	}
 	return raw, nil

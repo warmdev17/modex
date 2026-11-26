@@ -343,7 +343,7 @@ func TestSynthesizerAcceptedInterruptFinishesInterrupted(t *testing.T) {
 	collector := &eventCollector{}
 	synth := NewSynthesizer("/work", collector.emit)
 	synth.StartTurn("ses_1", "msg_user", "/work")
-	synth.MarkInterrupted("ses_1")
+	synth.MarkInterrupted("ses_1", "msg_user")
 	synth.Handle("session.idle", json.RawMessage(`{"sessionID":"ses_1"}`))
 
 	events := collector.snapshot()
