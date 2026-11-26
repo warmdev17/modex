@@ -2,55 +2,32 @@
 
 ## OpenCode backend
 
-Updated 2026-11-26. Branch `feat/opencode-backend`. `modex-host` can now drive
-OpenCode 2.4.x behind the existing Modex protocol; Codex remains the default
-backend.
+Updated 2026-11-26 on `feat/opencode-backend`; Stage 1 implementation source is
+`771c518`. Codex remains the default. The accepted roadmap and core plan are
+[design](docs/superpowers/specs/2026-11-26-opencode-integration-design.md) and
+[plan](docs/superpowers/plans/2026-11-26-opencode-core.md).
 
-Milestone commits in order: `d43fbe7`, `6d97255`, `57d7bc3`, `67488cd`,
-`a1b1ed2`, `6006d5a`, `71e9624`, `d42fd5d`, `0c5c1db`, `1291100`, `4588aca`.
+- Core entry is usable by the existing Android protocol: standalone New chat
+  creates an OpenCode session under `$HOME/Documents/Codex`; `turn/start`
+  supports text/files; `turn/steer` uses native `delivery:"steer"` and returns
+  the active Modex turn id; exact-turn Stop rejects stale/completed targets
+  before calling OpenCode.
+- Concurrency corrections remove the decision/synthesizer reverse lock edge and
+  prevent a delayed Stop response from marking a replacement turn interrupted.
+  OpenCode's interrupt/prompt endpoints do not accept an expected turn id, so a
+  narrow upstream change after the local snapshot remains unavoidable.
+- Existing read/history/model/SSE/permission projections remain. OpenCode state
+  is still temporary per supervisor; forms/questions, lifecycle navigation,
+  projects, references, plan mode and cross-agent utilities remain later-stage
+  work.
 
-- Backend selection: `--backend codex|opencode` (default `codex`) and
-  `--opencode <binary>` (default `opencode`). OpenCode requires `--serve`,
-  `--background` or `--supervise`; `--cli`, `--native-socket`, `--codex-home`
-  and `--thread` are rejected. Attach and stop ignore `--backend`.
-- Isolated child: the host spawns `opencode serve --port 0` with a random
-  64-hex password via `OPENCODE_PASSWORD`, temporary `XDG_DATA_HOME` and
-  `XDG_STATE_HOME` removed on close, inherited `XDG_CONFIG_HOME` for provider
-  auth, and loopback-only HTTP. Credentials are never logged or placed in SSH
-  arguments.
-- Read surface: `status`, `threads/list`, `threads/start`, `threads/read`,
-  `threads/resume` and `models/list` are projected to the existing result
-  shapes, including chronological paged history with an opaque
-  `history_revision`.
-- Turn lifecycle: `turn/start` sends text and file attachments and applies the
-  selected model; `turn/interrupt` stops the active execution. Turn ids are the
-  accepted user message ids.
-- Streaming: OpenCode v2 SSE (`GET /api/event`) is synthesized into Codex-shaped
-  `turn/started`, item text/reasoning/tool events, `turn/completed`, decision
-  events and fixed `error` notices, with reconnect backoff, event dedupe and a
-  polling reconciler for dropped streams.
-- Permissions: `permission.asked`/`permission.replied` are projected into
-  `decision/required`, `decision/resolved` and `decision/reset`. Reply mapping is
-  `accept`→`once`, `decline`/`cancel`→`reject`; `always` is not exposed. Pending
-  approvals are capped at 128, and unsupported forms fail the turn visibly.
-- Explicitly unsupported methods return clear errors: `threads/archive`,
-  `threads/unarchive`, `threads/delete`, `threads/fork`, `threads/takeover`,
-  `threads/mode`, `threads/status`, `threads/permissions`, `plans/respond`,
-  `projects/list`, `projects/create` and `references/list`.
-
-Verified with the full Go suite, race detector, `go vet`, cross-builds, and a
-real isolated supervisor end-to-end run against OpenCode 2.4.1.
-
-Known limitations: no persistent `always` grants; file-change approvals are
-decline/cancel-only without a diff viewer; no plan mode, projects, references,
-fork, takeover or archive; `threads/list` does not surface server pagination;
-questions/forms are unsupported; a session model/provider is empty until a model
-is set; native CLI/TUI remains Codex-only; OpenCode data/state is temporary, so
-cross-restart session continuity is not claimed.
-
-Android is unchanged in this slice; no service restart was performed and no
-push/merge was executed. User-facing documentation is
-[docs/opencode-backend.md](docs/opencode-backend.md), linked from `README.md`.
+Fresh verification at `771c518`: `umask 022; go test -race ./...`, `go vet
+./...`, and a temporary host build passed. An isolated OpenCode 2.4.1
+supervisor verified standalone creation, initial admission, native steer with
+the same turn id, exact-turn interrupt with an interrupted completion, and
+fixture cleanup without touching the live service. A paid-provider completion,
+physical Android, release, merge, installation and live host activation were
+not performed.
 
 ## Stale Android attachment lease
 
