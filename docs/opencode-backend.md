@@ -399,9 +399,13 @@ with the fixed `unsupported_input` notice instead of leaving it stalled. A
 
 - The host bridge still uses the existing 4 MiB frame cap and per-request
   deadlines. Upstream HTTP requests time out after 20 seconds and responses are
-  capped at 8 MiB. OpenCode includes base64 file data in prompt confirmations
-  and history pages, so sizable files or batches can exceed this response cap
-  even if the upload itself was accepted.
+  capped at 8 MiB after projection. For prompt confirmations and history,
+  Modex discards embedded attachment base64 while reading the upstream
+  response. Those endpoints have a separate 256 MiB wire budget to accommodate
+  the Android limit of eight 20 MiB files. An oversized history page is
+  retried with fewer entries and the same cursor. If a single native message
+  still exceeds the limits, the read fails visibly. A prompt is never reposted
+  because its response exceeded a limit.
 - `turn/interrupt` and `decision/respond` are handled ahead of queued ordinary
   commands so a long `turn/start` cannot starve them. The ordinary command queue
   holds 16 items; overflow returns an explicit error.

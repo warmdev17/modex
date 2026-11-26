@@ -204,9 +204,13 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 	}
 	var messages []message
 	cursor := ""
+	seen := map[string]bool{}
+	limit := pollMessages
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	// shortcut: recover from at most 100 messages per poll, expand when longer offline turns need recovery.
-	for range 5 {
-		page, err := s.client.ListMessagesPage(ctx, sessionID, pollMessages, "desc", cursor)
+	for len(messages) < 100 {
+		page, err := s.client.ListMessagesPage(ctx, sessionID, min(limit, 100-len(messages)), "desc", cursor)
 		if err != nil {
 			return
 		}
@@ -218,10 +222,15 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 				break
 			}
 		}
-		if anchored || page.Cursor.Next == nil || *page.Cursor.Next == "" || *page.Cursor.Next == cursor {
+		if anchored || len(page.Data) == 0 || page.Cursor.Next == nil || *page.Cursor.Next == "" {
 			break
 		}
 		cursor = *page.Cursor.Next
+		if seen[cursor] {
+			return
+		}
+		seen[cursor] = true
+		limit = min(limit, len(page.Data))
 	}
 	reverseMessages(messages)
 	if inFlight {

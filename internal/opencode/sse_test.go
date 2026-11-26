@@ -215,3 +215,36 @@ func TestPollFindsTurnAnchorOnOlderPage(t *testing.T) {
 		t.Fatal("missed completion with the original prompt on the second page")
 	}
 }
+
+func TestPollFindsTurnAnchorAfterSeveralShrunkPages(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, _ string) {
+		switch r.URL.Path {
+		case "/api/session/s":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"s","location":{"directory":"/work"}}}`)
+		case "/api/session/s/message":
+			if r.URL.Query().Get("limit") != "1" {
+				w.Header().Set("Content-Length", "268435457")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			var page int
+			_, _ = fmt.Sscan(r.URL.Query().Get("cursor"), &page)
+			switch page {
+			case 0:
+				jsonResponse(w, 200, `{"data":[{"id":"idle","type":"idle","outcome":"succeeded"}],"cursor":{"next":"1"}}`)
+			case 6:
+				jsonResponse(w, 200, `{"data":[{"id":"start","type":"user"}],"cursor":{}}`)
+			default:
+				jsonResponse(w, 200, fmt.Sprintf(`{"data":[{"id":"followup-%d","type":"user"}],"cursor":{"next":"%d"}}`, page, page+1))
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	synth := NewSynthesizer("/work", nil)
+	synth.StartTurn("s", "start", "/work")
+	NewStream(NewClient(server.URL, server.Client(), "/work"), synth).reconcile(context.Background(), "s", false)
+	if _, active := synth.ActiveTurn("s"); active {
+		t.Fatal("missed completion past five shrunken pages")
+	}
+}

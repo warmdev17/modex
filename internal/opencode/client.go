@@ -265,6 +265,8 @@ func (c *Client) ListMessages(ctx context.Context, id string, limit int, order s
 }
 
 func (c *Client) ListMessagesPage(ctx context.Context, id string, limit int, order, cursor string) (messagePage, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	query := url.Values{}
 	// OpenCode encodes the order in the cursor and rejects a cursor combined
 	// with order, so only the first page may specify one.
@@ -277,9 +279,19 @@ func (c *Client) ListMessagesPage(ctx context.Context, id string, limit int, ord
 	if cursor != "" {
 		query.Set("cursor", cursor)
 	}
-	var page messagePage
-	err := c.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id)+"/message", query, nil, &page)
-	return page, err
+	for {
+		var page messagePage
+		err := c.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id)+"/message", query, nil, &page, historyAttachmentPath)
+		if !errors.Is(err, errResponseTooLarge) || limit == 1 {
+			return page, err
+		}
+		if limit <= 0 {
+			limit = 10
+		} else {
+			limit /= 2
+		}
+		query.Set("limit", strconv.Itoa(limit))
+	}
 }
 
 // Interrupt stops the active execution and reports whether one was running.
@@ -336,7 +348,7 @@ func (c *Client) prompt(ctx context.Context, sessionID, text string, files []pro
 			Type string `json:"type"`
 		} `json:"data"`
 	}
-	if err := c.request(ctx, http.MethodPost, path+"/prompt", nil, body, &response); err != nil {
+	if err := c.request(ctx, http.MethodPost, path+"/prompt", nil, body, &response, promptAttachmentPath); err != nil {
 		return "", err
 	}
 	if response.Data.ID != "" {
@@ -435,7 +447,7 @@ func (c *Client) locationQuery() url.Values {
 	return query
 }
 
-func (c *Client) request(ctx context.Context, method, path string, query url.Values, body, out any) error {
+func (c *Client) request(ctx context.Context, method, path string, query url.Values, body, out any, attachmentPath ...[]string) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	endpoint := c.baseURL + path
@@ -471,9 +483,20 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponse))
 		return nil
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
-	if err != nil {
-		return errRequestFailed
+	var raw []byte
+	if len(attachmentPath) > 0 {
+		if resp.ContentLength > maxAttachmentWire {
+			return errResponseTooLarge
+		}
+		raw, err = readAttachmentResponse(resp.Body, attachmentPath[0], maxAttachmentWire)
+		if err != nil {
+			return err
+		}
+	} else {
+		raw, err = io.ReadAll(io.LimitReader(resp.Body, maxResponse))
+		if err != nil {
+			return errRequestFailed
+		}
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return errInvalidResponse
