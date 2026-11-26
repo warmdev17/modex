@@ -387,3 +387,32 @@ func TestSynthesizerFailureUsesFixedNotice(t *testing.T) {
 		t.Fatalf("turn/completed=%s", events[2].params)
 	}
 }
+
+func TestProjectMessagesActiveTurnUsesUserAndSteerIdentity(t *testing.T) {
+	for _, tc := range []struct{ name, raw, want string }{
+		{"user", `[{"id":"u1","type":"user"},{"id":"a1","type":"assistant"}]`, "u1"},
+		{"steer", `[{"id":"u1","type":"user"},{"id":"a1","type":"assistant"},{"id":"u2","type":"user","metadata":{"modex_turn_id":"u1"}},{"id":"a2","type":"assistant"}]`, "u1"},
+		{"steer page", `[{"id":"u2","type":"user","metadata":{"modex_turn_id":"u1"}},{"id":"a2","type":"assistant"}]`, "u1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var messages []message
+			if err := json.Unmarshal([]byte(tc.raw), &messages); err != nil {
+				t.Fatal(err)
+			}
+			_, active, id := projectMessages("s", "/work", messages)
+			if !active || id != tc.want {
+				t.Fatalf("active=%v id=%q want %q", active, id, tc.want)
+			}
+		})
+	}
+}
+
+func TestSynthesizerReconcileIgnoresMissingAnchor(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("s", "new", "/work")
+	synth.Reconcile(session{ID: "s", Outcome: "succeeded"}, []message{{ID: "old", Type: "user"}, {ID: "answer", Type: "assistant", Text: "stale"}})
+	if id, active := synth.ActiveTurn("s"); !active || id != "new" || collector.hasMethod("item/agentMessage/delta") {
+		t.Fatalf("stale snapshot applied: %+v", collector.snapshot())
+	}
+}

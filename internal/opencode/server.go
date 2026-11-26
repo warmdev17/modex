@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,6 +47,10 @@ func Handle(ctx context.Context, cwd string, cmd bridge.Command, call Caller) (a
 // HandleEvents validates a Modex command and projects the OpenCode read
 // surface into the same result shapes the Codex bridge returns.
 func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call EventCaller, emit func(string, json.RawMessage)) (any, error) {
+	return handleEvents(ctx, cwd, cmd, call, emit, nil)
+}
+
+func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call EventCaller, emit func(string, json.RawMessage), synth *Synthesizer) (any, error) {
 	if unsupportedMethods[cmd.Method] {
 		return nil, fmt.Errorf("%s is unsupported by the opencode backend", cmd.Method)
 	}
@@ -247,6 +252,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			}
 		}
 		var files []promptFile
+		content := []map[string]string{{"type": "text", "text": text}}
 		if raw, ok := p["attachments"]; ok && string(raw) != "null" {
 			var attachments []struct {
 				Path string `json:"path"`
@@ -264,7 +270,15 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 				}
 				// Live v2 PromptInput.FileAttachment takes uri/name; MIME is
 				// inferred by OpenCode and is not accepted in this body.
-				files = append(files, promptFile{URI: "file://" + attachment.Path, Name: filepath.Base(attachment.Path)})
+				path := filepath.ToSlash(attachment.Path)
+				uri := url.URL{Scheme: "file", Path: path}
+				if filepath.VolumeName(attachment.Path) != "" && !strings.HasPrefix(path, "/") {
+					uri.Path = "/" + path
+				}
+				files = append(files, promptFile{URI: uri.String(), Name: filepath.Base(attachment.Path)})
+				if attachment.Kind == "image" {
+					content = append(content, map[string]string{"type": "localImage", "path": attachment.Path})
+				}
 			}
 		}
 		modelID := ""
@@ -280,6 +294,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			if json.Unmarshal(raw, &effort) != nil || strings.TrimSpace(effort) == "" || len(effort) > 64 || strings.ContainsAny(effort, "\r\n\x00") {
 				return nil, errors.New("invalid reasoning effort")
 			}
+		}
+		if _, err := readSession(ctx, call, id, cwd, emit); err != nil {
+			return nil, err
 		}
 		var model *modelRef
 		if cmd.Method == "turn/start" {
@@ -304,12 +321,23 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, err
 		}
 		var result struct {
-			Turn struct {
+			UserMessageID string `json:"userMessageId"`
+			Turn          struct {
 				ID string `json:"id"`
 			} `json:"turn"`
 		}
 		if json.Unmarshal(raw, &result) != nil || result.Turn.ID == "" {
 			return nil, errors.New("invalid turn response")
+		}
+		if emit != nil && result.UserMessageID != "" {
+			event, err := json.Marshal(map[string]any{
+				"threadId": id, "turnId": result.Turn.ID,
+				"item": map[string]any{"id": result.UserMessageID, "type": "userMessage", "content": content},
+			})
+			if err != nil {
+				return nil, err
+			}
+			emit("item/completed", event)
 		}
 		return map[string]any{"turn": map[string]any{"id": result.Turn.ID, "status": "inProgress"}}, nil
 	case "turn/interrupt":
@@ -320,6 +348,9 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		var turn string
 		if raw, ok := p["turn_id"]; !ok || json.Unmarshal(raw, &turn) != nil || strings.TrimSpace(turn) == "" || len(turn) > 256 || strings.ContainsAny(turn, "\r\n\x00") {
 			return nil, errors.New("turn_id must be a nonempty single-line string up to 256 bytes")
+		}
+		if _, err := readSession(ctx, call, id, cwd, emit); err != nil {
+			return nil, err
 		}
 		if _, err := call(ctx, callTurnInterrupt, map[string]any{"sessionID": id, "turnID": turn}, emit); err != nil {
 			return nil, err
@@ -388,6 +419,13 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, err
 		}
 		entries, active, activeID := projectMessages(id, cwd, messages)
+		if cursor == "" && synth != nil {
+			if turnID, running := synth.ActiveTurn(id); running {
+				active, activeID = true, turnID
+			} else if turnID != "" {
+				active, activeID = false, ""
+			}
+		}
 		result := map[string]any{
 			"thread":         projectThread(thread),
 			"messages":       entries,
@@ -641,17 +679,17 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cwd string, call Ca
 
 // ServeEvents reads Modex commands from in and writes framed replies to out.
 func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, call EventCaller) error {
-	return ServeEventsWithWriter(ctx, in, cwd, call, NewWriter(out))
+	return ServeEventsWithWriter(ctx, in, cwd, call, NewWriter(out), nil)
 }
 
 // ServeEventsWithWriter lets the host share one framed writer between command
 // replies and the SSE event stream. turn/interrupt is handled out-of-band so a
 // long turn/start cannot starve it, mirroring the Codex bridge.
-func ServeEventsWithWriter(ctx context.Context, in io.Reader, cwd string, call EventCaller, writer *Writer) error {
+func ServeEventsWithWriter(ctx context.Context, in io.Reader, cwd string, call EventCaller, writer *Writer, synth *Synthesizer) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 4096), 4*1024*1024)
 	handle := func(cmd bridge.Command) {
-		result, err := HandleEvents(ctx, cwd, cmd, call, writer.Emit)
+		result, err := handleEvents(ctx, cwd, cmd, call, writer.Emit, synth)
 		if err != nil {
 			writer.Error(cmd.ID, err)
 			return

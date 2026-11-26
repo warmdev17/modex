@@ -32,15 +32,18 @@ type session struct {
 }
 
 type message struct {
-	ID      string          `json:"id"`
-	Type    string          `json:"type"`
-	Outcome string          `json:"outcome"`
-	Agent   string          `json:"agent"`
-	Text    string          `json:"text"`
-	Content []part          `json:"content"`
-	Error   json.RawMessage `json:"error"`
-	Finish  string          `json:"finish"`
-	Time    struct {
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Outcome  string          `json:"outcome"`
+	Agent    string          `json:"agent"`
+	Text     string          `json:"text"`
+	Content  []part          `json:"content"`
+	Error    json.RawMessage `json:"error"`
+	Finish   string          `json:"finish"`
+	Metadata struct {
+		TurnID string `json:"modex_turn_id"`
+	} `json:"metadata"`
+	Time struct {
 		Created   int64  `json:"created"`
 		Completed *int64 `json:"completed"`
 	} `json:"time"`
@@ -124,6 +127,7 @@ func projectMessages(id, dir string, messages []message) ([]map[string]any, bool
 	entries := make([]map[string]any, 0, len(messages))
 	active := false
 	activeID := ""
+	userID := ""
 	for _, m := range messages {
 		if m.Type == "idle" {
 			// An idle marker closes any in-progress assistant response.
@@ -133,6 +137,10 @@ func projectMessages(id, dir string, messages []message) ([]map[string]any, bool
 		first := len(entries)
 		switch m.Type {
 		case "user":
+			userID = m.ID
+			if m.Metadata.TurnID != "" {
+				userID = m.Metadata.TurnID
+			}
 			if text := messageText(m); text != "" {
 				entries = append(entries, map[string]any{"id": m.ID, "role": "user", "text": text, "display_text": text})
 			}
@@ -141,7 +149,7 @@ func projectMessages(id, dir string, messages []message) ([]map[string]any, bool
 			if messageFailed(m) || terminalOutcome(m.Outcome) || m.Time.Completed != nil {
 				active, activeID = false, ""
 			} else {
-				active, activeID = true, m.ID
+				active, activeID = true, userID
 			}
 		}
 		if messageFailed(m) && len(entries) > first {

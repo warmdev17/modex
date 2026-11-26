@@ -52,6 +52,7 @@ type Decisions struct {
 	turnID     func(string) string
 	defaultDir string
 	pending    map[string]*Decision
+	consumed   map[string]struct{}
 
 	// OnUnsupportedInput surfaces an input request this slice cannot render
 	// (form.created / unknown *.asked) so the turn fails visibly instead of
@@ -72,6 +73,7 @@ func NewDecisions(defaultDir string, emit func(string, json.RawMessage), turnID 
 		turnID:     turnID,
 		defaultDir: defaultDir,
 		pending:    map[string]*Decision{},
+		consumed:   map[string]struct{}{},
 	}
 }
 
@@ -158,7 +160,7 @@ func (d *Decisions) failVisible(sessionID, message string) {
 }
 
 func (d *Decisions) failPendingCap(sessionID string) {
-	d.failVisible(sessionID, "OpenCode requested too many pending approvals. Review them on the computer and reconnect.")
+	d.failVisible(sessionID, "OpenCode requested too many pending approvals or reached the answered approval limit. Review them on the computer and reconnect.")
 }
 
 func (d *Decisions) add(request permissionRequest, directory string) {
@@ -180,10 +182,14 @@ func (d *Decisions) addLocked(request permissionRequest, directory, turnID strin
 		return false
 	}
 	key := decisionKey(request.SessionID, request.ID)
+	if _, consumed := d.consumed[key]; consumed {
+		return false
+	}
 	if _, exists := d.pending[key]; exists {
 		return false
 	}
-	if len(d.pending) >= 128 {
+	// shortcut: retain at most 16384 answered identities until restart, upgrade storage for longer-lived processes.
+	if len(d.pending) >= 128 || len(d.pending)+len(d.consumed) >= 16384 {
 		return true
 	}
 	if directory == "" {
@@ -290,6 +296,7 @@ func (d *Decisions) Answer(ctx context.Context, id string, result json.RawMessag
 		return errors.New("decision not offered by OpenCode")
 	}
 	delete(d.pending, id)
+	d.consumed[id] = struct{}{}
 	sessionID := decision.sessionID
 	requestID := decision.requestID
 	d.mu.Unlock()

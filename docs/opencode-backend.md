@@ -213,9 +213,9 @@ Returns the accepted user message id as the turn id:
 Parameters: `thread_id`, `turn_id`, `text`, and the same optional model,
 attachments and effort fields accepted by `turn/start`. Modex checks that the
 requested id is the exact active turn, then submits the prompt with
-`delivery:"steer"`; it returns that same active turn id. This does not start a
-second Modex turn. Android uses its existing protocol request and needs no new
-handling.
+`delivery:"steer"`. It returns the same active turn id and emits the accepted
+user message with its own item id. Modex checks the session workspace before
+sending prompts or interrupting a session.
 
 ### `turn/interrupt`
 
@@ -330,6 +330,10 @@ decisions; attach replays only decisions that are still pending.
 At most 128 approvals may be pending across the backend. A new request past that
 cap emits a fixed error and fails the turn visibly rather than dropping the
 request silently.
+
+Answered approvals stay suppressed for the lifetime of the OpenCode bridge,
+including after an uncertain delivery. The bridge retains up to 16,384 pending
+and consumed identities before declining new approvals.
 
 ## Unsupported methods
 

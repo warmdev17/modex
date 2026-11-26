@@ -459,3 +459,42 @@ func TestDecisionsTurnLookupDoesNotBlockCompletion(t *testing.T) {
 		})
 	}
 }
+
+func TestConsumedDecisionsRemainSessionScoped(t *testing.T) {
+	var replies []decisionReply
+	store, _ := decisionStore(t, &replies, errors.New("uncertain"))
+	store.Handle("permission.asked", perm("same", "bash"), "/work")
+	_ = store.Answer(context.Background(), "ses_1/same", json.RawMessage(`{"decision":"accept"}`))
+	store.Handle("permission.asked", json.RawMessage(`{"id":"same","sessionID":"ses_2","action":"bash"}`), "/work")
+	store.Handle("permission.updated", perm("same", "bash"), "/work")
+	store.Reconcile("ses_1", "/work", json.RawMessage(`{"data":[{"id":"same","action":"bash"}]}`))
+	pending := store.Pending()
+	if len(pending) != 1 || pending[0].ID != "ses_2/same" {
+		t.Fatalf("pending=%+v", pending)
+	}
+}
+
+func TestConsumedDecisionCapacityFailsClosed(t *testing.T) {
+	var notices int
+	store := NewDecisions("/work", nil, nil, func(context.Context, string, string, string) error { return nil })
+	store.OnUnsupportedInput = func(string, string) { notices++ }
+	for i := 0; i < 16383; i++ {
+		id := fmt.Sprintf("per_%d", i)
+		store.Handle("permission.asked", perm(id, "bash"), "/work")
+		if err := store.Answer(context.Background(), "ses_1/"+id, json.RawMessage(`{"decision":"accept"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.Handle("permission.asked", perm("last", "bash"), "/work")
+	store.Handle("permission.asked", perm("overflow", "bash"), "/work")
+	if pending := store.Pending(); len(pending) != 1 || pending[0].ID != "ses_1/last" || notices != 1 {
+		t.Fatalf("pending=%+v notices=%d", pending, notices)
+	}
+	if err := store.Answer(context.Background(), "ses_1/last", json.RawMessage(`{"decision":"accept"}`)); err != nil {
+		t.Fatal(err)
+	}
+	store.Handle("permission.asked", perm("per_0", "bash"), "/work")
+	if len(store.Pending()) != 0 {
+		t.Fatal("consumed approval reappeared after capacity was reached")
+	}
+}

@@ -192,19 +192,42 @@ func (s *Stream) poll(ctx context.Context) {
 }
 
 func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool) {
+	s.synth.mu.Lock()
+	turn := s.synth.turns[sessionID]
+	s.synth.mu.Unlock()
+	if turn == nil {
+		return
+	}
 	session, err := s.client.ReadSession(ctx, sessionID)
 	if err != nil {
 		return
 	}
-	page, err := s.client.ListMessagesPage(ctx, sessionID, pollMessages, "desc", "")
-	if err != nil {
-		return
+	var messages []message
+	cursor := ""
+	// shortcut: recover from at most 100 messages per poll, expand when longer offline turns need recovery.
+	for range 5 {
+		page, err := s.client.ListMessagesPage(ctx, sessionID, pollMessages, "desc", cursor)
+		if err != nil {
+			return
+		}
+		messages = append(messages, page.Data...)
+		anchored := false
+		for _, item := range page.Data {
+			if item.ID == turn.userID {
+				anchored = true
+				break
+			}
+		}
+		if anchored || page.Cursor.Next == nil || *page.Cursor.Next == "" || *page.Cursor.Next == cursor {
+			break
+		}
+		cursor = *page.Cursor.Next
 	}
-	reverseMessages(page.Data)
+	reverseMessages(messages)
 	if inFlight {
 		if permissions, err := s.client.ListPermissions(ctx, sessionID); err == nil && s.OnPermissions != nil {
 			s.OnPermissions(sessionID, session.Location.Directory, permissions)
 		}
 	}
-	s.synth.Reconcile(session, page.Data)
+	s.synth.reconcile(session, messages, turn)
 }

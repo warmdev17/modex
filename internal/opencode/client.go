@@ -149,18 +149,19 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 		if input.ProviderID != "" && input.ModelID != "" {
 			model = &modelRef{ProviderID: input.ProviderID, ModelID: input.ModelID}
 		}
-		delivery := ""
+		expectedTurn := ""
 		if method == "turn/steer" {
-			delivery = "steer"
+			expectedTurn = stringParam(values, "turnID")
 		}
-		userID, err := c.prompt(ctx, input.SessionID, input.Text, input.Files, model, input.Agent, delivery)
+		userID, err := c.prompt(ctx, input.SessionID, input.Text, input.Files, model, input.Agent, expectedTurn)
 		if err != nil {
 			return nil, err
 		}
 		if method == "turn/steer" {
-			userID = stringParam(values, "turnID")
+			value = map[string]any{"turn": map[string]any{"id": expectedTurn, "status": "inProgress"}, "userMessageId": userID}
+		} else {
+			value = map[string]any{"turn": map[string]any{"id": userID, "status": "inProgress"}, "userMessageId": userID}
 		}
-		value = map[string]any{"turn": map[string]any{"id": userID, "status": "inProgress"}}
 	case callTurnInterrupt:
 		interrupted, err := c.Interrupt(ctx, stringParam(values, "sessionID"))
 		if err != nil {
@@ -308,7 +309,7 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, files []pro
 	return c.prompt(ctx, sessionID, text, files, model, agent, "")
 }
 
-func (c *Client) prompt(ctx context.Context, sessionID, text string, files []promptFile, model *modelRef, agent, delivery string) (string, error) {
+func (c *Client) prompt(ctx context.Context, sessionID, text string, files []promptFile, model *modelRef, agent, expectedTurn string) (string, error) {
 	path := "/api/session/" + url.PathEscape(sessionID)
 	if model != nil && model.ProviderID != "" && model.ModelID != "" {
 		body := map[string]any{"model": map[string]string{"id": model.ModelID, "providerID": model.ProviderID}}
@@ -322,8 +323,9 @@ func (c *Client) prompt(ctx context.Context, sessionID, text string, files []pro
 		}
 	}
 	body := map[string]any{"text": text}
-	if delivery != "" {
-		body["delivery"] = delivery
+	if expectedTurn != "" {
+		body["delivery"] = "steer"
+		body["metadata"] = map[string]string{"modex_turn_id": expectedTurn}
 	}
 	if len(files) > 0 {
 		body["files"] = files
@@ -337,11 +339,11 @@ func (c *Client) prompt(ctx context.Context, sessionID, text string, files []pro
 	if err := c.request(ctx, http.MethodPost, path+"/prompt", nil, body, &response); err != nil {
 		return "", err
 	}
-	if delivery == "steer" {
-		return response.Data.ID, nil
-	}
 	if response.Data.ID != "" {
 		return response.Data.ID, nil
+	}
+	if expectedTurn != "" {
+		return "", errors.New("opencode did not confirm the follow-up; check the conversation before resending")
 	}
 	// Older or asynchronous prompt responses may omit the message; resolve the
 	// newest user message instead.

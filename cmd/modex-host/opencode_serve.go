@@ -63,7 +63,7 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 		}
 		return raw, err
 	}
-	return opencode.ServeEventsWithWriter(ctx, in, cwd, call, writer)
+	return opencode.ServeEventsWithWriter(ctx, in, cwd, call, writer, synth)
 }
 
 func openCodeTurnCall(ctx context.Context, client *opencode.Client, synth *opencode.Synthesizer, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {

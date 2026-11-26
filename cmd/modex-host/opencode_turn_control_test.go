@@ -36,7 +36,7 @@ func TestOpenCodeTurnControl(t *testing.T) {
 		}
 	}
 	raw, err := openCodeTurnCall(context.Background(), client, synth, "turn/steer", map[string]any{"sessionID": "ses_1", "turnID": "turn_1", "text": "follow up"}, nil)
-	if err != nil || string(raw) != `{"turn":{"id":"turn_1","status":"inProgress"}}` || synth.TurnID("ses_1") != "turn_1" {
+	if err != nil || string(raw) != `{"turn":{"id":"turn_1","status":"inProgress"},"userMessageId":"followup"}` || synth.TurnID("ses_1") != "turn_1" {
 		t.Fatalf("steer: raw=%s err=%v turn=%s", raw, err, synth.TurnID("ses_1"))
 	}
 	_, err = openCodeTurnCall(context.Background(), client, synth, "turn/interrupt", map[string]any{"sessionID": "ses_1", "turnID": "turn_1"}, nil)

@@ -135,15 +135,15 @@ func (s *Synthesizer) TurnID(sessionID string) string {
 	return ""
 }
 
-// ActiveTurn returns the currently running turn for a session.
+// ActiveTurn returns the latest turn identity for a session and whether it is running.
 func (s *Synthesizer) ActiveTurn(sessionID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.turns[sessionID]
-	if state == nil || state.completed {
+	if state == nil {
 		return "", false
 	}
-	return state.userID, true
+	return state.userID, !state.completed
 }
 
 // ActiveSession reports the latest turn and whether it is still running; the
@@ -282,18 +282,25 @@ func (s *Synthesizer) Handle(typ string, properties json.RawMessage) {
 // Reconcile fills in terminal state and parts missed by a dropped SSE stream.
 // It is idempotent: existing items/outputs are never emitted twice.
 func (s *Synthesizer) Reconcile(session session, messages []message) {
+	s.reconcile(session, messages, nil)
+}
+
+func (s *Synthesizer) reconcile(session session, messages []message, expected *turnState) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	state := s.turns[session.ID]
-	if state == nil || state.completed || state.userID == "" {
+	if state == nil || state.completed || state.userID == "" || expected != nil && state != expected {
 		return
 	}
-	start := 0
+	start := -1
 	for i, item := range messages {
 		if item.ID == state.userID {
 			start = i + 1
 			break
 		}
+	}
+	if start < 0 {
+		return
 	}
 	idleOutcome := ""
 	for _, item := range messages[start:] {

@@ -228,7 +228,7 @@ func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
 			{"id":"msg_run","role":"assistant","text":"working","display_text":"working"}
 		],
 		"active_turn":true,
-		"active_turn_id":"msg_run"
+		"active_turn_id":"msg_user"
 	}`)
 	for _, request := range *requests {
 		if request.Path == "/api/session/ses_1/message" && request.Query != "order=desc" {
@@ -444,6 +444,8 @@ func TestThreadOutsideWorkspaceRejected(t *testing.T) {
 func TestTurnStartSendsPromptAndReturnsUserTurn(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		switch r.URL.Path {
+		case "/api/session/ses_1":
+			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
 		case "/api/model":
 			jsonResponse(w, http.StatusOK, `{"location":{"directory":"/work"},"data":[{"id":"m1","modelID":"m1","providerID":"p1","name":"M1"}]}`)
 		case "/api/session/ses_1/model":
@@ -512,6 +514,10 @@ func TestTurnStartValidatesReferencesAndAttachments(t *testing.T) {
 
 func TestTurnInterruptPostsAndValidatesTurn(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path == "/api/session/ses_1" && r.Method == http.MethodGet {
+			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+			return
+		}
 		if r.URL.Path != "/api/session/ses_1/interrupt" || r.Method != http.MethodPost {
 			http.NotFound(w, r)
 			return
@@ -524,7 +530,7 @@ func TestTurnInterruptPostsAndValidatesTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertJSON(t, result, `{}`)
-	if len(*requests) != 1 || (*requests)[0].Path != "/api/session/ses_1/interrupt" {
+	if len(*requests) != 2 || (*requests)[1].Path != "/api/session/ses_1/interrupt" {
 		t.Fatalf("requests=%+v", *requests)
 	}
 	if _, err := runCommand(t, client, "/work", "turn/interrupt", map[string]any{"thread_id": "ses_1"}); err == nil || err.Error() != "turn_id must be a nonempty single-line string up to 256 bytes" {
@@ -534,6 +540,10 @@ func TestTurnInterruptPostsAndValidatesTurn(t *testing.T) {
 
 func TestTurnStartBusyErrorIsSanitized(t *testing.T) {
 	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path == "/api/session/ses_1" {
+			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+			return
+		}
 		if r.URL.Path == "/api/session/ses_1/prompt" {
 			jsonResponse(w, http.StatusConflict, `{"error":"SECRET provider detail"}`)
 			return
@@ -558,6 +568,8 @@ func TestServeEventsRoutesInterruptAheadOfPendingTurn(t *testing.T) {
 	interrupted := make(chan struct{})
 	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
 		switch method {
+		case callSessionRead:
+			return json.RawMessage(sessionBody), nil
 		case callTurnStart:
 			<-release
 			return json.RawMessage(`{"turn":{"id":"msg_user","status":"inProgress"}}`), nil
@@ -661,6 +673,8 @@ func TestServeEventsRoutesDecisionInline(t *testing.T) {
 	answered := make(chan struct{})
 	call := func(ctx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
 		switch method {
+		case callSessionRead:
+			return json.RawMessage(sessionBody), nil
 		case callTurnStart:
 			<-release
 			return json.RawMessage(`{"turn":{"id":"msg_user","status":"inProgress"}}`), nil
@@ -758,6 +772,9 @@ func TestTurnControlCarriesExpectedTurn(t *testing.T) {
 			}
 			raw, _ := json.Marshal(params)
 			_, err := HandleEvents(context.Background(), "/work", bridge.Command{Method: method, Params: raw}, func(_ context.Context, got string, p any, _ func(string, json.RawMessage)) (json.RawMessage, error) {
+				if got == callSessionRead {
+					return json.RawMessage(sessionBody), nil
+				}
 				values := p.(map[string]any)
 				if got != method || values["turnID"] != "turn_1" {
 					t.Errorf("call=%s params=%v", got, values)
@@ -773,6 +790,10 @@ func TestTurnControlCarriesExpectedTurn(t *testing.T) {
 
 func TestTurnSteerSendsDeliveryAndReturnsActiveTurn(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path == "/api/session/ses_1" {
+			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+			return
+		}
 		jsonResponse(w, http.StatusOK, `{"data":{"id":"followup_id","type":"user"}}`)
 	})
 	client := NewClient(server.URL, server.Client(), "/work")
@@ -781,7 +802,7 @@ func TestTurnSteerSendsDeliveryAndReturnsActiveTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertJSON(t, result, `{"turn":{"id":"turn_1","status":"inProgress"}}`)
-	if len(*requests) != 1 || (*requests)[0].Path != "/api/session/ses_1/prompt" || (*requests)[0].Body != `{"delivery":"steer","files":[{"uri":"file:///tmp/a.png","name":"a.png"}],"text":"follow up"}` {
+	if len(*requests) != 2 || (*requests)[1].Path != "/api/session/ses_1/prompt" || (*requests)[1].Body != `{"delivery":"steer","files":[{"uri":"file:///tmp/a.png","name":"a.png"}],"metadata":{"modex_turn_id":"turn_1"},"text":"follow up"}` {
 		t.Fatalf("requests=%+v", *requests)
 	}
 }

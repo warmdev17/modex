@@ -152,3 +152,66 @@ func TestStreamPollingCompletesMissedTurn(t *testing.T) {
 		t.Fatal("polling reconciler did not complete the missed turn")
 	}
 }
+
+func TestPollRejectsSnapshotForReplacedTurn(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/s":
+			close(started)
+			<-release
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"s","outcome":"succeeded","location":{"directory":"/work"}}}`)
+		case "/api/session/s/message":
+			jsonResponse(w, http.StatusOK, `{"data":[{"id":"new","type":"user"},{"id":"old","type":"user"}],"cursor":{}}`)
+		case "/api/session/s/permission":
+			jsonResponse(w, http.StatusOK, `[]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("s", "old", "/work")
+	stream := NewStream(NewClient(server.URL, server.Client(), "/work"), synth)
+	done := make(chan struct{})
+	go func() { defer close(done); stream.reconcile(context.Background(), "s", true) }()
+	<-started
+	synth.StartTurn("s", "new", "/work")
+	close(release)
+	<-done
+	if id, active := synth.ActiveTurn("s"); !active || id != "new" {
+		t.Fatalf("replacement turn affected: %v", collector.snapshot())
+	}
+}
+
+func TestPollFindsTurnAnchorOnOlderPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/s":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"s","location":{"directory":"/work"}}}`)
+		case "/api/session/s/message":
+			if r.URL.Query().Get("cursor") == "older" {
+				jsonResponse(w, http.StatusOK, `{"data":[{"id":"start","type":"user"}],"cursor":{}}`)
+				return
+			}
+			recent := []map[string]string{{"id": "idle", "type": "idle", "outcome": "succeeded"}}
+			for i := 1; i < pollMessages; i++ {
+				recent = append(recent, map[string]string{"id": fmt.Sprintf("followup-%d", i), "type": "user"})
+			}
+			raw, _ := json.Marshal(map[string]any{"data": recent, "cursor": map[string]string{"next": "older"}})
+			jsonResponse(w, http.StatusOK, string(raw))
+		case "/api/session/s/permission":
+			jsonResponse(w, http.StatusOK, `{"data":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	synth := NewSynthesizer("/work", nil)
+	synth.StartTurn("s", "start", "/work")
+	NewStream(NewClient(server.URL, server.Client(), "/work"), synth).reconcile(context.Background(), "s", true)
+	if _, active := synth.ActiveTurn("s"); active {
+		t.Fatal("missed completion with the original prompt on the second page")
+	}
+}
