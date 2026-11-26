@@ -201,6 +201,10 @@ optional `attachments`, optional `effort`, and `references`.
   input `{"uri":"file://<path>","name":"<base name>"}`. OpenCode infers MIME;
   image and file kinds are validated but do not select a different upstream
   field.
+- Confirmed prompts carry attachment preview metadata to Android, including
+  file-only prompts and follow-ups. History restores local file paths from
+  OpenCode's persisted attachment sources. Modex does not expose inline
+  attachment bytes or create previews for remote URLs.
 - A non-empty `references` array is rejected. Codex references have no OpenCode
   equivalent in this slice.
 - `effort` is accepted and validated for client compatibility but is not
@@ -395,7 +399,9 @@ with the fixed `unsupported_input` notice instead of leaving it stalled. A
 
 - The host bridge still uses the existing 4 MiB frame cap and per-request
   deadlines. Upstream HTTP requests time out after 20 seconds and responses are
-  capped at 8 MiB.
+  capped at 8 MiB. OpenCode includes base64 file data in prompt confirmations
+  and history pages, so sizable files or batches can exceed this response cap
+  even if the upload itself was accepted.
 - `turn/interrupt` and `decision/respond` are handled ahead of queued ordinary
   commands so a long `turn/start` cannot starve them. The ordinary command queue
   holds 16 items; overflow returns an explicit error.

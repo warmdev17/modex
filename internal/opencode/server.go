@@ -252,6 +252,7 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			}
 		}
 		var files []promptFile
+		var confirmedAttachments []chatAttachment
 		content := []map[string]string{{"type": "text", "text": text}}
 		if raw, ok := p["attachments"]; ok && string(raw) != "null" {
 			var attachments []struct {
@@ -262,7 +263,8 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 				return nil, errors.New("invalid attachments")
 			}
 			for _, attachment := range attachments {
-				if !filepath.IsAbs(attachment.Path) || len(attachment.Path) > 32768 || strings.ContainsAny(attachment.Path, "\r\n\x00") {
+				attachment.Path = attachmentPath(attachment.Path)
+				if !validAttachmentPath(attachment.Path) {
 					return nil, errors.New("attachment path must be an absolute path")
 				}
 				if attachment.Kind != "" && attachment.Kind != "image" && attachment.Kind != "file" {
@@ -276,6 +278,11 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 					uri.Path = "/" + path
 				}
 				files = append(files, promptFile{URI: uri.String(), Name: filepath.Base(attachment.Path)})
+				kind := attachment.Kind
+				if kind == "" {
+					kind = "file"
+				}
+				confirmedAttachments = append(confirmedAttachments, chatAttachment{Path: attachment.Path, Name: filepath.Base(attachment.Path), Kind: kind})
 				if attachment.Kind == "image" {
 					content = append(content, map[string]string{"type": "localImage", "path": attachment.Path})
 				}
@@ -330,9 +337,13 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, errors.New("invalid turn response")
 		}
 		if emit != nil && result.UserMessageID != "" {
+			item := map[string]any{"id": result.UserMessageID, "type": "userMessage", "content": content}
+			if len(confirmedAttachments) != 0 {
+				item["attachments"] = confirmedAttachments
+			}
 			event, err := json.Marshal(map[string]any{
 				"threadId": id, "turnId": result.Turn.ID,
-				"item": map[string]any{"id": result.UserMessageID, "type": "userMessage", "content": content},
+				"item": item,
 			})
 			if err != nil {
 				return nil, err
@@ -574,7 +585,7 @@ func historyRevision(threadID string, messages []message) string {
 	hash := sha256.New()
 	// Bump the prefix when the projection changes so Android invalidates its
 	// cached pages even if the upstream content is identical.
-	hash.Write([]byte("opencode-history-v1\x00"))
+	hash.Write([]byte("opencode-history-v2\x00"))
 	hash.Write([]byte(threadID))
 	hash.Write([]byte{0})
 	for _, item := range messages {

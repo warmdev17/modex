@@ -32,14 +32,15 @@ type session struct {
 }
 
 type message struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
-	Outcome  string          `json:"outcome"`
-	Agent    string          `json:"agent"`
-	Text     string          `json:"text"`
-	Content  []part          `json:"content"`
-	Error    json.RawMessage `json:"error"`
-	Finish   string          `json:"finish"`
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Outcome  string             `json:"outcome"`
+	Agent    string             `json:"agent"`
+	Text     string             `json:"text"`
+	Content  []part             `json:"content"`
+	Files    []nativeAttachment `json:"files,omitempty"`
+	Error    json.RawMessage    `json:"error"`
+	Finish   string             `json:"finish"`
 	Metadata struct {
 		TurnID string `json:"modex_turn_id"`
 	} `json:"metadata"`
@@ -141,8 +142,14 @@ func projectMessages(id, dir string, messages []message) ([]map[string]any, bool
 			if m.Metadata.TurnID != "" {
 				userID = m.Metadata.TurnID
 			}
-			if text := messageText(m); text != "" {
-				entries = append(entries, map[string]any{"id": m.ID, "role": "user", "text": text, "display_text": text})
+			text := messageText(m)
+			attachments := projectAttachments(m.Files)
+			if text != "" || len(attachments) != 0 {
+				entry := map[string]any{"id": m.ID, "role": "user", "text": text, "display_text": text}
+				if len(attachments) != 0 {
+					entry["attachments"] = attachments
+				}
+				entries = append(entries, entry)
 			}
 		case "assistant":
 			entries = append(entries, projectAssistant(m, dir)...)
