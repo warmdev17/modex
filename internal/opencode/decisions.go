@@ -232,6 +232,8 @@ func (d *Decisions) resolve(sessionID, requestID string) {
 		return
 	}
 	delete(d.pending, key)
+	// An overlapping poll can still contain the request that was just answered.
+	d.consumed[key] = struct{}{}
 	d.emitEvent("decision/resolved", map[string]string{"decision_id": decision.ID})
 }
 
@@ -336,7 +338,7 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 	var response struct {
 		Data []permissionRequest `json:"data"`
 	}
-	if json.Unmarshal(raw, &response) != nil {
+	if json.Unmarshal(raw, &response) != nil || response.Data == nil {
 		return
 	}
 	turnID := ""

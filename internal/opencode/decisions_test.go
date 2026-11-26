@@ -141,6 +141,36 @@ func TestDecisionsDedupeReplayAndResolve(t *testing.T) {
 	}
 }
 
+func TestDecisionsExternalReplySurvivesStaleSnapshot(t *testing.T) {
+	var replies []decisionReply
+	store, collector := decisionStore(t, &replies, nil)
+	asked := perm("per_1", "bash", "echo fixture")
+	store.Handle("permission.asked", asked, "/work")
+	store.Handle("permission.replied", json.RawMessage(`{"sessionID":"ses_1","requestID":"per_1","reply":"once"}`), "/work")
+	store.Reconcile("ses_1", "/work", json.RawMessage(`{"data":[`+string(asked)+`]}`))
+	store.Handle("permission.asked", asked, "/work")
+	store.Replay(true)
+	want := []string{"decision/required", "decision/resolved", "decision/reset"}
+	if got := eventMethods(collector.snapshot()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events=%v want=%v", got, want)
+	}
+	if err := store.Answer(context.Background(), "ses_1/per_1", json.RawMessage(`{"decision":"accept"}`)); err == nil || len(replies) != 0 {
+		t.Fatalf("resolved request was answerable: err=%v replies=%v", err, replies)
+	}
+}
+
+func TestDecisionsIncompleteSnapshotPreservesPendingApproval(t *testing.T) {
+	var replies []decisionReply
+	store, _ := decisionStore(t, &replies, nil)
+	store.Handle("permission.asked", perm("per_1", "bash", "echo fixture"), "/work")
+	for _, snapshot := range []string{`{}`, `{"data":null}`} {
+		store.Reconcile("ses_1", "/work", json.RawMessage(snapshot))
+		if len(store.Pending()) != 1 {
+			t.Fatalf("incomplete snapshot %s cleared pending approval", snapshot)
+		}
+	}
+}
+
 func TestDecisionsAnswerMapsOnceAndReject(t *testing.T) {
 	var replies []decisionReply
 	store, collector := decisionStore(t, &replies, nil)
