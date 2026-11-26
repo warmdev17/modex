@@ -435,7 +435,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         request("threads/start", backendCapabilities.supportedNewThreadParams(model, mode, workspace, projectId), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())?.let { selectionRequests += it }
     }
     fun createProject(name: String, workspace: String) {
-        if (!backendCapabilities.projects || !connected || projectCreating || name.isBlank() || workspace.isBlank()) return
+        if (!backendCapabilities.projectCreation || !connected || projectCreating || name.isBlank() || workspace.isBlank()) return
         projectCreating = true
         error = ""
         request("projects/create", JSONObject().put("name", name.trim()).put("workspace", workspace).put("idempotency_key", java.util.UUID.randomUUID().toString()))

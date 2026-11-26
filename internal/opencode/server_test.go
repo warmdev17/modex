@@ -45,6 +45,39 @@ func assertJSON(t *testing.T, got any, want string) {
 
 const sessionBody = `{"id":"ses_1","projectID":"p","agent":"builder","model":{"id":"m1","providerID":"p1","variant":"default"},"title":"Thread title","location":{"directory":"/work"},"time":{"created":1,"updated":2}}`
 
+func TestNativeProjectsListAndCreateChat(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/project":
+			jsonResponse(w, 200, `[{"id":"global","canonical":"/","sandboxes":[]},{"id":"p","canonical":"/work","name":"Workspace","sandboxes":[]}]`)
+		case "POST /api/session":
+			assertJSON(t, json.RawMessage(body), `{"location":{"directory":"/work"}}`)
+			jsonResponse(w, 200, `{"data":`+sessionBody+`}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/default")
+	result, err := runCommand(t, client, "/default", "projects/list", map[string]any{"limit": 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"data":[{"id":"p","name":"Workspace","roots":[{"path":"/work"}]}],"next_cursor":null}`)
+	if _, err := runCommand(t, client, "/default", "threads/start", map[string]any{"workspace": "/wrong", "project_id": "p"}); err == nil {
+		t.Fatal("mismatched workspace accepted")
+	}
+	for _, request := range *requests {
+		if request.Method == http.MethodPost {
+			t.Fatal("mismatched workspace reached a native mutation")
+		}
+	}
+	created, err := runCommand(t, client, "/default", "threads/start", map[string]any{"workspace": "/work", "project_id": "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, created, `{"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"},"model":"p1/m1"}`)
+}
+
 func TestStatusProjectsDefaultAgent(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		switch r.URL.Path {
@@ -186,7 +219,7 @@ func TestThreadsReadMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"p1/m1"}}`)
+	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"}}`)
 }
 
 func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
@@ -218,7 +251,7 @@ func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
 	}
 	notice := `{"category":"turn_failed","message":"OpenCode could not complete this turn. Review the conversation before trying again.","retrying":false}`
 	assertJSON(t, result, `{
-		"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"p1/m1"},
+		"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"},
 		"messages":[
 			{"id":"msg_user","role":"user","text":"hello","display_text":"hello"},
 			{"id":"msg_asst/r1","role":"reasoning","text":"think","display_text":"think","summary_parts":["think"]},
@@ -330,7 +363,7 @@ func TestThreadsResumeReturnsModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"p1/m1"},"model":"p1/m1"}`)
+	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"},"model":"p1/m1"}`)
 }
 
 func TestModelsListProjection(t *testing.T) {
@@ -405,7 +438,7 @@ func TestUnsupportedMethods(t *testing.T) {
 	methods := []string{
 		"threads/archive", "threads/unarchive", "threads/delete", "threads/fork",
 		"threads/takeover", "threads/mode", "threads/status", "threads/permissions",
-		"plans/respond", "projects/list", "projects/create", "references/list",
+		"plans/respond", "projects/create", "references/list",
 	}
 	for _, method := range methods {
 		_, err := runCommand(t, client, "/work", method, map[string]any{})
@@ -433,7 +466,7 @@ func TestValidationErrors(t *testing.T) {
 		{"status", map[string]any{"unexpected": 1}, "unknown parameter"},
 		{"threads/list", map[string]any{"limit": 0}, "limit must be an integer from 1 to 100"},
 		{"threads/list", map[string]any{"archived": true}, "archived is unsupported by the opencode backend"},
-		{"threads/start", map[string]any{"project_id": "p1"}, "project_id is unsupported by the opencode backend"},
+		{"threads/start", map[string]any{"project_id": "p1"}, "project_id requires an explicit project workspace"},
 		{"threads/start", map[string]any{"permission_mode": "read-only"}, "permission_mode is unsupported by the opencode backend"},
 		{"threads/start", map[string]any{"model": ""}, "model must be a nonempty single-line string up to 256 bytes"},
 		{"threads/read", map[string]any{"thread_id": ""}, "thread_id must be a nonempty single-line string up to 256 bytes"},

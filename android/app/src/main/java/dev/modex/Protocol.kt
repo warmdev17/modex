@@ -11,6 +11,7 @@ internal data class BackendCapabilities(
     val permissionProfiles: Boolean,
     val sessionLifecycle: Boolean,
     val projects: Boolean,
+    val projectCreation: Boolean,
     val references: Boolean,
     val takeover: Boolean,
 ) {
@@ -20,14 +21,15 @@ internal data class BackendCapabilities(
         "threads/mode", "plans/respond" -> planMode
         "threads/permissions" -> permissionProfiles
         "threads/archive", "threads/unarchive", "threads/delete", "threads/fork" -> sessionLifecycle
-        "projects/list", "projects/create" -> projects
+        "projects/list" -> projects
+        "projects/create" -> projectCreation
         "references/list" -> references
         "threads/takeover" -> takeover
         else -> true
     }
 
     companion object {
-        val LegacyCodex = BackendCapabilities("codex", true, true, true, true, true, true, true)
+        val LegacyCodex = BackendCapabilities("codex", true, true, true, true, true, true, true, true)
 
         fun fromReady(frame: JSONObject): BackendCapabilities {
             if (!frame.has("backend") && !frame.has("capabilities")) return LegacyCodex
@@ -42,6 +44,7 @@ internal data class BackendCapabilities(
                 "plan_mode" in keys,
                 "permission_profiles" in keys,
                 "session_lifecycle" in keys,
+                "projects" in keys || "projects_read" in keys,
                 "projects" in keys,
                 "references" in keys,
                 "takeover" in keys,

@@ -119,7 +119,7 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer): daemon_thread
 s=Server(('127.0.0.1',0),Handler)
 print('server listening on http://127.0.0.1:%d' % s.server_port,flush=True)
 s.serve_forever()
-`, `[]`},
+`, `["projects_read"]`},
 		{"codex", "opencode", `
 import json,sys
 for line in sys.stdin:

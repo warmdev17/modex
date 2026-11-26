@@ -257,7 +257,7 @@ internal fun ChatWorkspace(
                 FilledTonalButton(onClick = { openNewChat() }, enabled = canSwitch, shape = RoundedCornerShape(10.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = Mocha.Blue, contentColor = Mocha.Base), modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 6.dp), contentPadding = PaddingValues(14.dp)) {
                     ChatGlyph(ChatIcon.New); Spacer(Modifier.width(12.dp)); Text("New chat"); Spacer(Modifier.weight(1f))
                 }
-                if (backendCapabilities.projects) TextButton(onClick = { scope.launch { drawer.close(); onNewProject() } }, enabled = canSwitch && !attachmentWorking, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp), contentPadding = PaddingValues(14.dp)) {
+                if (backendCapabilities.projectCreation) TextButton(onClick = { scope.launch { drawer.close(); onNewProject() } }, enabled = canSwitch && !attachmentWorking, shape = RoundedCornerShape(10.dp), modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 6.dp), contentPadding = PaddingValues(14.dp)) {
                     ChatGlyph(ChatIcon.Folder); Spacer(Modifier.width(12.dp)); Text("New project"); Spacer(Modifier.weight(1f))
                 }
                 OutlinedTextField(search, { search = it }, placeholder = { Text(if (backendCapabilities.projects) "Search sessions or projects" else "Search sessions") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), shape = RoundedCornerShape(10.dp))

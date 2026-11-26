@@ -9,12 +9,14 @@ import androidx.compose.material3.Surface
 import org.json.JSONObject
 
 /** Render-only capability fixture: no host, provider request or conversation mutation. */
-internal fun Instrumentation.openCodeCapabilitiesSmoke() {
+internal fun Instrumentation.openCodeCapabilitiesSmoke(projectsRead: Boolean = false) {
     val output = Bundle()
     try {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
-        val capabilities = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"open","backend":"opencode","capabilities":[]}"""))
+        val capabilityList = if (projectsRead) "[\"projects_read\"]" else "[]"
+        val capabilities = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"open","backend":"opencode","capabilities":$capabilityList}"""))
         val approval = JSONObject("""{"decision_id":"approval","thread_id":"thread","context":{"command":"echo core-chat","availableDecisions":["accept","decline"]}}""")
+        var started = emptyList<String>()
         runOnMainSync { activity.setContent { ModexTheme { Surface { ChatWorkspace(
             host = "Fixture", connected = true, connecting = false, selected = "thread",
             threads = listOf("thread"), titles = mapOf("thread" to "OpenCode conversation"),
@@ -23,9 +25,12 @@ internal fun Instrumentation.openCodeCapabilitiesSmoke() {
             decisions = listOf(approval), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {}, onCreate = { _, _, _ -> },
             onSend = { _, _, _, _ -> false }, onAnswer = { _, _ -> }, onConnection = {}, onDisconnect = {}, onHome = {},
             usageWarning = "Codex usage warning must stay hidden", takeoverSession = "thread",
-            registeredProjects = listOf(RemoteProject("cached", "Cached project must stay hidden", listOf("/cached"))),
+            registeredProjects = if (projectsRead) listOf(RemoteProject("project-1", "OpenCode project", listOf("/work/modex"))) else listOf(RemoteProject("cached", "Cached project must stay hidden", listOf("/cached"))),
+            projectMembership = if (projectsRead) mapOf("thread" to "project-1") else emptyMap(),
+            threadWorkspaces = if (projectsRead) mapOf("thread" to "/work/modex") else emptyMap(),
             backendCapabilities = capabilities,
             models = listOf(ModelOption("open-model", "Open model", "", emptyList())), hostModel = "open-model",
+            onCreateInProject = { model, mode, effort, root, project -> started = listOf(model, mode, effort, root, project) },
         ) } } } }
 
         fun node(label: String): AccessibilityNodeInfo? {
@@ -70,15 +75,29 @@ internal fun Instrumentation.openCodeCapabilitiesSmoke() {
         check(uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
 
         touch("Open sessions")
-        await("Search sessions")
         await("New chat")
-        absent("New project", "Archived conversations", "Projects", "Cached project must stay hidden", "Actions for OpenCode conversation")
-        touch("New chat")
-        await("New conversation")
-        await("Open model")
-        absent("Outside projects", "Host default", "Read-only", "Workspace write", "Full access")
+        if (projectsRead) {
+            await("Search sessions or projects")
+            await("Projects")
+            await("OpenCode project")
+            absent("New project", "Archived conversations", "Actions for OpenCode conversation")
+            touch("New chat")
+            await("New conversation")
+            touch("Outside projects")
+            await("/work/modex")
+            touch("OpenCode project")
+            touch("Create chat")
+            runOnMainSync { check(started.takeLast(2) == listOf("/work/modex", "project-1")) { "Project selection was not preserved: $started" } }
+        } else {
+            await("Search sessions")
+            absent("New project", "Archived conversations", "Projects", "Cached project must stay hidden", "Actions for OpenCode conversation")
+            touch("New chat")
+            await("New conversation")
+            await("Open model")
+            absent("Outside projects", "Host default", "Read-only", "Workspace write", "Full access")
+        }
 
-        output.putString("result", "PASS: OpenCode keeps core chat, files, models and approvals while optional controls remain absent")
+        output.putString("result", if (projectsRead) "PASS: OpenCode read-only projects list and select without project creation" else "PASS: OpenCode keeps core chat, files, models and approvals while optional controls remain absent")
         finish(-1, output)
     } catch (failure: Throwable) {
         output.putString("result", "FAIL: ${failure.javaClass.simpleName}: ${failure.message}")

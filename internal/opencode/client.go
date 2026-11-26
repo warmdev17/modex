@@ -85,6 +85,7 @@ const (
 	callSessionMessages  = "session/messages"
 	callSessionInterrupt = "session/interrupt"
 	callModels           = "models"
+	callProjects         = "project/list"
 	callClientAttached   = "client/attached"
 	callTurnStart        = "turn/start"
 	callTurnInterrupt    = "turn/interrupt"
@@ -132,6 +133,10 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 		value = map[string]any{}
 	case callModels:
 		value, err = c.ListModels(ctx)
+	case callProjects:
+		var projects []nativeProject
+		err = c.request(ctx, http.MethodGet, "/api/project", nil, nil, &projects)
+		value = projects
 	case callTurnStart, "turn/steer":
 		rawParams, _ := json.Marshal(params)
 		var input struct {

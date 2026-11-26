@@ -5,6 +5,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtocolTest {
+    @Test fun readOnlyProjectsKeepSelectionWithoutAllowingCreation() {
+        val readOnly = BackendCapabilities.fromReady(JSONObject("""{
+          "ready":true,"instance":"open","backend":"opencode","capabilities":["projects_read"]
+        }"""))
+        assertTrue(readOnly.projects)
+        assertFalse(readOnly.projectCreation)
+        assertTrue(readOnly.supports("projects/list"))
+        assertFalse(readOnly.supports("projects/create"))
+        val start = readOnly.supportedNewThreadParams("open-model", "host-default", "/work/modex", "project-1")
+        assertEquals("/work/modex", start.getString("workspace"))
+        assertEquals("project-1", start.getString("project_id"))
+        assertFalse(start.has("standalone"))
+
+        val full = BackendCapabilities.fromReady(JSONObject("""{
+          "ready":true,"instance":"codex","backend":"codex","capabilities":["projects"]
+        }"""))
+        assertTrue(full.projects)
+        assertTrue(full.projectCreation)
+        assertTrue(full.supports("projects/create"))
+    }
+
     @Test fun readyMetadataDefaultsLegacyFramesAndParsesExplicitCapabilities() {
         val legacy = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"legacy"}"""))
         assertEquals("Codex", legacy.label)

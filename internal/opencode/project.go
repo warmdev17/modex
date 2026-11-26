@@ -3,8 +3,31 @@ package opencode
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+type nativeProject struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Canonical string   `json:"canonical"`
+	Sandboxes []string `json:"sandboxes"`
+}
+
+func (p nativeProject) roots() []map[string]string {
+	if p.ID == "" || p.ID == "global" || len(p.ID) > 256 || strings.ContainsAny(p.ID, "\r\n\x00") {
+		return nil
+	}
+	var roots []map[string]string
+	seen := make(map[string]bool)
+	for _, path := range append([]string{p.Canonical}, p.Sandboxes...) {
+		if !seen[path] && filepath.IsAbs(path) && len(path) <= 32768 && !strings.ContainsAny(path, "\r\n\x00") {
+			roots = append(roots, map[string]string{"path": path})
+			seen[path] = true
+		}
+	}
+	return roots
+}
 
 // Native OpenCode shapes (subset). OpenCode v2 carries user text directly on
 // the message and assistant parts inside content; tool calls identify
@@ -101,14 +124,15 @@ func projectThread(s session) map[string]any {
 	if s.Model.ID != "" {
 		thread["model"] = modelChoiceID(s.Model.ProviderID, s.Model.ID)
 	}
+	if s.ProjectID != "" && s.ProjectID != "global" {
+		thread["projectId"] = s.ProjectID
+	}
 	// An empty model/provider is valid until OpenCode attaches one. Android
 	// always sends a model for threads/start and renders an empty provider as
 	// "Unknown" via sessionSettingsLabel, so this is not a crash path.
 	return thread
 }
 
-// projectSessionList omits projectId/projectless deliberately: OpenCode has no
-// project concept, so Android falls back to workspace matching.
 func projectSessionList(sessions []session) map[string]any {
 	data := make([]map[string]any, 0, len(sessions))
 	for _, s := range sessions {

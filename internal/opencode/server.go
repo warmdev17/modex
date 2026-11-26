@@ -33,7 +33,6 @@ var unsupportedMethods = map[string]bool{
 	"threads/status":      true,
 	"threads/permissions": true,
 	"plans/respond":       true,
-	"projects/list":       true,
 	"projects/create":     true,
 	"references/list":     true,
 }
@@ -104,6 +103,8 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 	case "models/list":
 		allowed["limit"] = true
 		allowed["cursor"] = true
+	case "projects/list":
+		allowed["limit"] = true
 	case "client/attached":
 		allowed["attached"] = true
 	default:
@@ -151,6 +152,30 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			"workspace": cwd,
 			"config":    map[string]any{"provider": provider, "model": modelChoiceID(provider, model)},
 		}, nil
+	case "projects/list":
+		if raw, ok := p["limit"]; ok {
+			if _, err := limitParam(raw); err != nil {
+				return nil, err
+			}
+		}
+		projects, err := callInto[[]nativeProject](ctx, call, callProjects, nil, emit)
+		if err != nil {
+			return nil, err
+		}
+		// The native endpoint returns a single bounded snapshot.
+		data := make([]map[string]any, 0, len(projects))
+		for _, project := range projects {
+			roots := project.roots()
+			if len(roots) == 0 {
+				continue
+			}
+			name := safePreview(project.Name)
+			if name == "" {
+				name = safePreview(filepath.Base(roots[0]["path"]))
+			}
+			data = append(data, map[string]any{"id": project.ID, "name": name, "roots": roots})
+		}
+		return map[string]any{"data": data, "next_cursor": nil}, nil
 	case "threads/list":
 		limit := 20
 		if raw, ok := p["limit"]; ok {
@@ -185,8 +210,27 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		}
 		return projectSessionList(sessions), nil
 	case "threads/start":
+		var projectID string
 		if raw, ok := p["project_id"]; ok && string(raw) != "null" {
-			return nil, errors.New("project_id is unsupported by the opencode backend")
+			if standalone || len(p["workspace"]) == 0 || json.Unmarshal(raw, &projectID) != nil ||
+				projectID == "" || len(projectID) > 256 || strings.ContainsAny(projectID, "\r\n\x00") {
+				return nil, errors.New("project_id requires an explicit project workspace")
+			}
+			projects, err := callInto[[]nativeProject](ctx, call, callProjects, nil, emit)
+			if err != nil {
+				return nil, err
+			}
+			belongs := false
+			for _, project := range projects {
+				if project.ID == projectID {
+					for _, root := range project.roots() {
+						belongs = belongs || root["path"] == cwd
+					}
+				}
+			}
+			if !belongs {
+				return nil, errors.New("workspace does not belong to the selected OpenCode project")
+			}
 		}
 		if raw, ok := p["permission_mode"]; ok && string(raw) != "null" {
 			return nil, errors.New("permission_mode is unsupported by the opencode backend")
@@ -222,7 +266,7 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		if err != nil {
 			return nil, err
 		}
-		if created.ID == "" || created.Location.Directory != cwd {
+		if created.ID == "" || created.Location.Directory != cwd || (projectID != "" && created.ProjectID != projectID) {
 			return nil, errors.New("invalid thread response")
 		}
 		return map[string]any{"thread": projectThread(created), "model": modelChoiceID(created.Model.ProviderID, created.Model.ID)}, nil

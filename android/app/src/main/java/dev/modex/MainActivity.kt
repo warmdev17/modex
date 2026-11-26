@@ -81,7 +81,7 @@ internal fun HostWorkspace(
             OutlinedTextField(projectNameInput, { projectNameInput = it }, label = { Text("Project name") }, singleLine = true)
             Text(projectFolder, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
         } },
-        confirmButton = { TextButton(enabled = vm.connected && !vm.projectCreating && projectNameInput.isNotBlank() && projectNameInput.toByteArray().size <= 256 && projectNameInput.none { it.isISOControl() }, onClick = { vm.createProject(projectNameInput, projectFolder); projectFolder = "" }) { Text("Create project") } },
+        confirmButton = { TextButton(enabled = vm.backendCapabilities.projectCreation && vm.connected && !vm.projectCreating && projectNameInput.isNotBlank() && projectNameInput.toByteArray().size <= 256 && projectNameInput.none { it.isISOControl() }, onClick = { vm.createProject(projectNameInput, projectFolder); projectFolder = "" }) { Text("Create project") } },
         dismissButton = { TextButton(onClick = { projectFolder = "" }) { Text("Cancel") } }
     )
     if (remoteThread.isNotEmpty()) RemoteFilePicker(

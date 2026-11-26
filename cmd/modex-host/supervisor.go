@@ -126,7 +126,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 	endpoint := supervisorEndpoint{Address: listener.Addr().String(), Token: randomID(), Instance: randomID(), Workspace: cwd, NativeSocket: nativeSocket}
 	server := supervisor.NewServer(ctx, endpoint.Token, endpoint.Instance, input, stop)
 	server.Backend = b.kind
-	server.Capabilities = []string{}
+	server.Capabilities = []string{"projects_read"}
 	if b.kind == "codex" {
 		server.Capabilities = []string{"session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover"}
 	}
