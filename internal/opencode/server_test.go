@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -123,6 +125,51 @@ func TestThreadsStartCreatesSessionAndResolvesModel(t *testing.T) {
 	}
 	if createBody != `{"location":{"directory":"/work"},"model":{"id":"m1","providerID":"p1"}}` {
 		t.Fatalf("create body=%s", createBody)
+	}
+}
+
+func TestThreadsStartStandaloneCreatesPrivateDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	directory := filepath.Join(home, "Documents", "Codex")
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.URL.Path != "/api/session" {
+			http.NotFound(w, r)
+			return
+		}
+		data, _ := json.Marshal(map[string]any{"data": map[string]any{"id": "ses_new", "location": map[string]string{"directory": directory}}})
+		jsonResponse(w, http.StatusOK, string(data))
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	result, err := runCommand(t, client, "/work", "threads/start", map[string]any{"standalone": true, "workspace": "", "project_id": nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(directory)
+	if err != nil || !info.IsDir() || info.Mode().Perm() != 0700 {
+		t.Fatalf("directory: info=%v err=%v", info, err)
+	}
+	expected, _ := json.Marshal(map[string]any{"thread": map[string]any{"id": "ses_new", "cwd": directory, "modelProvider": ""}, "model": ""})
+	assertJSON(t, result, string(expected))
+	expectedBody, _ := json.Marshal(map[string]any{"location": map[string]string{"directory": directory}})
+	if len(*requests) != 1 || (*requests)[0].Body != string(expectedBody) {
+		t.Fatalf("requests=%+v", *requests)
+	}
+}
+
+func TestThreadsStartStandaloneRejectsConflictingParameters(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		t.Errorf("unexpected request: %s", r.URL.Path)
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	for _, params := range []map[string]any{{"standalone": true, "workspace": "/other"}, {"standalone": true, "project_id": "p1"}} {
+		if _, err := runCommand(t, client, "/work", "threads/start", params); err == nil {
+			t.Fatalf("accepted conflicting params: %+v", params)
+		}
+	}
+	if len(*requests) != 0 {
+		t.Fatalf("unexpected requests: %+v", *requests)
 	}
 }
 
@@ -362,7 +409,6 @@ func TestValidationErrors(t *testing.T) {
 		{"status", map[string]any{"unexpected": 1}, "unknown parameter"},
 		{"threads/list", map[string]any{"limit": 0}, "limit must be an integer from 1 to 100"},
 		{"threads/list", map[string]any{"archived": true}, "archived is unsupported by the opencode backend"},
-		{"threads/start", map[string]any{"standalone": true}, "standalone is unsupported by the opencode backend"},
 		{"threads/start", map[string]any{"project_id": "p1"}, "project_id is unsupported by the opencode backend"},
 		{"threads/start", map[string]any{"permission_mode": "read-only"}, "permission_mode is unsupported by the opencode backend"},
 		{"threads/start", map[string]any{"model": ""}, "model must be a nonempty single-line string up to 256 bytes"},

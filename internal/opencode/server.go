@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -105,12 +106,25 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, errors.New("unknown parameter")
 		}
 	}
+	standalone := false
+	if raw, ok := p["standalone"]; ok {
+		var err error
+		standalone, err = boolParam(raw, "standalone")
+		if err != nil {
+			return nil, err
+		}
+	}
 	if raw, ok := p["workspace"]; ok {
 		var workspace string
-		if json.Unmarshal(raw, &workspace) != nil || !filepath.IsAbs(workspace) || strings.ContainsAny(workspace, "\r\n\x00") || len(workspace) > 32768 {
+		if json.Unmarshal(raw, &workspace) != nil || (!(standalone && workspace == "") && !filepath.IsAbs(workspace)) || strings.ContainsAny(workspace, "\r\n\x00") || len(workspace) > 32768 {
 			return nil, errors.New("workspace must be an absolute path")
 		}
-		cwd = workspace
+		if standalone && workspace != "" {
+			return nil, errors.New("standalone cannot be combined with workspace")
+		}
+		if workspace != "" {
+			cwd = workspace
+		}
 	}
 
 	switch cmd.Method {
@@ -163,15 +177,6 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		}
 		return projectSessionList(sessions), nil
 	case "threads/start":
-		if raw, ok := p["standalone"]; ok {
-			standalone, err := boolParam(raw, "standalone")
-			if err != nil {
-				return nil, err
-			}
-			if standalone {
-				return nil, errors.New("standalone is unsupported by the opencode backend")
-			}
-		}
 		if raw, ok := p["project_id"]; ok && string(raw) != "null" {
 			return nil, errors.New("project_id is unsupported by the opencode backend")
 		}
@@ -185,6 +190,16 @@ func HandleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 				return nil, err
 			}
 			modelID = parsed
+		}
+		if standalone {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, err
+			}
+			cwd = filepath.Join(home, "Documents", "Codex")
+			if err := os.MkdirAll(cwd, 0700); err != nil {
+				return nil, err
+			}
 		}
 		model, err := resolveModelChoice(ctx, call, modelID, emit)
 		if err != nil {
