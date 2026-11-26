@@ -3,7 +3,7 @@
 ## OpenCode backend
 
 Updated 2026-11-26 on `feat/opencode-backend`; Stage 1 implementation source is
-`771c518`. Codex remains the default. The accepted roadmap and core plan are
+`075697e`. Codex remains the default. The accepted roadmap and core plan are
 [design](docs/superpowers/specs/2026-11-26-opencode-integration-design.md) and
 [plan](docs/superpowers/plans/2026-11-26-opencode-core.md).
 
@@ -21,13 +21,18 @@ Updated 2026-11-26 on `feat/opencode-backend`; Stage 1 implementation source is
   projects, references, plan mode and cross-agent utilities remain later-stage
   work.
 
-Fresh verification at `771c518`: `umask 022; go test -race ./...`, `go vet
-./...`, and a temporary host build passed. An isolated OpenCode 2.4.1
-supervisor verified standalone creation, initial admission, native steer with
-the same turn id, exact-turn interrupt with an interrupted completion, and
-fixture cleanup without touching the live service. A paid-provider completion,
-physical Android, release, merge, installation and live host activation were
-not performed.
+- Final review fixes preserve the active turn on history reload, discard stale
+  polling snapshots, check workspace before mutations, suppress consumed
+  approvals, emit confirmed user messages and encode attachment URIs. Polling
+  searches up to 100 messages for the active turn anchor.
+
+Stage 1 checks at `075697e`: Go race suite (umask 022), vet, temporary host
+build, scoped re-review and isolated OpenCode session creation passed. The
+earlier isolated supervisor run at `771c518` verified standalone creation,
+same-turn steer admission and exact-turn interrupt. The final live steer
+transcript, paid-provider completion, physical Android and production
+activation were not exercised. No release or merge. Next is Stage 2
+capability gating and conversation parity.
 
 ## Stale Android attachment lease
 
