@@ -17,6 +17,52 @@ import (
 	"github.com/warmdev/modex/internal/version"
 )
 
+// backendSpec selects which agent backend the host runs. Codex keeps the
+// existing stdio app-server path; OpenCode uses an isolated `opencode serve`
+// child with an HTTP/SSE surface added by later milestones.
+type backendSpec struct {
+	kind     string // "codex" | "opencode"
+	codex    string
+	opencode string
+	home     string // codex-home; codex only
+}
+
+// backendFlags captures the flags that decide whether an opencode backend is
+// compatible with the selected host mode.
+type backendFlags struct {
+	backend      string
+	nativeSocket string
+	home         string
+	thread       string
+	cli          bool
+	serve        bool
+	background   bool
+	supervise    bool
+	attach       bool
+	stop         bool
+}
+
+// validateBackendFlags rejects opencode only for modes that spawn or open a
+// backend. attach/stop are backend-agnostic and must ignore --backend entirely.
+func validateBackendFlags(f backendFlags) error {
+	if f.backend != "opencode" || f.attach || f.stop {
+		return nil
+	}
+	switch {
+	case f.cli:
+		return fmt.Errorf("open code backend does not support --cli")
+	case f.nativeSocket != "":
+		return fmt.Errorf("open code backend does not support --native-socket")
+	case f.home != "":
+		return fmt.Errorf("open code backend does not support --codex-home")
+	case f.thread != "":
+		return fmt.Errorf("open code backend does not support --thread")
+	case !f.serve && !f.background && !f.supervise:
+		return fmt.Errorf("open code backend requires --serve, --background, or --supervise")
+	}
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, "modex-host:", err)
@@ -31,6 +77,8 @@ func run() error {
 	}
 	workspace := flag.String("workspace", "", "Existing workspace directory (required)")
 	binary := flag.String("codex", "codex", "Codex executable")
+	backend := flag.String("backend", "codex", "Agent backend: codex or opencode")
+	opencodeBinary := flag.String("opencode", "opencode", "OpenCode executable (only with --backend opencode)")
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")
 	profile := flag.String("profile", "", "Named profile (not yet supported; fails explicitly)")
 	cli := flag.Bool("cli", false, "Open a native Codex TUI on the shared supervisor backend (Linux/macOS)")
@@ -54,6 +102,38 @@ func run() error {
 	}
 	if modes > 1 {
 		return fmt.Errorf("choose only one host mode")
+	}
+	if *backend != "codex" && *backend != "opencode" {
+		return fmt.Errorf("--backend must be codex or opencode")
+	}
+	codexExplicit, opencodeExplicit := false, false
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "codex":
+			codexExplicit = true
+		case "opencode":
+			opencodeExplicit = true
+		}
+	})
+	if *backend == "codex" && opencodeExplicit {
+		return fmt.Errorf("--opencode requires --backend opencode")
+	}
+	if *backend == "opencode" && codexExplicit {
+		return fmt.Errorf("--codex requires --backend codex")
+	}
+	if err := validateBackendFlags(backendFlags{
+		backend:      *backend,
+		nativeSocket: *nativeSocket,
+		home:         *home,
+		thread:       *thread,
+		cli:          *cli,
+		serve:        *serve,
+		background:   *background,
+		supervise:    *supervise,
+		attach:       *attach,
+		stop:         *stop,
+	}); err != nil {
+		return err
 	}
 	if *nativeSocket != "" && (!*serve || !filepath.IsAbs(*nativeSocket)) {
 		return fmt.Errorf("--native-socket requires --serve and an absolute private path")
@@ -123,14 +203,15 @@ func run() error {
 		}
 		return err
 	}
+	spec := backendSpec{kind: *backend, codex: *binary, opencode: *opencodeBinary, home: *home}
 	if *background {
-		return startBackground(cwd, *binary, *home, *stateDir)
+		return startBackground(cwd, spec, *stateDir)
 	}
 	if *supervise {
-		return superviseHost(cwd, *binary, *home, *stateDir)
+		return superviseHost(cwd, spec, *stateDir)
 	}
 	if *serve {
-		return serveHostWithSocket(cwd, *binary, *home, *nativeSocket)
+		return serveHostWithSocket(cwd, spec, *nativeSocket)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

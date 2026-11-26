@@ -15,22 +15,21 @@ import (
 	"github.com/warmdev/modex/internal/bridge"
 )
 
-func serveHost(cwd, binary, home string) error {
-	return serveHostWithSocket(cwd, binary, home, "")
-}
-
-func serveHostWithSocket(cwd, binary, home, socket string) error {
+func serveHostWithSocket(cwd string, b backendSpec, socket string) error {
+	if b.kind == "opencode" {
+		return serveOpenCodeHost(cwd, b)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	env := os.Environ()
-	if home != "" {
-		absolute, err := filepath.Abs(home)
+	if b.home != "" {
+		absolute, err := filepath.Abs(b.home)
 		if err != nil {
 			return err
 		}
 		env = append(env, "CODEX_HOME="+absolute)
 	}
-	p, err := bridge.StartProcess(ctx, binary, []string{"app-server", "--listen", "stdio://"}, cwd, env)
+	p, err := bridge.StartProcess(ctx, b.codex, []string{"app-server", "--listen", "stdio://"}, cwd, env)
 	if err != nil {
 		return err
 	}
@@ -43,7 +42,7 @@ func serveHostWithSocket(cwd, binary, home, socket string) error {
 		if err != nil {
 			return err
 		}
-		backend.home = home
+		backend.home = b.home
 		closeGateway, err := backend.listen(socket)
 		if err != nil {
 			return err
@@ -51,7 +50,7 @@ func serveHostWithSocket(cwd, binary, home, socket string) error {
 		defer closeGateway()
 		return bridge.ServeEvents(ctx, os.Stdin, os.Stdout, cwd, backend.call)
 	}
-	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd, home)
+	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd, b.home)
 }
 
 func serveBridge(ctx context.Context, p *bridge.Process, in io.Reader, out io.Writer, cwd, home string) error {

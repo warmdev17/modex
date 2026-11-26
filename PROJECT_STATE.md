@@ -1,5 +1,39 @@
 # Modex project state
 
+## OpenCode backend
+
+Updated 2026-11-26 on `feat/opencode-backend`; Stage 1 implementation source is
+`075697e`. Codex remains the default. The accepted roadmap and core plan are
+[design](docs/superpowers/specs/2026-11-26-opencode-integration-design.md) and
+[plan](docs/superpowers/plans/2026-11-26-opencode-core.md).
+
+- Core entry is usable by the existing Android protocol: standalone New chat
+  creates an OpenCode session under `$HOME/Documents/Codex`; `turn/start`
+  supports text/files; `turn/steer` uses native `delivery:"steer"` and returns
+  the active Modex turn id; exact-turn Stop rejects stale/completed targets
+  before calling OpenCode.
+- Concurrency corrections remove the decision/synthesizer reverse lock edge and
+  prevent a delayed Stop response from marking a replacement turn interrupted.
+  OpenCode's interrupt/prompt endpoints do not accept an expected turn id, so a
+  narrow upstream change after the local snapshot remains unavoidable.
+- Existing read/history/model/SSE/permission projections remain. OpenCode state
+  is still temporary per supervisor; forms/questions, lifecycle navigation,
+  projects, references, plan mode and cross-agent utilities remain later-stage
+  work.
+
+- Final review fixes preserve the active turn on history reload, discard stale
+  polling snapshots, check workspace before mutations, suppress consumed
+  approvals, emit confirmed user messages and encode attachment URIs. Polling
+  searches up to 100 messages for the active turn anchor.
+
+Stage 1 checks at `075697e`: Go race suite (umask 022), vet, temporary host
+build, scoped re-review and isolated OpenCode session creation passed. The
+earlier isolated supervisor run at `771c518` verified standalone creation,
+same-turn steer admission and exact-turn interrupt. The final live steer
+transcript, paid-provider completion, physical Android and production
+activation were not exercised. No release or merge. Next is Stage 2
+capability gating and conversation parity.
+
 ## Stale Android attachment lease
 
 Updated 2026-11-25T21:10:57+07:00 on `fix/stale-attach-lease`, source `0068718`. Android attach now negotiates a 15-second application heartbeat. The supervisor releases a negotiated client after one minute without frames or incoming bytes, while legacy CLI attaches retain unlimited idle behavior. This prevents a half-open phone SSH connection from indefinitely causing `another client is attached`; heartbeat frames never reach the Codex bridge, and slow command uploads renew the lease as bytes arrive.
