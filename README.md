@@ -232,10 +232,13 @@ The host starts an isolated loopback `opencode serve` child with a random
 per-process password. Provider auth is inherited through `XDG_CONFIG_HOME`,
 while data and state use a temporary directory removed on close. Existing Modex
 methods return projected OpenCode sessions, messages, turns, models and
-permissions, so the current Android UI needs no changes in this slice. Plan
-mode, projects, references, fork/takeover/archive/delete, persistent approvals
-and Codex questions/forms are unsupported; file-change approvals are
-decline/cancel-only.
+permissions, so the current Android UI needs no changes in this slice.
+Standalone chats use `$HOME/Documents/Codex`; `turn/steer` uses OpenCode's
+native prompt delivery and exact-turn Stop checks stale requests locally. The
+interrupt endpoint cannot guard against a turn change in the small interval
+between that check and its HTTP call. Capability reporting, forms, persistent
+state/session navigation, and later utilities (projects, references, plan mode
+and agents) remain future stages; file-change approvals are decline/cancel-only.
 
 See [OpenCode backend](docs/opencode-backend.md) for flags, the protocol
 mapping, event/decision behavior, the unsupported matrix and limitations.

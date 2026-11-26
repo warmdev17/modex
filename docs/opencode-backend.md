@@ -1,9 +1,9 @@
 # OpenCode backend
 
 Modex normally remote-controls the Codex CLI. This document describes the
-optional OpenCode backend, verified against live OpenCode 2.4.1. Codex remains
-the default; the OpenCode backend is selected explicitly with
-`--backend opencode`.
+optional OpenCode backend, verified against OpenCode 2.4.1 at revision
+`771c518`. Codex remains the default; the OpenCode backend is selected
+explicitly with `--backend opencode`.
 
 The backend keeps the existing Modex protocol for the implemented surface: the
 same method names, result shapes and event names that the Codex bridge already
@@ -93,11 +93,12 @@ lists the upstream OpenCode surface behind each implemented method.
 | --- | --- |
 | `status` | `GET /api/info` and `GET /api/config`; returns `{workspace,config:{provider,model}}` from the configured default agent. |
 | `threads/list` | `GET /api/session`; client-side limit, `next_cursor` is always null. |
-| `threads/start` | `POST /api/session` with `{location:{directory}}` and an optional model ref; returns the projected thread and model. |
+| `threads/start` | `POST /api/session` with `{location:{directory}}` and an optional model ref; `standalone:true` uses `$HOME/Documents/Codex`. |
 | `threads/read` | `GET /api/session/:id` and `GET /api/session/:id/message`; projects content parts into Modex messages. |
 | `threads/resume` | `GET /api/session/:id` plus an exact directory check. No writer lock or fork. |
 | `turn/start` | Applies the selected model to the session, then `POST /api/session/:id/prompt` with `{text,files}`. |
-| `turn/interrupt` | `POST /api/session/:id/interrupt`. |
+| `turn/steer` | `POST /api/session/:id/prompt` with `{text,files,delivery:"steer"}`; returns the active Modex turn id. |
+| `turn/interrupt` | Checks the exact active Modex turn id, then `POST /api/session/:id/interrupt`. |
 | `decision/respond` | `POST /api/session/:id/permission/:requestId/reply` with `{decision}`. |
 | `models/list` | `GET /api/model?directory=…`, with a short lazy-discovery retry. |
 | `client/attached` | Returns `{"updated":true}` and replays pending decisions. |
@@ -133,10 +134,13 @@ Modex cursor is not surfaced.
 ### `threads/start`
 
 Parameters: optional `model` (`provider/model` or a bare model id from the
-catalogue) and optional `workspace` (absolute path). `standalone:true`, a
-non-null `project_id` and a non-null `permission_mode` are rejected. A fresh
-session is created in the connection workspace with
-`{location:{directory}}` and the resolved model ref `{id,providerID}`. Returns:
+catalogue), optional `workspace` (absolute path), and optional `standalone`.
+With `standalone:true`, the host creates `$HOME/Documents/Codex` with private
+permissions and creates the session there. Standalone cannot be combined with a
+workspace or non-null `project_id`. Otherwise, a fresh session is created in
+the connection workspace. A non-null `permission_mode` is unsupported. Session
+creation uses `{location:{directory}}` and the resolved model ref
+`{id,providerID}`. Returns:
 
 ```json
 {"thread":{"id":"session-id","cwd":"/absolute/project","modelProvider":"provider-id","model":"model-id"},"model":"model-id"}
@@ -204,12 +208,24 @@ Returns the accepted user message id as the turn id:
 {"turn":{"id":"user-message-id","status":"inProgress"}}
 ```
 
+### `turn/steer`
+
+Parameters: `thread_id`, `turn_id`, `text`, and the same optional model,
+attachments and effort fields accepted by `turn/start`. Modex checks that the
+requested id is the exact active turn, then submits the prompt with
+`delivery:"steer"`; it returns that same active turn id. This does not start a
+second Modex turn. Android uses its existing protocol request and needs no new
+handling.
+
 ### `turn/interrupt`
 
-Parameters: `thread_id`, `turn_id`. `turn_id` is validated (non-empty,
-single-line, at most 256 bytes) but OpenCode interrupts the session's active
-execution. Returns `{}`. The accepted interrupt marks the turn so a later idle
-event completes it as `interrupted`.
+Parameters: `thread_id`, `turn_id`. Modex compares the requested id with the
+currently active synthesized turn immediately before the OpenCode request.
+Missing, stale or completed ids are rejected locally and never reach OpenCode.
+OpenCode's interrupt endpoint accepts no expected turn id, so a narrow race
+remains if the active turn changes between Modex's snapshot and the HTTP call.
+An accepted interrupt marks that turn so a later idle event completes it as
+`interrupted`.
 
 ### `models/list`
 
@@ -331,8 +347,8 @@ this backend:
 | `references/list` | No Codex reference catalogue. |
 
 Unknown methods and unknown parameters also fail before any upstream call.
-`archived:true`, `standalone:true`, non-null `project_id`, non-null
-`permission_mode`, and non-empty `references` are rejected.
+`archived:true`, non-null `project_id` on ordinary session creation,
+non-null `permission_mode`, and non-empty `references` are rejected.
 
 Questions and forms are not mapped. OpenCode 2.4.1 has no `/api/question`
 endpoint; it uses a different "forms" API. `form.created`, `question.created`,
@@ -373,3 +389,19 @@ with the fixed `unsupported_input` notice instead of leaving it stalled. A
   holds 16 items; overflow returns an explicit error.
 - A failed or timed-out read does not close the tunnel. An uncertain `turn/start`
   must not be replayed automatically; reconnect and inspect the session.
+
+## Verification boundary and next stages
+
+At revision `771c518`, `go test -race ./...`, `go vet ./...`, and the
+`modex-host` build passed. An isolated supervisor using OpenCode 2.4.1 passed
+standalone creation, start, steer and exact-turn interrupt checks. Paid provider
+completion, physical Android behavior and service activation were not checked.
+The decision/synthesizer lock inversion was removed by avoiding the reverse
+lock edge; a delayed interrupt response also checks turn identity before it can
+mark the session interrupted.
+
+Later stages remain open: Stage 2 adds capability reporting and completes
+conversation parity for attachments, permissions and forms; Stage 3 adds
+persistent state and session navigation/lifecycle; Stage 4 considers utilities
+such as projects, references, plan mode and agents where OpenCode has stable
+contracts.
