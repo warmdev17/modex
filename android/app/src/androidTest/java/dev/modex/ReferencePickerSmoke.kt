@@ -66,6 +66,11 @@ internal fun Instrumentation.referencePickerSmoke() {
             File(targetContext.filesDir, name).outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
             bitmap.recycle()
         }
+        click("Attach files")
+        click("Skills & plugins")
+        waitNode("Prompt references")
+        click("Close reference suggestions")
+        input("")
         input("@")
         waitNode("Select skill review")
         check(!waitNode("Select skill disabled").parent.isEnabled) { "Disabled skill is selectable" }

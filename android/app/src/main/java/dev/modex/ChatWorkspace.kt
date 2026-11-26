@@ -499,7 +499,7 @@ internal fun ChatWorkspace(
                 modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) }),
                 focus = focus, steerSending = steerSending, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
-                showReferences = backendCapabilities.references, referenceEnabled = backendCapabilities.references && connected && selected.isNotBlank() && !historyLoading, chosenReferences = if (backendCapabilities.references) chosenReferences else emptyList(),
+                referencesAvailable = backendCapabilities.references, referenceEnabled = backendCapabilities.references && connected && selected.isNotBlank() && !historyLoading, chosenReferences = if (backendCapabilities.references) chosenReferences else emptyList(),
                 onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
                 suggestionsEnabled = !drawer.isOpen,
                 mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain, showMode = backendCapabilities.planMode, modeEnabled = modeActionEnabled,
@@ -667,7 +667,7 @@ private fun PromptComposer(
     attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
     modelColor: Color, focus: FocusRequester, steerSending: Boolean, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
-    showReferences: Boolean, referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
+    referencesAvailable: Boolean, referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
     suggestionsEnabled: Boolean, mode: String, modeChanging: Boolean, modeUncertain: Boolean, showMode: Boolean, modeEnabled: Boolean,
     onMode: (String) -> Unit, onModeRefresh: () -> Unit, work: ChatEntry?, workAction: String?,
@@ -680,9 +680,9 @@ private fun PromptComposer(
     var manualReferences by remember(draftKey) { mutableStateOf(false) }
     LaunchedEffect(prompt, draftKey) { if (editor.text != prompt) editor = TextFieldValue(prompt, TextRange(prompt.length)) }
     val query = referenceQuery(editor.text, editor.selection.start, editor.selection.end)
-    val showReferences = suggestionsEnabled && referenceEnabled && (manualReferences || (fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)))
+    val referencesVisible = suggestionsEnabled && referenceEnabled && (manualReferences || (fieldFocused && query != null && dismissedQuery != (editor.text to editor.selection.start)))
     fun closeReferences() { manualReferences = false; dismissedQuery = editor.text to editor.selection.start }
-    BackHandler(showReferences) { closeReferences() }
+    BackHandler(referencesVisible) { closeReferences() }
     fun changeEditor(value: TextFieldValue, reference: PromptReference? = null) {
         if (value.text != editor.text || value.selection != editor.selection) dismissedQuery = null
         editor = value
@@ -722,7 +722,7 @@ private fun PromptComposer(
         }
         Surface(shape = RoundedCornerShape(12.dp), color = Mocha.Mantle, border = BorderStroke(1.dp, Mocha.Surface), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Message input container" }) {
         Column(Modifier.padding(12.dp)) {
-            if (showReferences) Box(Modifier.weight(1f, fill = false)) {
+            if (referencesVisible) Box(Modifier.weight(1f, fill = false)) {
                 ReferencePicker(referenceCatalog, query?.query.orEmpty(), referencesLoading, referenceStatus, chosenReferences, onRefreshReferences,
                 onDismiss = ::closeReferences,
                 onSelect = { reference ->
@@ -740,7 +740,7 @@ private fun PromptComposer(
                         modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp).semantics { contentDescription = "Remove ${reference.kind} ${reference.name}" })
                 }
             }
-            if (attachments.isNotEmpty() && !showReferences) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (attachments.isNotEmpty() && !referencesVisible) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 attachments.forEach { file ->
                     if (keyboardVisible) InputChip(
                         selected = false, onClick = { onPreview(file) },
@@ -765,7 +765,7 @@ private fun PromptComposer(
                     ModexDropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
                         DropdownMenuItem(text = { Text("From this phone") }, leadingIcon = { ChatGlyph(ChatIcon.Phone) }, enabled = attachEnabled, onClick = { attachMenu = false; onPhoneFiles() })
                         DropdownMenuItem(text = { Text("From connected computer") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, enabled = attachEnabled, onClick = { attachMenu = false; onRemoteFiles() })
-                        if (showReferences) DropdownMenuItem(text = { Text("Skills & plugins") }, leadingIcon = { ChatGlyph(ChatIcon.Skill) }, enabled = referenceEnabled, onClick = {
+                        if (referencesAvailable) DropdownMenuItem(text = { Text("Skills & plugins") }, leadingIcon = { ChatGlyph(ChatIcon.Skill) }, enabled = referenceEnabled, onClick = {
                             attachMenu = false
                             val start = editor.selection.min; val end = editor.selection.max
                             val marker = (if (start > 0 && !editor.text[start - 1].isWhitespace()) " " else "") + "@"
