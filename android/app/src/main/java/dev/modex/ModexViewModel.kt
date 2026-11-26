@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.first
 internal fun takeoverTarget(method: String, detail: String, target: String): String =
     if (method == "threads/resume" && detail.contains("active_writer", true)) target else ""
 
+private const val CHOOSE_OPENCODE_PROVIDER = "Multiple OpenCode providers offer this model. Choose the provider in the model picker."
+
 internal fun explainHostRejection(method: String, detail: String): String {
     return when {
         method == "projects/create" -> "Project creation was not confirmed. Check the folder and update modex-host/Codex if needed. Refresh projects before retrying."
@@ -30,6 +32,7 @@ internal fun explainHostRejection(method: String, detail: String): String {
         detail.contains("takeover_mismatch") -> "The registered CLI has changed sessions or loaded multiple sessions. Nothing was taken over. Close it on your computer."
         detail.contains("takeover_unavailable") -> "The registered CLI is no longer available. Refresh the session before retrying."
         detail.contains("takeover_uncertain") -> "Takeover result is uncertain. Do not retry takeover; refresh and inspect the session first."
+        detail == "model is offered by multiple OpenCode providers; select a provider-qualified model" -> CHOOSE_OPENCODE_PROVIDER
         method == "turn/start" && detail.contains("reference", true) -> "A selected skill or plugin is unavailable. Refresh references and review the prompt before sending a new turn."
         method == "turn/start" && detail.contains("usage_limit_exceeded") -> "Codex usage limit reached. Open Session Status to check reset times."
         method == "turn/start" && (detail.contains("attachment", true) || detail.contains("select PNG")) -> "An attachment could not be read. Check the file still exists, is at most 20 MiB, and images are PNG, JPEG, GIF or WebP."
@@ -424,6 +427,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     fun create(model: String, mode: String, effort: String = "", workspace: String = "", projectId: String = "") {
         if (!connected || historyLoading || switching()) return
+        if (backendCapabilities.backend == "opencode" && ambiguousOpenCodeModel(model, models)) {
+            error = CHOOSE_OPENCODE_PROVIDER
+            return
+        }
         clearSelection()
         request("threads/start", backendCapabilities.supportedNewThreadParams(model, mode, workspace, projectId), resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString())?.let { selectionRequests += it }
     }
@@ -506,6 +513,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
         if (!connected || steerSending || (busy && (activeTurnId.isBlank() || stopping)) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || !validModelId(model) || !validEffort(effort)) return false
         val target = activeTurnId
+        if (target.isEmpty() && backendCapabilities.backend == "opencode" && ambiguousOpenCodeModel(choice.model, models)) {
+            error = CHOOSE_OPENCODE_PROVIDER
+            return false
+        }
         val params = withWorkspace(backendCapabilities.supportedTurnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace)
         if (target.isNotEmpty()) {
             val id = request("turn/steer", params.put("turn_id", target), selected) ?: return false

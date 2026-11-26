@@ -116,7 +116,7 @@ No parameters. Calls `GET /api/info` to prove reachability and reads the layered
 config documents to resolve the configured default agent's model. Returns:
 
 ```json
-{"workspace":"/absolute/project","config":{"provider":"provider-id","model":"model-id"}}
+{"workspace":"/absolute/project","config":{"provider":"provider-id","model":"provider-id/model-id"}}
 ```
 
 Provider or model may be empty when no default agent/model is configured.
@@ -150,7 +150,7 @@ creation uses `{location:{directory}}` and the resolved model ref
 `{id,providerID}`. Returns:
 
 ```json
-{"thread":{"id":"session-id","cwd":"/absolute/project","modelProvider":"provider-id","model":"model-id"},"model":"model-id"}
+{"thread":{"id":"session-id","cwd":"/absolute/project","modelProvider":"provider-id","model":"provider-id/model-id"},"model":"provider-id/model-id"}
 ```
 
 `model` is omitted from the thread when OpenCode has not attached one.
@@ -240,12 +240,15 @@ Parameters `limit`/`cursor` are validated for compatibility; the catalogue is
 returned in one page. Each entry is projected to:
 
 ```json
-{"id":"provider/model","model":"model-id","displayName":"model-id","defaultReasoningEffort":"","supportedReasoningEfforts":[]}
+{"id":"provider/model","model":"provider/model","displayName":"model","defaultReasoningEffort":"","supportedReasoningEfforts":[]}
 ```
 
 The response is `{data:[…],next_cursor:null}`. OpenCode has no reasoning-effort
 catalogue, so both effort fields are empty. The client makes up to four attempts
 at 250 ms intervals when provider discovery returns an empty catalogue.
+Model choices keep the provider prefix when creating, reading or resuming a
+chat. Older bare model IDs still work if exactly one provider offers the ID.
+If several do, select the desired provider in the picker before retrying.
 
 ### `client/attached`
 
@@ -387,8 +390,6 @@ with the fixed `unsupported_input` notice instead of leaving it stalled. A
   gateway in this slice.
 - Session state lives in a temporary isolated data directory, so cross-restart
   OpenCode session continuity is not claimed.
-- Model selection still uses the existing model IDs. Providers that expose the
-  same model ID need a provider-qualified selection, which is pending.
 
 ## Operational limits
 

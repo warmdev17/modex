@@ -149,7 +149,7 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		provider, model := resolveDefaultModel(docs)
 		return map[string]any{
 			"workspace": cwd,
-			"config":    map[string]any{"provider": provider, "model": model},
+			"config":    map[string]any{"provider": provider, "model": modelChoiceID(provider, model)},
 		}, nil
 	case "threads/list":
 		limit := 20
@@ -225,7 +225,7 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		if created.ID == "" || created.Location.Directory != cwd {
 			return nil, errors.New("invalid thread response")
 		}
-		return map[string]any{"thread": projectThread(created), "model": created.Model.ID}, nil
+		return map[string]any{"thread": projectThread(created), "model": modelChoiceID(created.Model.ProviderID, created.Model.ID)}, nil
 	case "turn/start", "turn/steer":
 		id, err := requiredThreadID(p)
 		if err != nil {
@@ -451,7 +451,7 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"thread": projectThread(thread), "model": thread.Model.ID}, nil
+		return map[string]any{"thread": projectThread(thread), "model": modelChoiceID(thread.Model.ProviderID, thread.Model.ID)}, nil
 	case "models/list":
 		if raw, ok := p["limit"]; ok {
 			if _, err := limitParam(raw); err != nil {
@@ -659,10 +659,13 @@ func resolveModelChoice(ctx context.Context, call EventCaller, model string, emi
 			return nil, err
 		}
 		for _, candidate := range models {
-			if candidate.ModelID == id {
-				provider = candidate.ProviderID
-				break
+			if candidate.ModelID != id || candidate.ProviderID == "" {
+				continue
 			}
+			if provider != "" && provider != candidate.ProviderID {
+				return nil, errors.New("model is offered by multiple OpenCode providers; select a provider-qualified model")
+			}
+			provider = candidate.ProviderID
 		}
 	}
 	if provider == "" {

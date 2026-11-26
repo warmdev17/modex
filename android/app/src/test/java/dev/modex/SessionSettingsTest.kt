@@ -54,6 +54,19 @@ class SessionSettingsTest {
         assertFalse(turnStartParams("t", "hello", "custom", "").has("effort"))
         assertFalse(validEffort("bad\neffort"))
     }
+    @Test fun openCodeCataloguePreservesProviderWhenModelsShareAName() {
+        val models = readModels(JSONObject("""{"data":[
+            {"id":"p1/m1","model":"p1/m1","displayName":"m1"},
+            {"id":"p2/m1","model":"p2/m1","displayName":"m1"}
+        ]}""")).distinctBy { it.model }
+        assertEquals(listOf("p1/m1", "p2/m1"), models.map { it.model })
+        val picked = models[1].model
+        assertTrue(ambiguousOpenCodeModel("m1", models))
+        assertFalse(ambiguousOpenCodeModel("m1", models.take(1)))
+        assertFalse(ambiguousOpenCodeModel(picked, models))
+        assertEquals("p2/m1", newThreadParams(picked, "host-default").getString("model"))
+        assertEquals("p2/m1", turnStartParams("thread", "hello", picked).getString("model"))
+    }
     @Test fun projectsKeepSameNamedFoldersSeparateAcrossPlatforms() {
         assertEquals("modex", projectName("/home/me/modex"))
         assertEquals("modex", projectName("C:\\Work\\modex"))

@@ -98,7 +98,7 @@ func projectThread(s session) map[string]any {
 		"modelProvider": s.Model.ProviderID,
 	}
 	if s.Model.ID != "" {
-		thread["model"] = s.Model.ID
+		thread["model"] = modelChoiceID(s.Model.ProviderID, s.Model.ID)
 	}
 	// An empty model/provider is valid until OpenCode attaches one. Android
 	// always sends a model for threads/start and renders an empty provider as
