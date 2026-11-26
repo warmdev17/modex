@@ -107,7 +107,25 @@ reposted in response to a read failure.
   After restart, Android: Connection settings → Reset session cursor →
   reconnect. This snapshot does not verify timer execution or activation.
 - No Android source change, APK release, physical phone run or real provider
-  inference in this milestone. Next: native OpenCode permissions and questions.
+  inference in this milestone.
+
+Stage 2 permission replay fix verified 2026-11-26T22:51:14+07:00 on
+`fix/opencode-permission-replay`, source `c2ce61c`. A native reply to a known
+pending approval prevents stale SSE events or poll snapshots from reopening
+it. Missing or null snapshot data preserves pending approvals.
+
+- Both regressions failed before the fix. `go test -race ./... -count=1`
+  (umask 022), `go vet ./...`, diff checks and the two isolated
+  `scripts/test_supervisor.py` tests passed using the built host.
+- Verified that the previous binary had activated. Installed the new
+  exact tested binary with SHA-256
+  `b9978f2f1c3531c7968dd93a84d912ec3d8f39ff68ada9dafabea2b0ca37e424`.
+  Previous binary backed up at
+  `/home/warmdev/.local/state/modex-host-rollback.lO454w/modex-host`.
+  One delayed restart is prepared as the final operational step. Service
+  runs Codex. This snapshot does not verify activation.
+- Phone and live OpenCode approval were not exercised. Android source is
+  unchanged. Next: native OpenCode forms and remaining permission parity.
 
 ## Stale Android attachment lease
 
