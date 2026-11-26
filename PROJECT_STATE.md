@@ -84,10 +84,30 @@ formats. The history projection revision was bumped.
 - With isolated OpenCode 2.4.1 and a null native default model, the real
   client/bridge admitted a text file with an escaped name and a PNG with
   blank prompt text. The confirmation and persisted history matched.
-- A native 7 MiB file produced a response above Modex's existing 8 MiB HTTP
-  cap. This can prevent confirmation/history even after admission. Next,
-  handle large attachment responses, then native permissions and questions.
-  No physical/emulator UI test, APK release, or service activation.
+- No physical/emulator UI test or APK release in the attachment projection
+  milestone.
+
+Stage 2 large attachments verified 2026-11-26T21:09:15+07:00 on
+`feat/opencode-large-attachments`, source `4fe7fbf`. Prompt acknowledgments
+and history discard embedded attachment bytes under bounded wire and output
+limits. Oversized history pages retry with the same cursor and a smaller
+limit. Turn polling retains the 100-message anchor window. Prompts are not
+reposted in response to a read failure.
+
+- Go race suite, vet, staged diff check, independent review and isolated
+  exact-binary supervisor tests passed. OpenCode 2.4.1 with no default model
+  preserved the message ID and file metadata across confirmation and history
+  for a 20 MiB fixture. History was 27,962,727 bytes on the wire. Native
+  pagination with varied limits preserved order and IDs.
+- Tested host binary installed at `/home/warmdev/.local/bin/modex-host`
+  with SHA-256 `216be265d40071e3dcd9e04975c37bfba87da1a95566c129ca24959ae7005f9d`.
+  Previous binary saved to `/home/warmdev/.local/state/modex-host-rollback.0ZZPU1pW/modex-host`.
+  Activation prepared for one external 30-second restart. Running PID was
+  still 1129122 at installation. Service remains configured for Codex.
+  After restart, Android: Connection settings → Reset session cursor →
+  reconnect. This snapshot does not verify timer execution or activation.
+- No Android source change, APK release, physical phone run or real provider
+  inference in this milestone. Next: native OpenCode permissions and questions.
 
 ## Stale Android attachment lease
 
