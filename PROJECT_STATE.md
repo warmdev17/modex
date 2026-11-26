@@ -50,9 +50,25 @@ and Android controls and requests gated to the current connection.
   after the fix. Earlier checks at `b24779e` passed native Codex controls,
   loopback SSH reconnect/wrong pin and attachment transfer.
 - Capability branch is local. No delivery build, service activation,
-  physical device check or live provider inference. Next, preserve
-  provider-qualified model selections, then verify OpenCode attachment
-  parity and implement native permission and question behavior.
+  physical device check or live provider inference.
+
+Stage 2 model identity verified 2026-11-26T20:51:43+07:00 on `feat/opencode-models`,
+source `b808702`, based on capability milestone `df35920`. OpenCode reports
+`provider/model` as the selectable ID and carries it through default status,
+creation, read and resume. Legacy unique bare IDs still resolve. Ambiguous
+bare IDs require an explicit provider, and Android retains the draft when
+its loaded catalogue detects the ambiguity before send. Active steer keeps
+the current model.
+
+- `umask 022; go test -race ./... -timeout=90s`, `go vet ./...` and
+  independent review passed. Fixture regression tests cover equal model names
+  across providers, exact prompt provider and rejected ambiguous mutations.
+- Android `./gradlew :app:testDebugUnitTest :app:lintDebug --offline` passed
+  with 155 tests and zero lint errors. An isolated OpenCode 2.4.1 supervisor
+  passed catalogue, qualified session creation, resume and read.
+- Work is local. Phone/emulator UI and real inference were not exercised
+  for this milestone. Next, verify OpenCode attachment parity and implement
+  native permission and question behavior.
 
 ## Stale Android attachment lease
 
