@@ -162,11 +162,36 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		if err != nil {
 			return nil, err
 		}
+		duplicates := make(map[string][]string)
+		for _, project := range projects {
+			if filepath.IsAbs(project.Canonical) && len(project.roots()) != 0 {
+				root := filepath.Clean(project.Canonical)
+				duplicates[root] = append(duplicates[root], project.ID)
+			}
+		}
+		hidden := make(map[string]bool)
+		for _, ids := range duplicates {
+			if len(ids) < 2 {
+				continue
+			}
+			hasChats := false
+			for _, id := range ids {
+				sessions, err := callInto[[]session](ctx, call, callSessionList, map[string]any{"limit": 1, "project": id}, emit)
+				if err != nil {
+					return nil, err
+				}
+				hidden[id] = len(sessions) == 0
+				hasChats = hasChats || len(sessions) != 0
+			}
+			if !hasChats {
+				delete(hidden, ids[0])
+			}
+		}
 		// The native endpoint returns a single bounded snapshot.
 		data := make([]map[string]any, 0, len(projects))
 		for _, project := range projects {
 			roots := project.roots()
-			if len(roots) == 0 {
+			if len(roots) == 0 || hidden[project.ID] {
 				continue
 			}
 			name := safePreview(project.Name)

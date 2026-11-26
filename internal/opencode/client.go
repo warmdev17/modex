@@ -111,7 +111,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 	case callConfig:
 		value, err = c.Config(ctx)
 	case callSessionList:
-		value, err = c.ListSessions(ctx, intParam(values, "limit", 20))
+		value, err = c.ListSessions(ctx, intParam(values, "limit", 20), stringParam(values, "project"))
 	case callSessionCreate:
 		var model *modelRef
 		providerID := stringParam(values, "providerID")
@@ -200,11 +200,8 @@ func (c *Client) Config(ctx context.Context) ([]configDocument, error) {
 	return out, err
 }
 
-// ListSessions collects newest sessions first and slices to limit. OpenCode
-// exposes cursor pagination, but the Modex list contract returns a null cursor,
-// so the client walks every page (bounded) and slices afterwards rather than
-// hiding older sessions in an undelivered cursor.
-func (c *Client) ListSessions(ctx context.Context, limit int) ([]session, error) {
+// ListSessions collects newest top-level sessions, up to the requested limit.
+func (c *Client) ListSessions(ctx context.Context, limit int, project string) ([]session, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -215,6 +212,10 @@ func (c *Client) ListSessions(ctx context.Context, limit int) ([]session, error)
 		query := url.Values{}
 		query.Set("limit", "100")
 		query.Set("order", "desc")
+		query.Set("parentID", "null")
+		if project != "" {
+			query.Set("project", project)
+		}
 		if cursor != "" {
 			query.Set("cursor", cursor)
 		}
@@ -223,19 +224,19 @@ func (c *Client) ListSessions(ctx context.Context, limit int) ([]session, error)
 			return nil, err
 		}
 		for _, item := range response.Data {
-			if item.ID == "" || seen[item.ID] {
+			if item.ID == "" || item.ParentID != "" || seen[item.ID] || (project != "" && item.ProjectID != project) {
 				continue
 			}
 			seen[item.ID] = true
 			all = append(all, item)
+			if len(all) == limit {
+				return all, nil
+			}
 		}
 		if response.Cursor.Next == nil || *response.Cursor.Next == "" {
 			break
 		}
 		cursor = *response.Cursor.Next
-	}
-	if len(all) > limit {
-		all = all[:limit]
 	}
 	return all, nil
 }

@@ -117,13 +117,13 @@ func TestClientListSessionsFollowsCursorAndSlices(t *testing.T) {
 		}
 	})
 	client := NewClient(server.URL, server.Client(), "/work")
-	sessions, err := client.ListSessions(context.Background(), 2)
+	sessions, err := client.ListSessions(context.Background(), 2, "")
 	if err != nil || len(sessions) != 2 || sessions[0].ID != "ses_1" || sessions[1].ID != "ses_2" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
 	want := []recordedRequest{
-		{"GET", "/api/session", "limit=100&order=desc", ""},
-		{"GET", "/api/session", "cursor=c2&limit=100&order=desc", ""},
+		{"GET", "/api/session", "limit=100&order=desc&parentID=null", ""},
+		{"GET", "/api/session", "cursor=c2&limit=100&order=desc&parentID=null", ""},
 	}
 	if !reflect.DeepEqual(*requests, want) {
 		t.Fatalf("requests=%+v\nwant=%+v", *requests, want)

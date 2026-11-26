@@ -49,7 +49,13 @@ func TestNativeProjectsListAndCreateChat(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		switch r.Method + " " + r.URL.Path {
 		case "GET /api/project":
-			jsonResponse(w, 200, `[{"id":"global","canonical":"/","sandboxes":[]},{"id":"p","canonical":"/work","name":"Workspace","sandboxes":[]}]`)
+			jsonResponse(w, 200, `[{"id":"global","canonical":"/","sandboxes":[]},{"id":"p-empty","canonical":"/work/","name":"Workspace","sandboxes":[]},{"id":"p","canonical":"/work","name":"Workspace","sandboxes":[]}]`)
+		case "GET /api/session":
+			data := "[]"
+			if r.URL.Query().Get("project") == "p" {
+				data = "[" + sessionBody + "]"
+			}
+			jsonResponse(w, 200, `{"data":`+data+`}`)
 		case "POST /api/session":
 			assertJSON(t, json.RawMessage(body), `{"location":{"directory":"/work"}}`)
 			jsonResponse(w, 200, `{"data":`+sessionBody+`}`)
@@ -106,6 +112,7 @@ func TestThreadsListProjectsSessions(t *testing.T) {
 	longTitle := strings.Repeat("t", 200)
 	page, _ := json.Marshal(map[string]any{
 		"data": []map[string]any{
+			{"id": "ses_child", "parentID": "ses_1", "location": map[string]string{"directory": "/work"}},
 			{"id": "ses_1", "model": map[string]any{"id": "m1", "providerID": "p1"}, "title": longTitle, "location": map[string]string{"directory": "/work"}},
 			{"id": "ses_2", "title": "", "location": map[string]string{"directory": "/other"}},
 		},
@@ -128,7 +135,7 @@ func TestThreadsListProjectsSessions(t *testing.T) {
 		{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"p1/m1","preview":`+string(title)+`,"name":`+string(title)+`},
 		{"id":"ses_2","cwd":"/other","modelProvider":"","preview":"","name":""}
 	],"next_cursor":null}`)
-	if len(*requests) != 1 || (*requests)[0].Query != "limit=100&order=desc" {
+	if len(*requests) != 1 || (*requests)[0].Query != "limit=100&order=desc&parentID=null" {
 		t.Fatalf("requests=%+v", *requests)
 	}
 }

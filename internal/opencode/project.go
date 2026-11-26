@@ -35,6 +35,7 @@ func (p nativeProject) roots() []map[string]string {
 type session struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"projectID"`
+	ParentID  string `json:"parentID"`
 	Agent     string `json:"agent"`
 	Model     struct {
 		ID         string `json:"id"`
