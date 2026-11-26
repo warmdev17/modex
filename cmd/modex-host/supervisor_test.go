@@ -137,11 +137,27 @@ for line in sys.stdin:
 				t.Fatal(err)
 			}
 			state := filepath.Join(dir, "state")
+			t.Cleanup(func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				for {
+					if _, err := os.Stat(filepath.Join(state, "endpoint.json")); err == nil {
+						if out, err := exec.CommandContext(cleanupCtx, binary, "--stop", "--state-dir", state).CombinedOutput(); err != nil {
+							t.Errorf("stop fixture supervisor: %v: %s", err, out)
+						}
+						return
+					}
+					select {
+					case <-cleanupCtx.Done():
+						return
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			})
 			start := exec.CommandContext(ctx, binary, "--background", "--workspace", dir, "--state-dir", state, "--backend", tc.kind, "--"+tc.kind, fake)
 			if out, err := start.CombinedOutput(); err != nil {
 				t.Fatalf("start: %v: %s", err, out)
 			}
-			defer exec.CommandContext(ctx, binary, "--stop", "--state-dir", state).Run()
 			attach := exec.CommandContext(ctx, binary, "--attach", "--state-dir", state, "--backend", tc.attachKind)
 			stdin, err := attach.StdinPipe()
 			if err != nil {
