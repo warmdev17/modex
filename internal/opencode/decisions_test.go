@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -307,14 +308,101 @@ func TestDecisionsResolveOnTurnCompletion(t *testing.T) {
 	}
 }
 
+func TestNativeTextFormReplaysAndRepliesOnce(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/session/ses_1/form/frm_1/reply" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	var permissionReplies []decisionReply
+	store, collector := decisionStore(t, &permissionReplies, nil)
+	client := NewClient(server.URL, server.Client(), "/work")
+	store.ReplyForm = client.ReplyForm
+	stream := NewStream(client, NewSynthesizer("/work", collector.emit), store.Handle)
+	form := json.RawMessage(`{"form":{"id":"frm_1","sessionID":"ses_1","title":"Build","fields":[{"key":"target","type":"string","title":"Which target?","required":true}]}}`)
+	stream.dispatch(`{"id":"evt_1","type":"form.created","data":` + string(form) + `}`)
+	store.Reconcile("ses_1", "/work", json.RawMessage(`{"data":[]}`))
+	store.Replay(true)
+	events := collector.snapshot()
+	want := []string{"decision/required", "decision/reset", "decision/required"}
+	if got := eventMethods(events); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events=%v want=%v", got, want)
+	}
+	assertJSON(t, events[0].params, `{"decision_id":"ses_1/frm_1","method":"item/tool/requestUserInput","thread_id":"ses_1","turn_id":"msg_user","item_id":"","context":{"questions":[{"id":"target","question":"Which target?"}]}}`)
+	// Invalid responses must leave the pending card available for correction.
+	if err := store.Answer(context.Background(), "ses_1/frm_1", json.RawMessage(`{"answers":{"target":{"answers":["a","b"]}}}`)); err == nil || len(*requests) != 0 {
+		t.Fatalf("invalid answer reached native endpoint: %v, %v", err, *requests)
+	}
+	answer := json.RawMessage(`{"answers":{"target":{"answers":["android"]}}}`)
+	if err := store.Answer(context.Background(), "ses_1/frm_1", answer); err != nil {
+		t.Fatal(err)
+	}
+	store.Handle("form.created", form, "/work")
+	if err := store.Answer(context.Background(), "ses_1/frm_1", answer); err == nil || len(*requests) != 1 || len(store.Pending()) != 0 {
+		t.Fatalf("answered form appeared again: err=%v requests=%v", err, *requests)
+	}
+	assertJSON(t, json.RawMessage((*requests)[0].Body), `{"answer":{"target":"android"}}`)
+	if len(permissionReplies) != 0 {
+		t.Fatal("form used the permission reply endpoint")
+	}
+}
+
+func TestNativeTextFormUncertainReplyDoesNotReplay(t *testing.T) {
+	var permissionReplies []decisionReply
+	store, collector := decisionStore(t, &permissionReplies, nil)
+	sent := 0
+	store.ReplyForm = func(context.Context, string, string, map[string]string) error {
+		sent++
+		return errors.New("connection closed")
+	}
+	form := json.RawMessage(`{"form":{"id":"frm_1","sessionID":"ses_1","title":"Target","fields":[{"key":"target","type":"string","required":true}]}}`)
+	answer := json.RawMessage(`{"answers":{"target":{"answers":["android"]}}}`)
+	store.Handle("form.created", form, "/work")
+	if err := store.Answer(context.Background(), "ses_1/frm_1", answer); err == nil || err.Error() != "decision delivery failed; do not replay" {
+		t.Fatalf("uncertain delivery error=%v", err)
+	}
+	store.Handle("form.created", form, "/work")
+	store.Replay(true)
+	if err := store.Answer(context.Background(), "ses_1/frm_1", answer); err == nil || sent != 1 {
+		t.Fatalf("uncertain reply retried: err=%v sends=%d", err, sent)
+	}
+	if got := eventMethods(collector.snapshot()); !reflect.DeepEqual(got, []string{"decision/required", "decision/reset"}) {
+		t.Fatalf("form replayed after uncertain delivery: %v", got)
+	}
+}
+
+func TestNativeTextFormReplyFromAnotherClient(t *testing.T) {
+	var permissionReplies []decisionReply
+	store, collector := decisionStore(t, &permissionReplies, nil)
+	store.ReplyForm = func(context.Context, string, string, map[string]string) error {
+		t.Fatal("already answered form sent a request")
+		return nil
+	}
+	form := json.RawMessage(`{"form":{"id":"frm_1","sessionID":"ses_1","title":"Target","fields":[{"key":"target","type":"string","required":true}]}}`)
+	store.Handle("form.created", form, "/work")
+	store.Handle("form.replied", json.RawMessage(`{"id":"frm_1","sessionID":"ses_1","answer":{"target":"from CLI"}}`), "/work")
+	store.Handle("form.created", form, "/work")
+	store.Replay(true)
+	want := []string{"decision/required", "decision/resolved", "decision/reset"}
+	if got := eventMethods(collector.snapshot()); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events=%v want=%v", got, want)
+	}
+}
+
 func TestUnsupportedFormFailsTurnVisibly(t *testing.T) {
 	collector := &eventCollector{}
 	synth := NewSynthesizer("/work", collector.emit)
 	store := NewDecisions("/work", collector.emit, synth.TurnID, func(context.Context, string, string, string) error { return nil })
+	store.ReplyForm = func(context.Context, string, string, map[string]string) error {
+		t.Fatal("unsupported form sent a request")
+		return nil
+	}
 	synth.OnTurnComplete = store.Resolve
 	store.OnUnsupportedInput = synth.UnsupportedInput
 	synth.StartTurn("ses_1", "msg_user", "/work")
-	store.Handle("form.created", json.RawMessage(`{"form":{"id":"frm_1","sessionID":"ses_1","title":"SECRET FORM TITLE","fields":[{"key":"q","title":"SECRET FIELD"}]}}`), "/work")
+	store.Handle("form.created", json.RawMessage(`{"form":{"id":"frm_1","sessionID":"ses_1","title":"SECRET FORM TITLE","fields":[{"key":"q","title":"SECRET FIELD","type":"string","required":true,"hidden":true}]}}`), "/work")
 
 	var failed bool
 	var notice string
