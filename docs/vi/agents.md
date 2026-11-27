@@ -17,7 +17,7 @@ Chat hiện có tiếp tục dùng runtime và phiên native đã chọn. Kết 
 | --- | --- | --- |
 | Codex | Đường tích hợp đầy đủ nhất: chat, streaming, lịch sử, tệp đính kèm, phê duyệt/câu hỏi được hỗ trợ và các điều khiển riêng Codex mà host công bố. | Một số khả năng và thao tác native của Codex chưa có; xem [tài liệu protocol](../history-contract.md) và [thiết kế](../design.md). |
 | OpenCode | Chat, lịch sử, chọn model, tệp đính kèm, ngữ cảnh project, form và trạng thái công cụ. | Chưa có plan mode, permission profile, takeover, reference hay toàn bộ điều khiển project riêng Codex. Trạng thái phiên chỉ tồn tại theo supervisor. |
-| Antigravity | Prompt văn bản, streaming, Stop, lịch sử, quyền dùng một lần và chọn model, mức suy nghĩ trên host tương thích. | Đính kèm cần bản phát triển mô tả bên dưới. Chưa hỗ trợ gửi thêm prompt trong lúc chạy. |
+| Antigravity | Prompt văn bản, streaming, Stop, lịch sử, quyền dùng một lần và chọn model, mức suy nghĩ trên host tương thích. | Đính kèm và gửi thêm prompt cần bản phát triển mô tả bên dưới. |
 
 Chỉ có executable không đồng nghĩa agent đã sẵn sàng. Hiện tại, bộ kiểm tra Antigravity xác nhận CLI, đăng nhập và các khả năng ACP bắt buộc trước khi cho phép chọn. Host Codex và OpenCode khởi động thành công chỉ chứng minh bridge đã khởi tạo, không chứng minh provider đã xác thực hay inference sẽ thành công. Tài khoản provider và thông tin xác thực được cấu hình, kiểm tra trên host.
 
@@ -64,6 +64,11 @@ Mỗi file văn bản tối đa 256 KiB. Khả năng nhận ảnh còn phụ thu
 đang dùng. Sau khi host khởi động lại, Modex khôi phục phần xem trước từ
 các đường dẫn file mà Antigravity trả về trong lịch sử. Một số file đã gửi
 có thể không xuất hiện lại.
+
+Với bản Modex host và Android tương thích cùng Antigravity CLI 1.5.17,
+bấm Send lúc agent đang trả lời để gửi thêm prompt văn bản vào cùng
+phiên. Đợi phiên rảnh để gửi nháp có file đính kèm. Stop dừng lượt đang
+chạy nếu còn prompt chưa hoàn tất.
 
 Bảng Agents hiển thị lượt gọi subagent do Antigravity báo về. Trạng thái
 hoàn tất của lượt gọi nghĩa là công cụ đã trả kết quả. Bản CLI được kiểm

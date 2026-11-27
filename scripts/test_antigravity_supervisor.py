@@ -30,6 +30,71 @@ def red_png():
 
 @unittest.skipUnless(HOST and AGY, "requires a built host and authenticated Antigravity CLI")
 class AntigravitySupervisorTests(unittest.TestCase):
+    def test_antigravity_followup_while_streaming(self):
+        with tempfile.TemporaryDirectory(prefix="modex-agy-steer-") as directory:
+            workspace = Path(directory) / "workspace"
+            workspace.mkdir()
+            state = Path(directory) / "state"
+            host = str(Path(HOST).resolve())
+            control = [host, "--state-dir", str(state)]
+            launch = control + ["--background", "--workspace", str(workspace), "--agy", AGY]
+            self.assertEqual(subprocess.run(launch, capture_output=True, timeout=40).returncode, 0)
+            client = None
+            try:
+                client = AttachedRPC(host, state, workspace)
+                self.assertIn("antigravity_steer", client.capabilities)
+                runtimes = {item["id"]: item for item in client.call("agents/list")["data"]}
+                self.assertIn("antigravity", runtimes)
+                self.assertTrue(runtimes["antigravity"]["ready"], runtimes["antigravity"].get("reason"))
+                thread = client.call("threads/start", {"agent": "antigravity", "workspace": str(workspace)})["thread"]["id"]
+                target = {"thread_id": thread, "workspace": str(workspace)}
+                turn = client.call("turn/start", dict(target,
+                    text="Without tools, list 120 different everyday objects and describe each in one sentence."))["turn"]["id"]
+                marker = "STEER-" + secrets.token_hex(4).upper()
+                followup = f"Without tools, reply with exactly {marker} instead of continuing the list."
+                deadline = time.monotonic() + 120
+                sent, echo, starts = False, 0, 0
+                output = []
+                while True:
+                    frame = client.events.popleft() if client.events else client.receive(deadline)
+                    params = frame.get("params", {})
+                    if params.get("threadId") != thread:
+                        continue
+                    event = frame.get("event")
+                    if event == "turn/started":
+                        starts += 1
+                    elif event == "item/agentMessage/delta":
+                        self.assertEqual(params["turnId"], turn)
+                        if sent:
+                            output.append(params["delta"])
+                        else:
+                            ack = client.call("turn/steer", dict(target, turn_id=turn, text=followup))
+                            self.assertEqual(ack["turnId"], turn)
+                            sent = True
+                    elif event == "item/completed":
+                        item = params.get("item", {})
+                        if item.get("type") == "userMessage" and any(block.get("text") == followup for block in item["content"]):
+                            echo += 1
+                    elif event == "turn/completed":
+                        self.assertEqual(params["turn"]["id"], turn)
+                        self.assertEqual(params["turn"]["status"], "completed")
+                        break
+                self.assertEqual(starts, 1)
+                self.assertEqual(echo, 1)
+                self.assertIn(marker, "".join(output))
+                history = client.call("threads/read", dict(target, include_turns=True))
+                self.assertFalse(history["active_turn"])
+                messages = history["messages"]
+                indices = [i for i, item in enumerate(messages)
+                           if item["role"] == "user" and item["text"] == followup]
+                self.assertEqual(len(indices), 1)
+                self.assertIn(marker, "".join(item["text"] for item in messages[indices[0] + 1:]
+                                              if item["role"] == "assistant"))
+            finally:
+                if client is not None:
+                    client.close()
+                self.assertEqual(subprocess.run(control + ["--stop"], capture_output=True, timeout=10).returncode, 0)
+
     def test_antigravity_conversation_survives_restart(self):
         with tempfile.TemporaryDirectory(prefix="modex-agy-supervisor-") as directory:
             root = Path(directory)

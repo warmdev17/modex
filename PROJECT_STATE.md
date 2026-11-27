@@ -1,5 +1,38 @@
 # Modex project state
 
+## Antigravity follow-ups
+
+Updated 2026-11-28T00:10:08+07:00 on `feat/antigravity-steering`. Host
+source `c7ba6f7`, Android source `64a6ea9`. See the
+[implementation plan](docs/superpowers/plans/2026-11-27-antigravity-steering.md).
+AGY 1.5.17 supports one outstanding text follow-up under the active Modex
+turn. Stop remains available while either native prompt is running. Wait
+for an idle turn to send drafts with attachments.
+
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with
+  umask 022, `go vet ./...` and independent review passed at `c7ba6f7`.
+  Fixtures cover both reply orders, stale and incompatible requests, late
+  RPC rejection, Stop and bounded ACP fallback replies.
+- The stamped host passed the three real AGY checks in
+  `test_antigravity_supervisor.py` after an earlier run failed discovery.
+  The follow-up reached the model while streaming and appeared once in
+  live events and history. Attachments and recovery after restart passed.
+  The isolated three-runtime `test_shared_agent_supervisor.py` also passed.
+- Offline Android unit, lint and app/test APK builds passed at `64a6ea9`
+  with 190 unit tests and zero lint errors. The signed code-50-to-51
+  in-place upgrade preserved encrypted fixture state. The emulator passed
+  Antigravity attachment/ACK, model/level and shared-chat smokes.
+- Private signed APK `.modex/previews/modex-0.1.0-preview.51-antigravity-steering.apk`
+  in the main checkout. APK SHA-256
+  `13e3e85d1f9377f62a33fe8ef13c9dc5284663bfbc06bbb252c90ddc99b7d4c3`.
+  Host SHA-256
+  `aaa02853fbcffb25ccd354a85f273032f3f0d4ad824536093b741eca3c29eefd`.
+  Previous binary backed up at
+  `/tmp/modex-agy-steering.SDBsQc/modex-host.previous`.
+  Final activation uses the external delayed restart and remains
+  unverified at handoff. Physical Android and other AGY versions were
+  not tested. Branch and preview are local.
+
 ## Antigravity attachments
 
 Updated 2026-11-27T22:54:14+07:00 on `feat/antigravity-attachments`. Host

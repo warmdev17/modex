@@ -17,7 +17,7 @@ Existing chats keep their selected runtime and native session. Connecting a host
 | --- | --- | --- |
 | Codex | Fullest path: chat, streaming, history, attachments, supported approvals/questions, and Codex-specific controls advertised by the host. | Some native Codex capabilities and operations remain unavailable; see the [protocol docs](history-contract.md) and [design](design.md). |
 | OpenCode | Chat, history, model selection, attachments, project context, forms, and tool state. | No Codex-specific plan mode, permission profiles, takeover, references, or full project controls. Session state is temporary per supervisor. |
-| Antigravity | Text prompts, streaming, Stop, history, one-time permissions, and model and thinking selection on compatible hosts. | Attachments require the development build described below. Steer remains unavailable. |
+| Antigravity | Text prompts, streaming, Stop, history, one-time permissions, and model and thinking selection on compatible hosts. | Attachments and text follow-ups require the development build described below. |
 
 An executable alone does not mean an agent is ready. The current Antigravity picker probe checks its CLI, sign-in, and required ACP capabilities before enabling selection. Codex and OpenCode host startup proves that their bridge initialized, not that provider authentication or inference will succeed. Provider accounts and credentials are configured and verified on the host.
 
@@ -64,6 +64,11 @@ eight files and 8 MiB in total. Each text file is limited to 256 KiB.
 Antigravity controls model access to image input. After a host restart,
 attachment previews are reconstructed from the local file references
 included in native history. Some sent files may be absent from that history.
+
+With matching Modex builds and Antigravity CLI 1.5.17, tap Send while a
+response is streaming to pass a text prompt to the same session.
+Wait until the conversation is idle to send drafts with attachments. Stop
+applies to the native session while its prompt requests are still running.
 
 The Agents panel shows subagent invocations reported by Antigravity. An
 invocation marked completed means the tool returned. The CLI tested here
