@@ -21,7 +21,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -61,14 +60,10 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Error, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
+internal enum class ChatIcon { Menu, New, Send, More, Close, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Error, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color = LocalContentColor.current) {
-    if (icon == ChatIcon.Model) {
-        Icon(painterResource(R.drawable.ic_openai), description, Modifier.size(22.dp), tint = color)
-        return
-    }
     Canvas(Modifier.size(22.dp).semantics { if (description != null) contentDescription = description }) {
         val u = size.width / 24
         fun line(x: Float, y: Float, x2: Float, y2: Float) = drawLine(color, Offset(x*u,y*u), Offset(x2*u,y2*u), 1.8f*u, StrokeCap.Round)
@@ -93,7 +88,6 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color
             ChatIcon.Activity -> { line(3f,12f,7f,12f); line(7f,12f,10f,5f); line(10f,5f,14f,19f); line(14f,19f,17f,12f); line(17f,12f,21f,12f) }
             ChatIcon.Terminal -> { line(3f,4f,21f,4f); line(21f,4f,21f,20f); line(21f,20f,3f,20f); line(3f,20f,3f,4f); line(7f,8f,11f,12f); line(11f,12f,7f,16f); line(13f,16f,17f,16f) }
             ChatIcon.Settings -> { line(4f,6f,8f,6f); line(12f,6f,20f,6f); line(4f,12f,14f,12f); line(18f,12f,20f,12f); line(4f,18f,6f,18f); line(10f,18f,20f,18f); for ((x,y) in listOf(10f to 6f,16f to 12f,8f to 18f)) drawCircle(color, 2f*u, Offset(x*u,y*u), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8f*u)) }
-            ChatIcon.Model -> Unit
             ChatIcon.ModelChoice -> { line(6f,6f,18f,6f); line(18f,6f,18f,18f); line(18f,18f,6f,18f); line(6f,18f,6f,6f); for (v in listOf(9f,12f,15f)) { line(v,3f,v,6f); line(v,18f,v,21f); line(3f,v,6f,v); line(18f,v,21f,v) } }
             ChatIcon.Attach -> { line(5f,12f,19f,12f); line(12f,5f,12f,19f) }
             ChatIcon.File -> { line(5f,3f,14f,3f); line(14f,3f,19f,8f); line(19f,8f,19f,21f); line(19f,21f,5f,21f); line(5f,21f,5f,3f); line(14f,3f,14f,8f); line(14f,8f,19f,8f) }
@@ -160,7 +154,8 @@ internal fun ChatWorkspace(
     sessionCapabilities: BackendCapabilities = backendCapabilities,
 ) {
     val antigravity = sessionAgent == ANTIGRAVITY_AGENT
-    val agyModelLabel = agyOptions.firstOrNull { it.id == "model" }?.currentLabel.orEmpty()
+    val agyModel = agyOptions.firstOrNull { it.id == "model" }
+    val agyModelLabel = agyModel?.currentLabel.orEmpty()
     val agyThinking = agyOptions.firstOrNull { it.id == "thought_level" }
     val agentLabel = chatAgents.firstOrNull { it.id == sessionAgent }?.label ?: if (antigravity) "Antigravity" else sessionCapabilities.label
     var deleting by remember(host, archived) { mutableStateOf("") }
@@ -555,6 +550,8 @@ internal fun ChatWorkspace(
                 if (antigravity) emptyList() else attachments, !antigravity && attachmentWorking, attachmentProgress, if (antigravity) "" else attachmentError,
                 !antigravity && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
+                modelBrand = if (antigravity) modelBrand(agyModel?.current.orEmpty(), agyModelLabel)
+                    else modelBrand(sessionModel, models.firstOrNull { it.model == sessionModel }?.name.orEmpty()),
                 modelColor = reasoningColor(if (antigravity) agyThinking?.current.orEmpty() else sessionEffort.ifBlank { defaultEffort(sessionModel) }),
                 focus = focus, steerSending = steerSending, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
@@ -622,7 +619,7 @@ internal fun ChatWorkspace(
             }
             if (backendCapabilities.projects) Text(newWorkspace.ifBlank { "Outside projects" }, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
             if (newChatAgent != ANTIGRAVITY_AGENT) {
-                ModelPicker(newChatModels, newChatModelCatalogStatus, model, { model = it; newEffort = defaultEffort(it, newChatModels) })
+                ModelPicker(newChatModels, newChatModelCatalogStatus, model) { model = it; newEffort = defaultEffort(it, newChatModels) }
                 ReasoningControl(newChatModels.firstOrNull { it.model == model }, newEffort) { newEffort = it }
                 if (newChatCapabilities.permissionProfiles && newChatAgent == CODEX_AGENT) Column(Modifier.selectableGroup()) {
                     permissionModes.forEach { (mode, label) ->
@@ -666,21 +663,18 @@ internal fun ChatWorkspace(
         agyOptions, agyOptionsLoading, agyOptionsError, connected && !busy && !historyLoading && !agyOptionsUncertain,
         onSetAgyOption, onRefreshAgyOptions, onClose = { showModel = false },
     )
-    if (showModel && !antigravity) AlertDialog(
-        onDismissRequest = { showModel = false },
-        title = { Text("Model for next turn") },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("$agentLabel applies this model to the next turn and later turns in this session.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
-            ModelPicker(models, modelCatalogStatus, modelInput, { modelInput = it; effortInput = defaultEffort(it) })
-            ReasoningControl(models.firstOrNull { it.model == modelInput.trim() }, effortInput) { effortInput = it }
-
-        } },
-        confirmButton = { TextButton(enabled = modelInput.isNotBlank() && validModelId(modelInput), onClick = {
+    if (showModel && !antigravity) ModelSettingsDialog(
+        onClose = { showModel = false },
+        actions = { TextButton(enabled = modelInput.isNotBlank() && validModelId(modelInput), onClick = {
             onModelChoice(modelInput.trim(), effortInput)
             showModel = false
         }) { Text("Use model") } },
-        dismissButton = { TextButton(onClick = { showModel = false }) { Text("Cancel") } }
-    )
+        dismiss = { TextButton(onClick = { showModel = false }) { Text("Cancel") } },
+    ) {
+        Text("$agentLabel applies this model to the next turn and later turns in this session.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
+        ModelPicker(models, modelCatalogStatus, modelInput) { modelInput = it; effortInput = defaultEffort(it) }
+        ReasoningControl(models.firstOrNull { it.model == modelInput.trim() }, effortInput) { effortInput = it }
+    }
 }
 
 @Composable
@@ -772,7 +766,7 @@ private fun PromptComposer(
     prompt: String, onChange: (String, PromptReference?) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
     attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
-    modelColor: Color, focus: FocusRequester, steerSending: Boolean, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
+    modelBrand: ModelBrand, modelColor: Color, focus: FocusRequester, steerSending: Boolean, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
     referencesAvailable: Boolean, referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
@@ -888,7 +882,7 @@ private fun PromptComposer(
                         contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
-                            ChatGlyph(ChatIcon.Model)
+                            ModelLogo(modelBrand)
                             Spacer(Modifier.width(6.dp))
                             Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
                         }

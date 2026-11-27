@@ -1,23 +1,11 @@
 package dev.modex
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.key
 import org.json.JSONObject
 
 internal data class AntigravityOption(val id: String, val current: String, val values: Map<String, String>) {
@@ -47,39 +35,31 @@ internal fun AntigravityOptionsDialog(
     options: List<AntigravityOption>, loading: Boolean, error: String, canChange: Boolean,
     onSelect: (String, String) -> Unit, onRefresh: () -> Unit, onClose: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Antigravity model settings") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (loading) Text("Checking session settings…", color = Mocha.Subtext)
-                if (error.isNotBlank()) {
-                    Text(error, color = MaterialTheme.colorScheme.error)
-                    TextButton(onClick = onRefresh, enabled = !loading) { Text("Refresh") }
-                }
-                if (options.isEmpty() && !loading && error.isBlank()) {
-                    Text("This session uses Antigravity’s default model.", color = Mocha.Subtext)
-                }
-                for (option in options) {
-                    var expanded by remember(option.id) { mutableStateOf(false) }
-                    Text(if (option.id == "model") "Model" else "Thinking level", style = MaterialTheme.typography.labelMedium)
-                    Box {
-                        OutlinedButton(onClick = { expanded = true }, enabled = canChange && !loading && error.isBlank(), modifier = Modifier.fillMaxWidth()) {
-                            Text(option.currentLabel.ifBlank { "Choose an option" }, modifier = Modifier.weight(1f))
-                            ChatGlyph(ChatIcon.ChevronDown, color = Mocha.Subtext)
-                        }
-                        ModexDropdownMenu(expanded && canChange && !loading, { expanded = false }, modifier = Modifier.heightIn(max = 260.dp)) {
-                            option.values.forEach { (value, label) ->
-                                DropdownMenuItem(text = { Text(label) }, onClick = {
-                                    expanded = false
-                                    if (value != option.current) onSelect(option.id, value)
-                                })
-                            }
-                        }
-                    }
-                }
+    val model = options.firstOrNull { it.id == "model" }
+    val thinking = options.firstOrNull { it.id == "thought_level" }
+    val models = remember(model?.values) {
+        model?.values.orEmpty().map { (id, label) -> ModelOption(id, label, "", emptyList()) }
+    }
+    val enabled = canChange && !loading && error.isBlank()
+    ModelSettingsDialog(onClose, actions = { TextButton(onClick = onClose) { Text("Done") } }) {
+        if (loading) Text("Checking session settings…", color = Mocha.Subtext)
+        if (error.isNotBlank()) {
+            Text(error, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = onRefresh, enabled = !loading) { Text("Refresh") }
+        }
+        if (model != null) {
+            ModelPicker(models, "", model.current, enabled = enabled, allowCustom = false) {
+                if (it != model.current) onSelect(model.id, it)
             }
-        },
-        confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
-    )
+        } else if (!loading && error.isBlank()) {
+            Text("This session uses Antigravity’s default model.", color = Mocha.Subtext)
+        }
+        if (thinking != null || (!loading && error.isBlank())) key(model?.current) {
+            ModelLevelControl("Thinking level", "Thinking level",
+                thinking?.values.orEmpty().keys.map { it to "" }, thinking?.current.orEmpty(),
+                labels = thinking?.values.orEmpty(), enabled = enabled, commitOnRelease = true) {
+                if (thinking != null) onSelect(thinking.id, it)
+            }
+        }
+    }
 }
