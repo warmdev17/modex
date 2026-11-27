@@ -61,3 +61,52 @@ func TestReplayOnlyLocalFileURIs(t *testing.T) {
 		t.Fatalf("projection: %+v", a)
 	}
 }
+
+func TestAttachmentCountAndAggregateSizeLimits(t *testing.T) {
+	root := t.TempDir()
+	image := func(name string, size int) string {
+		t.Helper()
+		path := filepath.Join(root, name)
+		data := make([]byte, size)
+		copy(data, "\x89PNG\r\n\x1a\n")
+		if err := os.WriteFile(path, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	first := image("first.png", 4*1024*1024)
+	exact := image("exact.png", 4*1024*1024)
+	over := image("over.png", 4*1024*1024+1)
+	small := image("small.png", 8)
+	encode := func(paths ...string) json.RawMessage {
+		entries := make([]map[string]string, 0, len(paths))
+		for _, path := range paths {
+			entries = append(entries, map[string]string{"path": path, "kind": "image"})
+		}
+		raw, err := json.Marshal(entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	for _, tc := range []struct {
+		name      string
+		paths     []string
+		wantError bool
+	}{
+		{"exact 8 MiB", []string{first, exact}, false},
+		{"over 8 MiB", []string{first, over}, true},
+		{"eight files", []string{small, small, small, small, small, small, small, small}, false},
+		{"nine files", []string{small, small, small, small, small, small, small, small, small}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blocks, metadata, err := prepareAttachments(encode(tc.paths...), acp.Info{Image: true})
+			if (err != nil) != tc.wantError {
+				t.Fatalf("error = %v", err)
+			}
+			if err == nil && (len(blocks) != len(tc.paths) || len(metadata) != len(tc.paths)) {
+				t.Fatalf("blocks=%d metadata=%d", len(blocks), len(metadata))
+			}
+		})
+	}
+}

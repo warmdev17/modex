@@ -483,6 +483,10 @@ func TestAttachmentTurnSendsNativeBlocksAndConfirmsMetadata(t *testing.T) {
 	if err := os.WriteFile(path, []byte("hello attached"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	imagePath := filepath.Join(root, "image #1.png")
+	if err := os.WriteFile(imagePath, []byte("\x89PNG\r\n\x1a\nexample"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	r := New(context.Background(), bin, root, state)
 	defer r.Close()
 	start, _, err := r.Handle(context.Background(), bridge.Command{Method: "threads/start", Params: json.RawMessage(`{"agent":"antigravity"}`)}, nil)
@@ -490,7 +494,7 @@ func TestAttachmentTurnSendsNativeBlocksAndConfirmsMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := start.(map[string]any)["thread"].(map[string]any)["id"].(string)
-	raw, _ := json.Marshal(map[string]any{"thread_id": id, "text": "look", "attachments": []map[string]string{{"path": path, "kind": "file"}}})
+	raw, _ := json.Marshal(map[string]any{"thread_id": id, "text": "look", "attachments": []map[string]string{{"path": imagePath, "kind": "image"}, {"path": path, "kind": "file"}}})
 	events := make(chan json.RawMessage, 1)
 	done := make(chan struct{})
 	_, _, err = r.Handle(context.Background(), bridge.Command{Method: "turn/start", Params: raw}, func(method string, b json.RawMessage) {
@@ -512,7 +516,27 @@ func TestAttachmentTurnSendsNativeBlocksAndConfirmsMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(b), `"type":"resource"`) || !strings.Contains(string(b), `"text":"hello attached"`) || !strings.Contains(string(b), `note%20%231.txt`) {
+	var request struct {
+		Params struct {
+			Prompt []struct {
+				Type     string `json:"type"`
+				Text     string `json:"text"`
+				MIME     string `json:"mimeType"`
+				Data     string `json:"data"`
+				URI      string `json:"uri"`
+				Resource struct {
+					URI  string `json:"uri"`
+					MIME string `json:"mimeType"`
+					Text string `json:"text"`
+				} `json:"resource"`
+			} `json:"prompt"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(b, &request); err != nil {
+		t.Fatal(err)
+	}
+	p := request.Params.Prompt
+	if len(p) != 3 || p[0].Type != "text" || p[0].Text != "look" || p[1].Type != "image" || p[1].MIME != "image/png" || p[1].Data != "iVBORw0KGgpleGFtcGxl" || !strings.HasSuffix(p[1].URI, "/image%20%231.png") || p[2].Type != "resource" || p[2].Resource.MIME != "text/plain" || p[2].Resource.Text != "hello attached" || !strings.HasSuffix(p[2].Resource.URI, "/note%20%231.txt") {
 		t.Fatalf("native prompt: %s", b)
 	}
 }
