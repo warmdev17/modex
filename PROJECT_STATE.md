@@ -1,5 +1,23 @@
 # Modex project state
 
+## Antigravity stage 3
+
+Updated 2026-11-27T17:28:00+07:00 on `feat/antigravity-session-controls`,
+based on `af8f5de`. Model, thinking level and subagent monitoring are the
+next requested scope. The [proposed design](docs/superpowers/specs/2026-11-27-antigravity-session-controls-design.md)
+reuses the Android model picker and Agents surface.
+
+- `umask 022; go test ./...` passed on the clean base revision. An isolated
+  `agy 1.5.17` ACP probe showed session-specific model and thinking options.
+  Thinking changed independently, invalid values were rejected, and a
+  fresh-process load of an empty session returned its original setting.
+- A read-only subagent prompt reached `end_turn`. ACP exposed the parent
+  invocation start and completion and replayed a tool call on load. The probe
+  received no child-scoped events. The design uses invocation status on this
+  CLI and requires native identity and stream evidence for child detail.
+- Next: settle the scope of the Agents panel with bradar, then plan and
+  implement the host and Android contracts. Product code and APK are unchanged.
+
 ## Public documentation refresh
 
 Updated 2026-11-27T16:09:44+07:00 on `docs/professional-readme`, source
