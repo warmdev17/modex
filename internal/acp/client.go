@@ -64,24 +64,28 @@ type configResult struct {
 	ConfigOptions []nativeOption `json:"configOptions"`
 }
 
+type Diff struct{ Path, OldText, NewText string }
+
 type Update struct {
-	Used, Size  int64
-	Model       string
-	SessionID   string
-	TurnID      string
-	Kind        string
-	Text        string
-	ToolCallID  string
-	Status      string
-	Subagent    bool
-	Role        string
-	CommandTool bool
-	ForeignTool bool
-	Command     string
-	Output      string
-	ExitCode    *int
-	URI         string
-	MIME        string
+	Used, Size     int64
+	Model          string
+	SessionID      string
+	TurnID         string
+	Kind           string
+	Text           string
+	ToolCallID     string
+	Status         string
+	Subagent       bool
+	Role           string
+	CommandTool    bool
+	ForeignTool    bool
+	Command        string
+	Output         string
+	ExitCode       *int
+	URI            string
+	MIME           string
+	Diffs          []Diff
+	DiffsTruncated bool
 }
 
 type PermissionRequest struct {
@@ -707,6 +711,9 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 			return
 		}
 		update.ToolCallID = event.Update.ToolCallID
+		if event.Update.Status == "completed" {
+			update.Diffs, update.DiffsTruncated = decodeDiffs(event.Update.Content)
+		}
 		switch event.Update.Status {
 		case "pending", "in_progress", "completed", "failed", "cancelled":
 			update.Status = event.Update.Status
@@ -755,6 +762,51 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	if emit != nil {
 		emit(update)
 	}
+}
+
+// decodeDiffs accepts only ACP diff blocks and bounds data before it reaches the router queue.
+func decodeDiffs(raw json.RawMessage) ([]Diff, bool) {
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil || len(blocks) > 128 {
+		return nil, false
+	}
+	var result []Diff
+	total := 0
+	for _, block := range blocks {
+		var d struct {
+			Type    string          `json:"type"`
+			Path    string          `json:"path"`
+			OldText json.RawMessage `json:"oldText"`
+			NewText json.RawMessage `json:"newText"`
+		}
+		if json.Unmarshal(block, &d) != nil || d.Type != "diff" || !filepath.IsAbs(d.Path) || len(d.Path) > 4096 || filepath.Clean(d.Path) != d.Path || !safeDiffText(d.Path, false) {
+			continue
+		}
+		var old, newText string
+		if len(d.OldText) == 0 || (string(d.OldText) != "null" && json.Unmarshal(d.OldText, &old) != nil) || len(d.NewText) == 0 || string(d.NewText) == "null" || json.Unmarshal(d.NewText, &newText) != nil || !safeDiffText(old, true) || !safeDiffText(newText, true) {
+			continue
+		}
+		total += len(d.Path) + len(old) + len(newText)
+		if total > 128<<10 || len(result) >= 16 {
+			return result, true
+		}
+		result = append(result, Diff{Path: d.Path, OldText: old, NewText: newText})
+	}
+	return result, false
+}
+
+func safeDiffText(s string, multiline bool) bool {
+	if !utf8.ValidString(s) || len(s) > 64<<10 {
+		return false
+	}
+	for _, r := range s {
+		if r < 32 || r == 127 {
+			if !multiline || (r != '\n' && r != '\r' && r != '\t') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func boundedUTF8(s string, max int) string {

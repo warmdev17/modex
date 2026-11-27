@@ -68,6 +68,7 @@ type chat struct {
 	calls                 map[string]invocationTarget
 	replayCalls           map[string]int
 	commandCalls          map[string]commandState
+	diffCalls             map[string]bool
 	setting, optionsDirty bool
 	titleDirty            bool
 	emit                  func(string, json.RawMessage)
@@ -279,6 +280,9 @@ func (r *Router) update(workspace string, source **acp.Client, u acp.Update) {
 		return
 	}
 	if c.admitting {
+		for _, d := range u.Diffs {
+			c.queuedBytes += len(d.Path) + len(d.OldText) + len(d.NewText)
+		}
 		c.queuedBytes += len(u.Text) + len(u.URI) + len(u.ToolCallID) + len(u.Command) + len(u.Output) + 256
 		if c.queuedBytes > 4<<20 || len(c.queued) >= 1024 {
 			if !c.queueOverflow {
@@ -348,6 +352,7 @@ func (r *Router) updateLocked(c *chat, u acp.Update) {
 		return
 	}
 	if u.ToolCallID != "" {
+		c.updateDiff(u)
 		c.updateCommand(u)
 		c.updateInvocation(u)
 		return
@@ -364,6 +369,9 @@ func (r *Router) updateLocked(c *chat, u acp.Update) {
 			a := replayAttachment(u.URI, u.MIME)
 			if a != nil {
 				if len(c.messages) == 0 || c.messages[len(c.messages)-1].Role != "user" {
+					clear(c.replayCalls)
+					clear(c.commandCalls)
+					clear(c.diffCalls)
 					c.messages = append(c.messages, message{ID: fmt.Sprintf("history-%d", len(c.messages)), Role: "user"})
 				}
 				c.messages[len(c.messages)-1].Attachments = append(c.messages[len(c.messages)-1].Attachments, *a)
@@ -376,6 +384,7 @@ func (r *Router) updateLocked(c *chat, u acp.Update) {
 			} else {
 				if role == "user" {
 					clear(c.replayCalls)
+					clear(c.diffCalls)
 					clear(c.commandCalls)
 				}
 				c.messages = append(c.messages, message{ID: fmt.Sprintf("history-%d", len(c.messages)), Role: role, Text: u.Text})
@@ -482,6 +491,7 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 	c.messages = nil
 	c.calls = nil
 	c.commandCalls = nil
+	c.diffCalls = nil
 	saved := c.record
 	r.mu.Unlock()
 	defer func() {
@@ -840,6 +850,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		c.emit = emit
 		c.calls = nil
 		c.commandCalls = nil
+		c.diffCalls = nil
 		c.admitting = true
 		c.segment = 0
 		r.mu.Unlock()

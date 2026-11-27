@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -822,4 +823,59 @@ func TestCommandOutputBoundsAndForeignPayload(t *testing.T) {
 	if len(got) != 2 || got[0].Output != "" || len(got[1].Command) > 4096 || len(got[1].Output) > 65536 || !utf8.ValidString(got[1].Command) || !utf8.ValidString(got[1].Output) || !strings.Contains(got[1].Output, "truncated") {
 		t.Fatalf("updates: %#v", got)
 	}
+}
+
+func TestCompletedDiffFramesAreDecoded(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	var updates []Update
+	for _, raw := range []string{
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"a","status":"completed","content":[{"type":"diff","path":"/tmp/a","oldText":"old\n","newText":"new\n"}]}}`,
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"b","status":"completed","content":[{"type":"diff","path":"/tmp/b","oldText":null,"newText":"new"}]}}`,
+	} {
+		c.handleUpdate(json.RawMessage(raw), func(u Update) { updates = append(updates, u) })
+	}
+	b, _ := json.Marshal(updates)
+	if len(updates) != 2 || !strings.Contains(string(b), `"/tmp/a"`) || !strings.Contains(string(b), `"/tmp/b"`) {
+		t.Fatalf("missing diffs: %s", b)
+	}
+}
+
+func TestDiffRejectsInvalidContentAndNoncompleted(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	for _, tc := range []struct{ status, content string }{
+		{"failed", `[{"type":"diff","path":"/ok","oldText":"a","newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"/a/../secret","oldText":"a","newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"relative","oldText":null,"newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"/ok","oldText":null,"newText":null}]`},
+		{"completed", `[{"type":"diff","path":"/ok","newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"/ok","oldText":"a","newText":"bad\u0000"}]`},
+	} {
+		raw := json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"x","status":"` + tc.status + `","content":` + tc.content + `}}`)
+		c.handleUpdate(raw, func(u Update) {
+			if len(u.Diffs) != 0 {
+				t.Errorf("accepted %s: %+v", raw, u.Diffs)
+			}
+		})
+	}
+	huge, _ := json.Marshal(map[string]any{"sessionId": "s", "update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "x", "status": "completed", "content": []any{map[string]any{"type": "diff", "path": "/ok", "oldText": nil, "newText": strings.Repeat("x", 65537)}}}})
+	c.handleUpdate(huge, func(u Update) {
+		if len(u.Diffs) != 0 {
+			t.Error("accepted oversized text")
+		}
+	})
+}
+
+func TestDiffAggregateLimitReportsOmissions(t *testing.T) {
+	blocks := make([]any, 17)
+	for i := range blocks {
+		blocks[i] = map[string]any{"type": "diff", "path": fmt.Sprintf("/file%d", i), "oldText": nil, "newText": "x"}
+	}
+	raw, _ := json.Marshal(map[string]any{"sessionId": "s", "update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "x", "status": "completed", "content": blocks}})
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	c.handleUpdate(raw, func(u Update) {
+		b, _ := json.Marshal(u)
+		if !strings.Contains(string(b), `"DiffsTruncated":true`) {
+			t.Fatalf("missing truncation: %s", b)
+		}
+	})
 }

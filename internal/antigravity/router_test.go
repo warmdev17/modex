@@ -1082,3 +1082,67 @@ func TestCommandSparseCompletionAndTurnIsolation(t *testing.T) {
 		t.Fatalf("messages %+v events %v", c.messages, events)
 	}
 }
+
+func TestFileDiffLiveReplayAndOrdering(t *testing.T) {
+	r := &Router{}
+	var events []string
+	c := &chat{record: record{ID: "thread"}, active: "turn", emit: func(method string, raw json.RawMessage) { events = append(events, method+string(raw)) }}
+	apply := func(c *chat, s string) {
+		var u acp.Update
+		if err := json.Unmarshal([]byte(s), &u); err != nil {
+			t.Fatal(err)
+		}
+		r.updateLocked(c, u)
+	}
+	apply(c, `{"Kind":"agent_message_chunk","TurnID":"turn","Text":"before"}`)
+	frame := `{"Kind":"tool_call_update","TurnID":"turn","ToolCallID":"a","Status":"completed","Diffs":[{"Path":"/tmp/a","OldText":"same\nold\nend\n","NewText":"same\nnew\nend\n"}]}`
+	apply(c, frame)
+	apply(c, frame)
+	apply(c, `{"Kind":"agent_message_chunk","TurnID":"turn","Text":"after"}`)
+	b, _ := json.Marshal(c.messages)
+	if len(c.messages) != 3 || c.messages[0].ID == c.messages[2].ID || !strings.Contains(string(b), `"role":"file_change"`) || !strings.Contains(string(b), `-old\n+new`) || len(events) != 3 || !strings.Contains(events[1], `"type":"fileChange"`) {
+		t.Fatalf("history %s events %v", b, events)
+	}
+	replay := &chat{loading: true}
+	apply(replay, frame)
+	apply(replay, frame)
+	if len(replay.messages) != 1 {
+		t.Fatalf("replay: %+v", replay.messages)
+	}
+}
+
+func TestFileDiffReplayBoundaryAndLimits(t *testing.T) {
+	r := &Router{}
+	c := &chat{loading: true}
+	apply := func(s string) {
+		var u acp.Update
+		if err := json.Unmarshal([]byte(s), &u); err != nil {
+			t.Fatal(err)
+		}
+		r.updateLocked(c, u)
+	}
+	frame := `{"Kind":"tool_call","ToolCallID":"a","Status":"completed","Diffs":[{"Path":"/a","OldText":"x","NewText":"y"}]}`
+	apply(frame)
+	apply(frame)
+	apply(`{"Kind":"user_message_chunk","Text":"next"}`)
+	apply(frame)
+	if len(c.messages) != 3 || c.messages[2].Role != "file_change" {
+		t.Fatalf("replay: %+v", c.messages)
+	}
+	patch := displayDiffLimit(strings.Repeat("x\n", 30000), strings.Repeat("y\n", 30000), 32<<10)
+	if len(patch) > 33000 || !strings.Contains(patch, "[Diff truncated]") {
+		t.Fatalf("unbounded patch length %d", len(patch))
+	}
+}
+
+func TestFileDiffShowsOmissionAndLiteralMarker(t *testing.T) {
+	r := &Router{}
+	c := &chat{loading: true}
+	var u acp.Update
+	_ = json.Unmarshal([]byte(`{"Kind":"tool_call","ToolCallID":"x","Status":"completed","DiffsTruncated":true,"Diffs":[{"Path":"/a","OldText":"[Diff truncated]\n","NewText":"new\n"}]}`), &u)
+	r.updateLocked(c, u)
+	b, _ := json.Marshal(c.messages)
+	if !strings.Contains(string(b), `-[Diff truncated]\n+new\n`) || !strings.Contains(string(b), "[Additional diffs truncated]") {
+		t.Fatalf("history: %s", b)
+	}
+}

@@ -129,6 +129,17 @@ else:
     thread = {"id": "codex-fixture", "cwd": workspace, "name": "Codex fixture",
               "projectId": "shared-project", "turns": []}
     agy_prompt = None
+    edit_record = Path(workspace) / ".edit-fixture"
+
+    def edit_update(update, status):
+        value = {"sessionUpdate": update, "toolCallId": "edit-1", "kind": "edit",
+                 "status": status, "content": [
+                     {"type": "diff", "path": str(Path(workspace) / "sample.txt"),
+                      "oldText": "same\nbefore\n", "newText": "same\nafter\n"},
+                 ]}
+        print(json.dumps({"jsonrpc": "2.0", "method": "session/update",
+                          "params": {"sessionId": "agy-native", "update": value}}), flush=True)
+
     for line in sys.stdin:
         request = json.loads(line)
         method = request.get("method")
@@ -141,15 +152,24 @@ else:
             continue
         if kind == "agy":
             if method == "session/prompt":
-                agy_prompt = request["id"]
-                continue
-            result = {
-                "initialize": {"protocolVersion": 1, "agentInfo": {
-                    "name": "Antigravity ACP Server", "version": "1"},
-                    "agentCapabilities": {"loadSession": True, "sessionCapabilities": {"list": {}}}},
-                "session/new": {"sessionId": "agy-native"},
-                "session/list": {"sessions": [{"sessionId": "agy-native", "cwd": workspace}]},
-            }.get(method, {})
+                if request["params"]["prompt"][0]["text"] != "Show edit fixture":
+                    agy_prompt = request["id"]
+                    continue
+                edit_record.touch()
+                edit_update("tool_call", "pending")
+                edit_update("tool_call_update", "completed")
+                edit_update("tool_call_update", "completed")
+                result = {"stopReason": "end_turn"}
+            else:
+                if method == "session/load" and edit_record.exists():
+                    edit_update("tool_call", "completed")
+                result = {
+                    "initialize": {"protocolVersion": 1, "agentInfo": {
+                        "name": "Antigravity ACP Server", "version": "1"},
+                        "agentCapabilities": {"loadSession": True, "sessionCapabilities": {"list": {}}}},
+                    "session/new": {"sessionId": "agy-native"},
+                    "session/list": {"sessions": [{"sessionId": "agy-native", "cwd": workspace}]},
+                }.get(method, {})
         else:
             result = {
                 "config/read": {"config": {"model": "fixture", "model_provider": "fixture"}},
@@ -232,11 +252,38 @@ class SharedAgentSupervisorTests(unittest.TestCase):
                     if frame.get("event") == "turn/completed":
                         completions[params["threadId"]] = params["turn"]["id"]
                 self.assertEqual(completions, {chats["opencode"]: oc_turn, chats["antigravity"]: agy_turn})
+                edit_turn = client.call("turn/start", dict(agy_target, text="Show edit fixture"))["turn"]["id"]
+                cards = []
+                deadline = time.monotonic() + 10
+                while True:
+                    frame = client.events.popleft() if client.events else client.receive(deadline)
+                    params = frame.get("params") or {}
+                    if params.get("threadId") != chats["antigravity"]:
+                        continue
+                    item = params.get("item") or {}
+                    if item.get("type") == "fileChange":
+                        self.assertEqual(frame["event"], "item/completed")
+                        self.assertEqual(params["turnId"], edit_turn)
+                        cards.append(item)
+                    if frame.get("event") == "turn/completed" and params["turn"]["id"] == edit_turn:
+                        self.assertEqual(params["turn"]["status"], "completed")
+                        break
+                self.assertEqual(len(cards), 1, "expected one completed edit card")
+                self.assertEqual(cards[0]["status"], "completed")
+                changes = cards[0]["changes"]
+                self.assertEqual(len(changes), 1)
+                self.assertEqual(Path(changes[0]["path"]).name, "sample.txt")
+                self.assertIn("-before", changes[0]["diff"])
+                self.assertIn("+after", changes[0]["diff"])
                 target["include_turns"] = True
                 client.close()
                 client = None
                 stop()
                 client = start()
+                agy_history = client.call("threads/read", dict(agy_target, include_turns=True, limit=10))
+                replay = [row for row in agy_history["messages"] if row["role"] == "file_change"]
+                self.assertEqual(len(replay), 1)
+                self.assertEqual(replay[0]["activity_item"]["changes"], changes)
                 history = client.call("threads/read", target)
                 self.assertEqual(history["thread"]["id"], chats["opencode"])
                 self.assertTrue(any(m["text"] == "OpenCode restart fixture" for m in history["messages"]))

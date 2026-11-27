@@ -65,6 +65,11 @@ Khi host đã cập nhật, lệnh shell do Antigravity báo về xuất hiện 
 cuộc trò chuyện. Mở thẻ lệnh để xem output và mã thoát nếu có. Khi mở lại
 chat, Modex hiển thị các lệnh được Antigravity trả về trong lịch sử.
 
+Khi Antigravity báo đã sửa file và gửi nội dung trước và sau khi sửa,
+mở thẻ sửa file để xem các dòng thay đổi. Khi mở lại chat, Modex hiển thị
+các bản sửa có trong lịch sử do Antigravity trả về. File quá lớn có thể
+không xuất hiện, còn bản diff bị cắt sẽ có dòng báo trong thẻ.
+
 Khi cả host lẫn Android đã cập nhật, tên do Antigravity tạo sẽ hiện ở
 đầu chat và trong sidebar, kể cả sau khi kết nối lại. Chat cũ lấy lại
 tên khi mở nếu Antigravity cung cấp tên đó.
