@@ -80,7 +80,7 @@ func run() error {
 	workspace := flag.String("workspace", "", "Existing workspace directory (required)")
 	binary := flag.String("codex", "codex", "Codex executable")
 	backend := flag.String("backend", "codex", "Agent backend: codex or opencode")
-	opencodeBinary := flag.String("opencode", "opencode", "OpenCode executable (only with --backend opencode)")
+	opencodeBinary := flag.String("opencode", "opencode", "OpenCode executable")
 	probeAntigravity := flag.Bool("probe-antigravity", false, "Probe Antigravity ACP compatibility without running a turn")
 	agy := flag.String("agy", "agy", "Antigravity CLI executable")
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")
@@ -110,18 +110,14 @@ func run() error {
 	if *backend != "codex" && *backend != "opencode" {
 		return fmt.Errorf("--backend must be codex or opencode")
 	}
-	codexExplicit, opencodeExplicit := false, false
+	codexExplicit := false
 	flag.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "codex":
 			codexExplicit = true
-		case "opencode":
-			opencodeExplicit = true
 		}
 	})
-	if *backend == "codex" && opencodeExplicit {
-		return fmt.Errorf("--opencode requires --backend opencode")
-	}
+
 	if *backend == "opencode" && codexExplicit {
 		return fmt.Errorf("--codex requires --backend codex")
 	}

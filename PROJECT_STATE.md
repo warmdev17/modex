@@ -1,5 +1,81 @@
 # Modex project state
 
+## Combined agent routing and Antigravity controls
+
+Updated 2026-11-27T20:33:08+07:00 on `feat/antigravity-session-controls`.
+Integrated shared agent routing through `a95ab4b` with Antigravity controls
+through `f5334e6`. Both plans and the bilingual agent guide describe the
+scoped capabilities and the managed OpenCode profile.
+
+- Ran `umask 022; go test -race ./... -timeout=120s`, `go vet ./...` and the
+  isolated three-runtime supervisor test on the combined tree. All passed.
+  The managed OpenCode permission snapshot now stays bound to its original
+  turn, and hitting the permission cap completes the turn instead of locking
+  the reconciler. An earlier standalone round-trip test once hit reply
+  ordering variability and passed in the final combined suite.
+- Combined debug APK uses the existing development certificate and fixture
+  versionCode 1002. JVM tests reported 180 passes and no failures. The
+  upgrade fixture preserved encrypted state from versionCode 39. Android
+  smoke tests confirmed runtime filtering, AGY model/thinking controls,
+  Codex read-only transcripts and SSH cursor reconnect and wrong-pin
+  rejection. The transcript test passed after using semantic clicks for
+  controls that move during animation.
+- Existing public APK and branch history on the remote have not changed.
+  Physical-device verification and OpenCode provider inference remain
+  unverified. AGY reports invocation status; child transcripts remain
+  unavailable in the tested ACP runtime.
+- Built the private installable preview `0.1.0-dev.39` with versionCode 48 and
+  the established development certificate. Unit tests, lint, package/signature
+  verification, the code-47-to-48 encrypted-state upgrade, shared-agent chats,
+  Antigravity options and agent-activity emulator smokes passed. The exact APK
+  is `/home/warmdev/Downloads/modex-0.1.0-dev.39-agent-routing.apk`, SHA-256
+  `d21f03972add22ac3be4dee53cf9566e1673f5b54e8bccdf09f5ccb7e6c48c5b`.
+  It has not been published, installed on a physical phone or tagged.
+
+## Shared agent chats
+
+Updated 2026-11-27T19:08:00+07:00 on `feat/shared-agent-chats`. Android
+routing and the sidebar landed in `4f934c3`. The
+[plan](docs/superpowers/plans/2026-11-27-shared-agent-chats.md) covers
+agent-neutral projects, explicit per-chat routing and isolated OpenCode state.
+
+- The isolated supervisor fixture created three chats in one project,
+  checked per-agent lists and the legacy list, exercised concurrent
+  OpenCode and AGY turns, rejected a stale Stop and a foreign workspace,
+  stopped OpenCode, and reopened its history after a restart.
+- Android Gradle unit, lint and APK tasks passed offline with 177 JVM tests.
+  Pixel 4 XL emulator verified agent labels and filtering, scoped OpenCode
+  creation and the same-signature upgrade from fixture code 1000 to 1001.
+- Real OpenCode 2.4.1 started with a private database, reported a model
+  catalogue and created a chat. Its native form, permission and history
+  endpoints returned the expected lists. The managed profile did not list
+  OpenCode Go. Live OpenCode inference was not verified.
+- Host review fixes and the combined result are recorded above.
+
+## Antigravity stage 3
+
+Updated 2026-11-27T18:21:00+07:00 on `feat/antigravity-session-controls`.
+ACP options/events landed in `8fce8ab`. This milestone adds acknowledged model
+and thinking choices per chat, guarded save/reload, draft retention until turn
+acknowledgement, and read-only invocation activity in Android. See the
+[design](docs/superpowers/specs/2026-11-27-antigravity-session-controls-design.md)
+and [plan](docs/superpowers/plans/2026-11-27-antigravity-session-controls.md).
+
+- On this milestone's working tree, `umask 022; go test -race ./... -timeout=110s`,
+  `go vet ./...` and `git diff --check` passed. Independent re-review found
+  no remaining blockers after regressions for malformed native responses,
+  failed saves followed by Refresh, and duplicate replayed invocations.
+- Isolated supervisor with real AGY 1.5.17: two chats held independent settings,
+  and model/thinking choices restored after restart in the chat with one
+  recorded turn. Native session listing omitted the empty chat after restart.
+  Native subagent probes observed invocation start/completion and replay.
+  The CLI supplied no child-scoped transcript in those probes.
+- Android `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`
+  passed offline, with 168 JVM tests. The Pixel 4 XL emulator passed the AGY
+  picker, existing Codex Agents flow and same-signature upgrade with encrypted
+  synthetic state from versionCode 39 to fixture versionCode 1000.
+- The combined result is recorded above.
+
 ## Public documentation refresh
 
 Updated 2026-11-27T16:09:44+07:00 on `docs/professional-readme`, source

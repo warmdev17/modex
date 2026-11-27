@@ -48,7 +48,7 @@ func serveHostWithSocket(cwd string, b backendSpec, socket string) error {
 			return err
 		}
 		defer closeGateway()
-		return serveAgentChats(ctx, os.Stdin, os.Stdout, cwd, b.agy, backend.call)
+		return serveAgentChats(ctx, os.Stdin, os.Stdout, cwd, b.agy, b.opencode, backend.call)
 	}
 	return serveBridge(ctx, p, os.Stdin, os.Stdout, cwd, b.home)
 }

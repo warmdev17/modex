@@ -32,20 +32,26 @@ type record struct {
 	Workspace   string `json:"workspace"`
 	Project     string `json:"project_id,omitempty"`
 	Projectless bool   `json:"projectless,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
 }
 type message struct {
-	ID   string `json:"id"`
-	Role string `json:"role"`
-	Text string `json:"text"`
-	Turn string `json:"turn_id,omitempty"`
+	ID       string          `json:"id"`
+	Role     string          `json:"role"`
+	Text     string          `json:"text"`
+	Turn     string          `json:"turn_id,omitempty"`
+	Activity *invocationItem `json:"activity_item,omitempty"`
 }
 type chat struct {
 	record
-	loaded   bool
-	loading  bool
-	active   string
-	messages []message
-	emit     func(string, json.RawMessage)
+	loaded                bool
+	loading               bool
+	active                string
+	messages              []message
+	calls                 map[string]invocationTarget
+	replayCalls           map[string]int
+	setting, optionsDirty bool
+	emit                  func(string, json.RawMessage)
 }
 type pending struct {
 	request acp.PermissionRequest
@@ -157,6 +163,9 @@ func (r *Router) saveLocked() error {
 	if e != nil {
 		return errors.New("cannot save Antigravity session")
 	}
+	for _, c := range r.chats {
+		c.optionsDirty = false
+	}
 	return nil
 }
 func thread(c *chat) map[string]any {
@@ -219,6 +228,10 @@ func (r *Router) update(workspace string, u acp.Update) {
 	if c == nil {
 		return
 	}
+	if u.ToolCallID != "" {
+		c.updateInvocation(u)
+		return
+	}
 	if c.loading {
 		role := ""
 		switch u.Kind {
@@ -231,6 +244,9 @@ func (r *Router) update(workspace string, u acp.Update) {
 			if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == role {
 				c.messages[len(c.messages)-1].Text += u.Text
 			} else {
+				if role == "user" {
+					clear(c.replayCalls)
+				}
 				c.messages = append(c.messages, message{ID: fmt.Sprintf("history-%d", len(c.messages)), Role: role, Text: u.Text})
 			}
 		}
@@ -240,8 +256,12 @@ func (r *Router) update(workspace string, u acp.Update) {
 		return
 	}
 	item := "assistant-" + u.TurnID
-	if len(c.messages) > 0 && c.messages[len(c.messages)-1].ID == item {
-		c.messages[len(c.messages)-1].Text += u.Text
+	index := len(c.messages) - 1
+	for index >= 0 && c.messages[index].Role == "agent_activity" && c.messages[index].Turn == u.TurnID {
+		index--
+	}
+	if index >= 0 && c.messages[index].ID == item {
+		c.messages[index].Text += u.Text
 	} else {
 		c.messages = append(c.messages, message{ID: item, Role: "assistant", Turn: u.TurnID, Text: u.Text})
 	}
@@ -281,7 +301,17 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		return nil, e
 	}
 	r.mu.Lock()
-	if c.loaded {
+	if c.setting {
+		r.mu.Unlock()
+		return nil, errors.New("session options are being updated")
+	}
+	if c.optionsDirty {
+		if err := r.saveLocked(); err != nil {
+			r.mu.Unlock()
+			return nil, err
+		}
+	}
+	if c.loaded && client.SessionLoaded(c.Native) {
 		r.mu.Unlock()
 		return client, nil
 	}
@@ -291,8 +321,15 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 	}
 	c.loading = true
 	c.messages = nil
+	c.calls = nil
+	saved := c.record
 	r.mu.Unlock()
-	defer func() { r.mu.Lock(); c.loading = false; r.mu.Unlock() }()
+	defer func() {
+		r.mu.Lock()
+		c.loading = false
+		c.replayCalls = nil
+		r.mu.Unlock()
+	}()
 	cursor := ""
 	found := false
 	for i := 0; i < 100; i++ {
@@ -321,6 +358,10 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 	if e = client.Load(ctx, c.Native); e != nil {
 		r.retire(c.Workspace, client)
 		return nil, e
+	}
+	if e = restoreOptions(ctx, client, saved); e != nil {
+		r.retire(c.Workspace, client)
+		return nil, errors.New("Antigravity could not restore chat options; refresh before sending")
 	}
 	r.mu.Lock()
 	c.loaded = true
@@ -528,6 +569,8 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		return nil, true, errors.New("thread outside workspace")
 	}
 	switch cmd.Method {
+	case "threads/options", "threads/options/set":
+		return r.handleOptions(ctx, c, cmd.Method, p)
 	case "threads/resume":
 		_, err := r.load(ctx, c)
 		if err != nil {
@@ -609,12 +652,13 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			return nil, true, err
 		}
 		r.mu.Lock()
-		if c.active != "" {
+		if c.active != "" || c.setting || c.optionsDirty || !c.loaded || !client.SessionLoaded(c.Native) {
 			r.mu.Unlock()
 			return nil, true, errors.New("session busy")
 		}
 		c.active = turn
 		c.emit = emit
+		c.calls = nil
 		sent := make(chan struct{})
 		done := make(chan error, 1)
 		go func() {
@@ -689,6 +733,16 @@ func (r *Router) finish(c *chat, turn, status string) {
 	if c.active != turn {
 		return
 	}
+	for _, target := range c.calls {
+		if target.Status == "running" || target.Status == "pendingInit" {
+			target.Status = "unknown"
+			if status == "interrupted" {
+				target.Status = "interrupted"
+			}
+			c.emitInvocation(turn, "completed", target)
+		}
+	}
+	c.calls = nil
 	for id, p := range r.pending {
 		if p.thread == c.ID && p.request.TurnID == turn {
 			delete(r.pending, id)

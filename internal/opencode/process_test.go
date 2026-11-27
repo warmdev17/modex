@@ -355,3 +355,152 @@ func TestAuthTransportSetsBasicAuthWithoutMutatingRequest(t *testing.T) {
 		t.Fatal("caller request was mutated")
 	}
 }
+
+func TestPersistentProcessPreservesStateAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n")
+	for i := 0; i < 2; i++ {
+		p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), os.Environ(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker := filepath.Join(dir, "data", "marker")
+		if i == 0 {
+			if err := os.WriteFile(marker, []byte("saved"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		} else if b, err := os.ReadFile(marker); err != nil || string(b) != "saved" {
+			t.Fatalf("state lost: %q %v", b, err)
+		}
+		p.Close()
+	}
+}
+
+func TestPersistentProcessRejectsSymlinkStateDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "exit 1\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("accepted symlink state directory")
+	}
+}
+
+func TestPersistentProcessOverridesInheritedDatabase(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	envFile := filepath.Join(t.TempDir(), "db")
+	fake := writeFake(t, fmt.Sprintf("printenv OPENCODE_DB > '%s'\nprintf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n", envFile))
+	p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), append(os.Environ(), "OPENCODE_DB=/outside/user.db"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	raw, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != filepath.Join(dir, "data", "opencode", "opencode.db") {
+		t.Fatalf("database path=%q", got)
+	}
+}
+
+func TestPersistentProcessRejectsSymlinkDatabaseDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "data"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "data", "opencode")); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("accepted symlink database directory")
+	}
+}
+
+func TestPersistentProcessRejectsSymlinkDatabase(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	dbDir := filepath.Join(dir, "data", "opencode")
+	if err := os.MkdirAll(dbDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), filepath.Join(dbDir, "opencode.db")); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("accepted symlink database")
+	}
+}
+
+func TestPersistentProcessPreservesDataAfterStartupFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	data := filepath.Join(dir, "data")
+	if err := os.Mkdir(data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(data, "marker")
+	if err := os.WriteFile(marker, []byte("retained"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "exit 1\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("expected startup failure")
+	}
+	if raw, err := os.ReadFile(marker); err != nil || string(raw) != "retained" {
+		t.Fatalf("state lost: %q %v", raw, err)
+	}
+}
+
+func TestPersistentProcessUsesAbsoluteDatabasePath(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(cwd, ".managed-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	rel, err := filepath.Rel(cwd, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "db")
+	fake := writeFake(t, fmt.Sprintf("printenv OPENCODE_DB > '%s'\nprintf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n", output))
+	p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(strings.TrimSpace(string(raw))) {
+		t.Fatalf("relative database path: %q", raw)
+	}
+}

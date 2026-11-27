@@ -22,3 +22,41 @@ Chat hiện có tiếp tục dùng runtime và phiên native đã chọn. Kết 
 Chỉ có executable không đồng nghĩa agent đã sẵn sàng. Hiện tại, bộ kiểm tra Antigravity xác nhận CLI, đăng nhập và các khả năng ACP bắt buộc trước khi cho phép chọn. Host Codex và OpenCode khởi động thành công chỉ chứng minh bridge đã khởi tạo, không chứng minh provider đã xác thực hay inference sẽ thành công. Tài khoản provider và thông tin xác thực được cấu hình, kiểm tra trên host.
 
 Ma trận này mô tả bản xem trước hiện tại. [Snapshot triển khai backend OpenCode](../opencode-backend.md) ghi lại một revision đã kiểm chứng trước đây và có thể chưa gồm phần project, form hay lịch sử tool mới hơn.
+
+## Chat nhiều agent trong bản phát triển
+
+Khi đã cập nhật cả host và Android, kết nối SSH một lần rồi chọn Codex,
+OpenCode hoặc Antigravity trong **New chat**. Có thể lọc danh sách theo
+agent. Các chat cùng project giữ agent và lịch sử riêng.
+
+Đường OpenCode do Modex quản lý cần OpenCode từ 2.4 trong dòng 2.x. Nó
+dùng cơ sở dữ liệu riêng trong thư mục trạng thái supervisor. Chat và
+tài khoản OpenCode độc lập vẫn nằm trong hồ sơ hiện có. Hãy cấu hình
+quyền truy cập provider trên host và kiểm tra model cần dùng trong hồ sơ
+được quản lý trước khi làm việc.
+
+Để đăng nhập OpenCode tương tác, đặt `supervisor_state` thành thư mục
+trạng thái đã cấu hình trong Modex. Chạy bằng chính tài khoản người dùng
+trên host, sau khi lần kiểm tra runtime đầu tiên đã tạo hồ sơ.
+
+```sh
+profile="$supervisor_state/agent-chats/opencode"
+XDG_DATA_HOME="$profile/data" XDG_STATE_HOME="$profile/state" \
+  OPENCODE_DB="$profile/data/opencode/opencode.db" opencode auth login --standalone
+```
+
+Làm mới danh sách agent sau khi đăng nhập.
+
+## Antigravity trong bản phát triển
+
+Khi cả host và Android hỗ trợ tùy chọn phiên Antigravity, bộ chọn trong
+chat hiển thị các model và mức suy nghĩ do ACP cung cấp. Có thể đổi khi chat
+đang rảnh. Modex lưu lựa chọn đã được xác nhận theo từng chat và đối chiếu
+với các tùy chọn còn khả dụng khi mở lại. Host cũ và phiên ACP thiếu tùy
+chọn tiếp tục dùng model mặc định của Antigravity.
+Antigravity 1.5.17 đưa chat mới vào danh sách khôi phục sau lượt chat đầu
+tiên được ghi lại.
+
+Bảng Agents hiển thị lượt gọi subagent do Antigravity báo về. Trạng thái
+hoàn tất của lượt gọi nghĩa là công cụ đã trả kết quả. Bản CLI được kiểm
+thử cung cấp trạng thái lượt gọi, còn lịch sử riêng của subagent chưa có.

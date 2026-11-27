@@ -103,6 +103,12 @@ internal fun Instrumentation.agentActivitySmoke() {
             }
             return bounds
         }
+        fun click(label: String) {
+            var target = await(label)
+            while (!target.isClickable) target = target.parent ?: error("Cannot click $label")
+            check(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "Cannot click $label" }
+            waitForIdleSync()
+        }
         fun screenshot(name: String) {
             ParcelFileDescriptor.AutoCloseInputStream(uiAutomation.executeShellCommand("screencap -p /data/local/tmp/$name"))
                 .use { it.readBytes() }
@@ -166,7 +172,7 @@ internal fun Instrumentation.agentActivitySmoke() {
         check(before.sameAs(after)) { "Live child updates moved the reading viewport" }
         before.recycle(); after.recycle()
         check(node("Live agent update") == null) { "Live update pulled the child transcript to the bottom" }
-        tap(await("Scroll to latest"))
+        click("Scroll to latest")
         await("Live agent update")
         runOnMainSync {
             conversation.event("item/agentMessage/delta", JSONObject().put("threadId", "one").put("turnId", "child-turn")
@@ -181,13 +187,13 @@ internal fun Instrumentation.agentActivitySmoke() {
         check(olderLoads == 1)
         await("Read-only agent response 0")
         check(node("Live during older page") == null) { "Older pagination pulled the viewport to a live update" }
-        tap(await("Scroll to latest"))
+        click("Scroll to latest")
         await("Live during older page")
         check(node("Message Codex") == null && node("Send message") == null && node("Stop response") == null)
         screenshot("agent-conversation.png")
-        tap(await("Back to agents"))
+        click("Back to agents")
         await("Agent activity")
-        tap(await("Close agent activity"))
+        click("Close agent activity")
         await("Send message")
         tap(await("Agents"))
         await("Agent activity")

@@ -28,6 +28,8 @@ func TestACPChild(t *testing.T) {
 			Method  string          `json:"method"`
 			Params  struct {
 				SessionID string                  `json:"sessionId"`
+				ConfigID  string                  `json:"configId"`
+				Value     string                  `json:"value"`
 				Prompt    []struct{ Text string } `json:"prompt"`
 			} `json:"params"`
 			Result struct {
@@ -58,17 +60,40 @@ func TestACPChild(t *testing.T) {
 				os.Exit(3)
 			}
 			update("saved", "user_message_chunk", "previous prompt")
-			reply(request.ID, map[string]any{})
+			reply(request.ID, json.RawMessage(`{"configOptions":[{"id":"thought_level","category":"thought_level","name":"Thinking","type":"select","currentValue":"low","options":[{"value":"low","name":"Low"}]}]}`))
 		case "session/new":
-			reply(request.ID, map[string]string{"sessionId": "fresh"})
+			reply(request.ID, json.RawMessage(`{"sessionId":"fresh","configOptions":[{"id":"model","category":"model","name":"Model","type":"select","currentValue":"a","options":[{"group":"g","name":"Group","options":[{"value":"a","name":"A"},{"value":"b","name":"B"}]}]},{"id":"thought_level","category":"thought_level","name":"Thinking","type":"select","currentValue":"low","options":[{"value":"low","name":"Low"}]}]}`))
 			if os.Getenv("MODEX_ACP_STALLED_INPUT") == "1" {
 				time.Sleep(30 * time.Second)
 				os.Exit(7)
 			}
+		case "session/set_config_option":
+			if result := os.Getenv("MODEX_ACP_SET_RESPONSE"); result != "" {
+				reply(request.ID, json.RawMessage(result))
+				continue
+			}
+			if os.Getenv("MODEX_ACP_SET_UNCERTAIN") == "1" {
+				_, _ = os.Stdout.WriteString(strings.Repeat("x", 16*1024*1024+1) + "\n")
+				continue
+			}
+			if request.Params.SessionID != "fresh" || request.Params.ConfigID != "model" || request.Params.Value != "b" {
+				os.Exit(8)
+			}
+			if os.Getenv("MODEX_ACP_CONFLICT") == "1" {
+				_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fresh","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"model","category":"model","name":"Model","type":"select","currentValue":"a","options":[{"value":"a","name":"A"}]}]}}}`))
+			}
+			reply(request.ID, json.RawMessage(`{"configOptions":[{"id":"model","category":"model","name":"Model","type":"select","currentValue":"b","options":[{"value":"b","name":"B"}]},{"id":"thought_level","category":"thought_level","name":"Thinking","type":"select","currentValue":"high","options":[{"value":"high","name":"High"}]}]}`))
 		case "session/prompt":
 			switch request.Params.Prompt[0].Text {
+			case "tools":
+				_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fresh","update":{"sessionUpdate":"tool_call","name":"invoke_subagent","toolCallId":"call-1","status":"in_progress","rawInput":{"Role":"reviewer","Prompt":"SECRET","Model":"SECRET"}}}}`))
+				_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fresh","update":{"sessionUpdate":"tool_call_update","toolCallId":"call-1","status":"completed","rawOutput":"SECRET"}}}`))
+				reply(request.ID, map[string]string{"stopReason": "end_turn"})
 			case "auth":
 				_ = send.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32000, "message": "private extra provider detail"}})
+			case "config-update":
+				_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fresh","update":{"sessionUpdate":"config_option_update","configOptions":[{"id":"model","category":"model","name":"Model","type":"select","currentValue":"b","options":[{"value":"b","name":"B"}]}]}}}`))
+				reply(request.ID, map[string]string{"stopReason": "end_turn"})
 			case "cancel", "cancel-late":
 				permissionMode = request.Params.Prompt[0].Text
 				pending = request.ID
@@ -471,5 +496,174 @@ func TestPermissionAfterStopIsCancelled(t *testing.T) {
 	case p := <-requests:
 		t.Fatalf("permission after stop exposed: %+v", p)
 	default:
+	}
+}
+
+func TestSessionOptionsAreScopedValidatedAndAcknowledged(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err = c.List(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err = c.Load(ctx, "saved"); err != nil {
+		t.Fatal(err)
+	}
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := c.Options(id)
+	if len(options) != 2 || options[0].CurrentValue != "a" || len(options[0].Values) != 2 {
+		t.Fatalf("new options: %+v", options)
+	}
+	options[0].Values[0].Value = "mutated"
+	if c.Options(id)[0].Values[0].Value != "a" {
+		t.Fatal("options expose mutable state")
+	}
+	if err := c.SetOption(ctx, id, "model", "invalid"); err == nil {
+		t.Fatal("accepted invalid option")
+	}
+	if err := c.SetOption(ctx, id, "model", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Options(id); len(got) != 2 || got[0].CurrentValue != "b" || got[1].CurrentValue != "high" {
+		t.Fatalf("acknowledged options: %+v", got)
+	}
+	if got := c.Options("saved"); len(got) != 1 || got[0].CurrentValue != "low" {
+		t.Fatalf("load or session isolation: %+v", got)
+	}
+	if err := c.SetOption(ctx, id, "model", "a"); err == nil {
+		t.Fatal("accepted stale option")
+	}
+}
+
+func TestSubagentEventsKeepOnlySafeScalars(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	events := make(chan Update, 4)
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), func(u Update) { events <- u })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Prompt(ctx, id, "turn", "tools"); err != nil {
+		t.Fatal(err)
+	}
+	start, end := <-events, <-events
+	if start.Kind != "tool_call" || start.ToolCallID != "call-1" || !start.Subagent || start.Role != "reviewer" || start.Status != "in_progress" || start.TurnID != "turn" {
+		t.Fatalf("start: %+v", start)
+	}
+	if end.Kind != "tool_call_update" || end.ToolCallID != "call-1" || end.Subagent || end.Status != "completed" {
+		t.Fatalf("end: %+v", end)
+	}
+	raw, _ := json.Marshal([]Update{start, end})
+	if strings.Contains(string(raw), "SECRET") {
+		t.Fatal("retained private tool data")
+	}
+}
+
+func TestOptionUpdatesAndBusySession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	events := make(chan Update, 4)
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), func(u Update) { events <- u })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Prompt(ctx, id, "update", "config-update"); err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Options(id); len(got) != 1 || got[0].CurrentValue != "b" {
+		t.Fatalf("notification: %+v", got)
+	}
+	if err := c.SetOption(ctx, id, "model", "a"); err == nil {
+		t.Fatal("accepted invalidated value")
+	}
+	done := make(chan error, 1)
+	go func() { _, err := c.Prompt(ctx, id, "busy", "cancel"); done <- err }()
+	<-events
+	if err := c.SetOption(ctx, id, "model", "b"); err == nil {
+		t.Fatal("accepted change during prompt")
+	}
+	if err := c.Cancel(ctx, id, "busy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestConflictingOptionUpdateRequiresReload(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1", "MODEX_ACP_CONFLICT=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetOption(ctx, id, "model", "b"); err == nil {
+		t.Fatal("conflicting notification accepted as confirmed")
+	}
+	if len(c.Options(id)) != 0 {
+		t.Fatal("conflicting options remained available")
+	}
+}
+
+func TestSessionLoadedDistinguishesRejectionFromUncertainExchange(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1", "MODEX_ACP_SET_UNCERTAIN=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetOption(ctx, id, "model", "invalid"); err == nil || !c.SessionLoaded(id) {
+		t.Fatal("local rejection should preserve loaded session")
+	}
+	if err := c.SetOption(ctx, id, "model", "b"); err == nil || c.SessionLoaded(id) {
+		t.Fatal("uncertain exchange should invalidate session")
+	}
+}
+
+func TestMalformedConfigurationAcknowledgementRequiresReload(t *testing.T) {
+	for _, response := range []string{"null", "[]", `{"configOptions":[]}`} {
+		t.Run(response, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1", "MODEX_ACP_SET_RESPONSE="+response), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			id, err := c.NewSession(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.SetOption(ctx, id, "model", "b"); err == nil || c.SessionLoaded(id) || len(c.Options(id)) != 0 {
+				t.Fatal("unacknowledged value left the session usable")
+			}
+		})
 	}
 }

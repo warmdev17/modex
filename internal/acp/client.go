@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,11 +38,36 @@ type Page struct {
 	NextCursor string    `json:"nextCursor,omitempty"`
 }
 
+type OptionValue struct {
+	Value, Name, Group string
+}
+
+type Option struct {
+	ID, Name, Category, CurrentValue string
+	Values                           []OptionValue
+}
+
+type nativeOption struct {
+	ID, Name, Category, Type, CurrentValue string
+	Options                                []struct {
+		Value, Name, Group string
+		Options            []struct{ Value, Name string }
+	}
+}
+
+type configResult struct {
+	ConfigOptions []nativeOption `json:"configOptions"`
+}
+
 type Update struct {
-	SessionID string
-	TurnID    string
-	Kind      string
-	Text      string
+	SessionID  string
+	TurnID     string
+	Kind       string
+	Text       string
+	ToolCallID string
+	Status     string
+	Subagent   bool
+	Role       string
 }
 
 type PermissionRequest struct {
@@ -69,6 +95,9 @@ type Client struct {
 type sessionState struct {
 	loaded, loading bool
 	turn            *promptTurn
+	setting         bool
+	options         []Option
+	optionsVersion  uint64
 }
 
 type promptTurn struct {
@@ -111,13 +140,11 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 		}
 		_ = process.Reject(id)
 	})
-	if onUpdate != nil {
-		process.SetNotificationHandler(func(method string, raw json.RawMessage) {
-			if method == "session/update" {
-				c.handleUpdate(raw, onUpdate)
-			}
-		})
-	}
+	process.SetNotificationHandler(func(method string, raw json.RawMessage) {
+		if method == "session/update" {
+			c.handleUpdate(raw, onUpdate)
+		}
+	})
 	initCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var initialized struct {
@@ -190,7 +217,10 @@ func (c *Client) List(ctx context.Context, cursor string) (Page, error) {
 }
 
 func (c *Client) NewSession(ctx context.Context) (string, error) {
-	var session Session
+	var session struct {
+		Session
+		configResult
+	}
 	params := map[string]any{"cwd": c.cwd, "mcpServers": []any{}}
 	if err := c.call(ctx, "session/new", params, &session); err != nil {
 		return "", err
@@ -200,7 +230,7 @@ func (c *Client) NewSession(ctx context.Context) (string, error) {
 	if !validID(session.ID) || c.sessions[session.ID] != nil {
 		return "", errors.New("invalid or duplicate Antigravity session ID")
 	}
-	c.sessions[session.ID] = &sessionState{loaded: true}
+	c.sessions[session.ID] = &sessionState{loaded: true, options: parseOptions(session.ConfigOptions)}
 	return session.ID, nil
 }
 
@@ -211,19 +241,126 @@ func (c *Client) Load(ctx context.Context, sessionID string) error {
 	}
 	c.mu.Lock()
 	session := c.sessions[sessionID]
-	if session == nil || session.loading || session.turn != nil {
+	if session == nil || session.loading || session.setting || session.turn != nil {
 		c.mu.Unlock()
 		return errors.New("Antigravity session is unavailable to load")
 	}
 	session.loading = true
 	c.mu.Unlock()
 	params := map[string]any{"sessionId": sessionID, "cwd": c.cwd, "mcpServers": []any{}}
-	err := c.call(ctx, "session/load", params, &struct{}{})
+	var result configResult
+	err := c.call(ctx, "session/load", params, &result)
 	c.mu.Lock()
 	session.loading = false
 	session.loaded = err == nil
+	if err == nil {
+		session.options = parseOptions(result.ConfigOptions)
+	}
 	c.mu.Unlock()
 	return err
+}
+
+// SessionLoaded reports whether the session is usable on this connection.
+func (c *Client) SessionLoaded(sessionID string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[sessionID]
+	return !c.closed && session != nil && session.loaded
+}
+
+// Options returns a snapshot of the latest supported session selectors.
+func (c *Client) Options(sessionID string) []Option {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session := c.sessions[sessionID]
+	if session == nil || !session.loaded {
+		return nil
+	}
+	result := append([]Option(nil), session.options...)
+	for i := range result {
+		result[i].Values = append([]OptionValue(nil), result[i].Values...)
+	}
+	return result
+}
+
+func parseOptions(native []nativeOption) []Option {
+	var result []Option
+	for _, n := range native {
+		if n.Type != "select" || (n.ID != "model" && n.ID != "thought_level" && n.Category != "model" && n.Category != "thought_level") || !validID(n.ID) {
+			continue
+		}
+		option := Option{ID: n.ID, Name: n.Name, Category: n.Category, CurrentValue: n.CurrentValue}
+		for _, v := range n.Options {
+			if validID(v.Value) {
+				option.Values = append(option.Values, OptionValue{Value: v.Value, Name: v.Name, Group: v.Group})
+			}
+			for _, item := range v.Options {
+				if validID(item.Value) {
+					option.Values = append(option.Values, OptionValue{Value: item.Value, Name: item.Name, Group: v.Name})
+				}
+			}
+		}
+		if len(option.Values) > 0 {
+			result = append(result, option)
+		}
+	}
+	return result
+}
+
+// SetOption only accepts values currently offered for an idle loaded session.
+func (c *Client) SetOption(ctx context.Context, sessionID, configID, value string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	session := c.sessions[sessionID]
+	allowed := false
+	if session != nil && session.loaded && !session.loading && !session.setting && session.turn == nil {
+		for _, option := range session.options {
+			if option.ID == configID {
+				for _, v := range option.Values {
+					if v.Value == value {
+						allowed = true
+					}
+				}
+			}
+		}
+	}
+	if !allowed {
+		c.mu.Unlock()
+		return errors.New("Antigravity session or configuration option is unavailable")
+	}
+	session.setting = true
+	version := session.optionsVersion
+	c.mu.Unlock()
+	raw, err := c.request(ctx, "session/set_config_option", map[string]string{"sessionId": sessionID, "configId": configID, "value": value}, nil)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	session.setting = false
+	if err != nil {
+		return err
+	}
+	var result configResult
+	validResponse := json.Unmarshal(raw, &result) == nil
+	acknowledged := parseOptions(result.ConfigOptions)
+	confirmed := false
+	for _, option := range acknowledged {
+		if option.ID == configID && option.CurrentValue == value {
+			confirmed = true
+		}
+	}
+	if !validResponse || !confirmed {
+		session.options = nil
+		session.loaded = false
+		return errors.New("invalid Antigravity configuration response; reload the session")
+	}
+	if session.optionsVersion != version && !reflect.DeepEqual(session.options, acknowledged) {
+		session.options = nil
+		session.loaded = false
+		return errors.New("conflicting Antigravity configuration updates; reload the session")
+	}
+	session.options = acknowledged
+	return nil
 }
 
 // Prompt runs one turn. The caller assigns a fresh turnID for each submission.
@@ -240,7 +377,7 @@ func (c *Client) PromptWithSent(ctx context.Context, sessionID, turnID, text str
 	}
 	c.mu.Lock()
 	session := c.sessions[sessionID]
-	if session == nil || !session.loaded || session.loading || session.turn != nil {
+	if session == nil || !session.loaded || session.loading || session.setting || session.turn != nil {
 		c.mu.Unlock()
 		return "", errors.New("Antigravity session is unavailable for a new prompt")
 	}
@@ -330,19 +467,53 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	var event struct {
 		ID     string `json:"sessionId"`
 		Update struct {
-			Kind    string                      `json:"sessionUpdate"`
-			Content struct{ Type, Text string } `json:"content"`
+			Kind          string                      `json:"sessionUpdate"`
+			Content       struct{ Type, Text string } `json:"content"`
+			ConfigOptions []nativeOption              `json:"configOptions"`
+			Name          string                      `json:"name"`
+			ToolCallID    string                      `json:"toolCallId"`
+			Status        string                      `json:"status"`
+			RawInput      struct {
+				Role string `json:"Role"`
+			} `json:"rawInput"`
 		} `json:"update"`
 	}
-	if json.Unmarshal(raw, &event) != nil || event.Update.Content.Type != "text" {
+	if json.Unmarshal(raw, &event) != nil {
 		return
 	}
+	if event.Update.Kind == "config_option_update" {
+		c.mu.Lock()
+		session := c.sessions[event.ID]
+		if session != nil && event.Update.ConfigOptions != nil {
+			session.options = parseOptions(event.Update.ConfigOptions)
+			session.optionsVersion++
+		}
+		c.mu.Unlock()
+		return
+	}
+	update := Update{SessionID: event.ID, Kind: event.Update.Kind}
 	switch event.Update.Kind {
 	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
+		if event.Update.Content.Type != "text" {
+			return
+		}
+		update.Text = event.Update.Content.Text
+	case "tool_call", "tool_call_update":
+		if !safeScalar(event.Update.ToolCallID, 256) {
+			return
+		}
+		update.ToolCallID = event.Update.ToolCallID
+		switch event.Update.Status {
+		case "pending", "in_progress", "completed", "failed":
+			update.Status = event.Update.Status
+		}
+		update.Subagent = event.Update.Name == "invoke_subagent"
+		if update.Subagent && safeScalar(event.Update.RawInput.Role, 64) {
+			update.Role = event.Update.RawInput.Role
+		}
 	default:
 		return
 	}
-	update := Update{SessionID: event.ID, Kind: event.Update.Kind, Text: event.Update.Content.Text}
 	c.mu.Lock()
 	session := c.sessions[event.ID]
 	if session == nil || (!session.loading && session.turn == nil) {
@@ -353,7 +524,21 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 		update.TurnID = session.turn.id
 	}
 	c.mu.Unlock()
-	emit(update)
+	if emit != nil {
+		emit(update)
+	}
+}
+
+func safeScalar(value string, max int) bool {
+	if value == "" || len(value) > max {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("_-.", r)) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Client) call(ctx context.Context, method string, params, dst any) error {
@@ -393,6 +578,7 @@ func (c *Client) exchangeError(err error) error {
 	// admitting another request that could receive the first request's updates.
 	c.process.Close()
 	c.mu.Lock()
+	c.closed = true
 	clear(c.permissions)
 	c.mu.Unlock()
 	return errors.New("Antigravity ACP exchange failed; refresh the session before retrying")
