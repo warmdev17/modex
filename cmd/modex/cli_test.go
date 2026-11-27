@@ -50,3 +50,41 @@ func TestCLISubcommandForwardsWorkspaceWithoutRequiringID(t *testing.T) {
 		t.Fatalf("accepted positional input: %v", err)
 	}
 }
+
+func TestDefaultCLICodexPrefersExecutableSibling(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix launcher")
+	}
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "modex")
+	executable, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launcher, executable, 0700); err != nil {
+		t.Fatal(err)
+	}
+	host := filepath.Join(dir, "modex-host")
+	if err := os.WriteFile(host, []byte("#!/bin/sh\nprintf '%s\\n' \"$5\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	patched := filepath.Join(dir, "codex-modex-plan")
+	check := func(want string, flags ...string) {
+		t.Helper()
+		cmd := exec.Command(launcher, append([]string{"-test.run=^TestCLISubcommandHelper$", "--"}, flags...)...)
+		cmd.Env = append(os.Environ(), "MODEX_CLI_SUBPROCESS=1")
+		if got, err := cmd.CombinedOutput(); err != nil || strings.TrimSpace(string(got)) != want {
+			t.Fatalf("Codex executable: got %q (%v), want %q", got, err, want)
+		}
+	}
+	check("codex")
+	if err := os.WriteFile(patched, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	check("codex")
+	if err := os.Chmod(patched, 0700); err != nil {
+		t.Fatal(err)
+	}
+	check(patched)
+	check("custom-codex", "--codex", "custom-codex")
+}
