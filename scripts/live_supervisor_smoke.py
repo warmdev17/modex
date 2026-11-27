@@ -20,6 +20,7 @@ class AttachedRPC(RPC):
             self.close()
             raise RuntimeError("attach_failed")
         self.instance = hello["instance"]
+        self.capabilities = hello.get("capabilities", [])
         self.cursor = cursor
         if hello.get("resynced"):
             checkpoint = hello.get("cursor")

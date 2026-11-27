@@ -73,4 +73,14 @@ class AntigravityTest {
         assertEquals(setOf("fixture-default", "fixture-alt"), options.first().values.keys)
         assertTrue(readAntigravityOptions(JSONObject("""{"options":[]}""")).isEmpty())
     }
+
+    @Test fun legacyAgentHostCanAdvertiseOptionsWithoutEnablingSharedRouting() {
+        val host = BackendCapabilities.fromReady(JSONObject("""{
+            "backend":"codex","capabilities":["agent_discovery","antigravity_session_options","plan_mode"]
+        }"""))
+        val agy = runtimeCapabilities(host, emptyList(), ANTIGRAVITY_AGENT)
+        assertTrue(agy.supports("threads/options"))
+        assertFalse(agy.planMode)
+        assertFalse(host.runtimeRouting)
+    }
 }

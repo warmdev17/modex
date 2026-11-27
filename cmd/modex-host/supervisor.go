@@ -40,6 +40,9 @@ func serveArgs(cwd string, b backendSpec, nativeSocket string) []string {
 	if b.home != "" {
 		args = append(args, "--codex-home", b.home)
 	}
+	if b.opencode != "" && b.opencode != "opencode" {
+		args = append(args, "--opencode", b.opencode)
+	}
 	if b.agy != "" && b.agy != "agy" {
 		args = append(args, "--agy", b.agy)
 	}
@@ -55,6 +58,9 @@ func superviseArgs(cwd string, b backendSpec, dir string) []string {
 	args := []string{"--supervise", "--workspace", cwd, "--codex", b.codex, "--state-dir", dir}
 	if b.home != "" {
 		args = append(args, "--codex-home", b.home)
+	}
+	if b.opencode != "" && b.opencode != "opencode" {
+		args = append(args, "--opencode", b.opencode)
 	}
 	if b.agy != "" && b.agy != "agy" {
 		args = append(args, "--agy", b.agy)
@@ -137,7 +143,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 	server.Backend = b.kind
 	server.Capabilities = []string{"projects_read"}
 	if b.kind == "codex" {
-		server.Capabilities = []string{"session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover", "agent_discovery", "antigravity_session_options"}
+		server.Capabilities = []string{"session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover", "agent_discovery", "runtime_routing", "antigravity_session_options"}
 	}
 	server.OnAttachment = func(attached bool) error {
 		return json.NewEncoder(input).Encode(map[string]any{"id": 2147483646, "method": "client/attached", "params": map[string]bool{"attached": attached}})

@@ -23,6 +23,30 @@ An executable alone does not mean an agent is ready. The current Antigravity pic
 
 This matrix describes the current preview. The [OpenCode backend implementation snapshot](opencode-backend.md) records an earlier verified revision and may not include newer projects, forms, or tool-history work.
 
+## Shared agent chats in development builds
+
+With an updated host and Android app, open one SSH connection and choose
+Codex, OpenCode or Antigravity in **New chat**. The sidebar can filter by
+agent. Chats in the same project keep their own agent and history.
+
+The managed OpenCode path requires OpenCode 2.4 or later in the 2.x series.
+It keeps its own database in the supervisor state directory. Existing
+standalone OpenCode chats and accounts stay in their existing profiles.
+Provider access must be configured for the managed runtime on the host.
+Verify the requested provider and model in that profile before starting work.
+
+For an interactive OpenCode login, set `supervisor_state` to the state
+directory configured in Modex. Run the login as the same host user, after
+the first runtime check has initialized the profile.
+
+```sh
+profile="$supervisor_state/agent-chats/opencode"
+XDG_DATA_HOME="$profile/data" XDG_STATE_HOME="$profile/state" \
+  OPENCODE_DB="$profile/data/opencode/opencode.db" opencode auth login --standalone
+```
+
+Refresh the agent list after signing in.
+
 ## Antigravity in development builds
 
 When both the host and the Android app support Antigravity session options,

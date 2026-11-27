@@ -30,8 +30,11 @@ type Stream struct {
 
 	// OnPermissions receives a session's pending-permission snapshot from the
 	// polling reconciler (nil disables the M4 reconciliation).
-	OnPermissions func(sessionID, directory string, raw json.RawMessage)
-	Forms         *Decisions
+	OnPermissions       func(sessionID, directory string, raw json.RawMessage)
+	OnScopedPermissions func(sessionID, directory string, raw json.RawMessage, turnID string) bool
+	Forms               *Decisions
+	Filter              func(typ string, properties json.RawMessage, directory string) bool
+	ScopedPoll          bool
 
 	seenMu    sync.Mutex
 	seen      map[string]bool
@@ -138,17 +141,18 @@ func (s *Stream) dispatch(payload string) {
 	if json.Unmarshal([]byte(payload), &envelope) != nil || envelope.Type == "" {
 		return
 	}
-	if envelope.ID != "" {
-		if s.alreadySeen(envelope.ID) {
-			return
-		}
-	}
 	properties := envelope.Data
 	if len(properties) == 0 {
 		properties = envelope.Properties
 	}
 	if len(properties) == 0 {
 		properties = json.RawMessage("null")
+	}
+	if s.Filter != nil && !s.Filter(envelope.Type, properties, envelope.Location.Directory) {
+		return
+	}
+	if envelope.ID != "" && s.alreadySeen(envelope.ID) {
+		return
 	}
 	switch envelope.Type {
 	case "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted", "session.idle", "session.error":
@@ -202,29 +206,18 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 	}
 	anchor := turn.historyAnchor
 	s.synth.mu.Unlock()
-	if inFlight && s.Forms != nil {
-		epoch := s.Forms.formEpoch()
-		formCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		forms, err := s.client.listForms(formCtx, sessionID)
-		cancel()
-		if err == nil {
-			s.synth.mu.Lock()
-			if s.synth.turns[sessionID] == turn && !turn.completed {
-				if notice := s.Forms.reconcileForms(sessionID, turn.userID, epoch, forms); notice != "" {
-					s.synth.completeWithNotice(turn, "failed", "unsupported_input", notice)
-				}
-			}
-			s.synth.mu.Unlock()
-		}
+	if !s.ScopedPoll {
+		s.reconcileForms(ctx, sessionID, turn, inFlight)
 	}
 	session, err := s.client.ReadSession(ctx, sessionID)
-	if err != nil {
+	if err != nil || s.ScopedPoll && (session.ID != sessionID || session.Location.Directory != turn.dir) {
 		return
 	}
 	var messages []message
 	cursor := ""
 	seen := map[string]bool{}
 	limit := pollMessages
+	anchored := false
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	// shortcut: recover at most 100 messages per poll from the last verified
@@ -235,7 +228,6 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 			return
 		}
 		messages = append(messages, page.Data...)
-		anchored := false
 		for _, item := range page.Data {
 			if item.ID == anchor {
 				anchored = true
@@ -252,11 +244,44 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 		seen[cursor] = true
 		limit = min(limit, len(page.Data))
 	}
+	if s.ScopedPoll && !anchored {
+		return
+	}
 	reverseMessages(messages)
+	if s.ScopedPoll {
+		s.reconcileForms(ctx, sessionID, turn, inFlight)
+	}
 	if inFlight {
-		if permissions, err := s.client.ListPermissions(ctx, sessionID); err == nil && s.OnPermissions != nil {
-			s.OnPermissions(sessionID, session.Location.Directory, permissions)
+		if permissions, err := s.client.ListPermissions(ctx, sessionID); err == nil {
+			if s.ScopedPoll && s.OnScopedPermissions != nil {
+				s.synth.mu.Lock()
+				if s.synth.turns[sessionID] == turn && !turn.completed &&
+					s.OnScopedPermissions(sessionID, session.Location.Directory, permissions, turn.userID) {
+					s.synth.completeWithNotice(turn, "failed", "unsupported_input", pendingCapNotice)
+				}
+				s.synth.mu.Unlock()
+			} else if !s.ScopedPoll && s.OnPermissions != nil {
+				s.OnPermissions(sessionID, session.Location.Directory, permissions)
+			}
 		}
 	}
 	s.synth.reconcile(session, messages, turn)
+}
+
+func (s *Stream) reconcileForms(ctx context.Context, sessionID string, turn *turnState, inFlight bool) {
+	if inFlight && s.Forms != nil {
+		epoch := s.Forms.formEpoch()
+		formCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		forms, err := s.client.listForms(formCtx, sessionID)
+		cancel()
+		if err == nil {
+			s.synth.mu.Lock()
+			if s.synth.turns[sessionID] == turn && !turn.completed {
+				if notice := s.Forms.reconcileForms(sessionID, turn.userID, epoch, forms); notice != "" {
+					s.synth.completeWithNotice(turn, "failed", "unsupported_input", notice)
+				}
+			}
+			s.synth.mu.Unlock()
+		}
+	}
 }

@@ -16,8 +16,9 @@ internal data class BackendCapabilities(
     val takeover: Boolean,
     val agentDiscovery: Boolean = false,
     val agySessionOptions: Boolean = false,
+    val runtimeRouting: Boolean = false,
 ) {
-    val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; else -> "Agent" }
+    val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; "antigravity" -> "Antigravity"; else -> "Agent" }
     fun supports(method: String): Boolean = when (method) {
         "agents/list" -> agentDiscovery
         "threads/options", "threads/options/set" -> agySessionOptions
@@ -52,8 +53,9 @@ internal data class BackendCapabilities(
                 "projects" in keys,
                 "references" in keys,
                 "takeover" in keys,
-                backend == "codex" && "agent_discovery" in keys,
-                backend == "codex" && "antigravity_session_options" in keys,
+                agentDiscovery = backend == "codex" && ("agent_discovery" in keys || "runtime_routing" in keys),
+                runtimeRouting = backend == "codex" && "runtime_routing" in keys,
+                agySessionOptions = backend == "codex" && "antigravity_session_options" in keys,
             )
         }
     }
