@@ -34,18 +34,20 @@ internal fun Instrumentation.openCodeTextFormPreview() {
             check(editors()[index].performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args))
             waitForIdleSync()
         }
-        fun submit(): AccessibilityNodeInfo {
-            var node = await { list -> list.any { it.text?.toString() == "Submit answer" } }
-                .first { it.text?.toString() == "Submit answer" }
-            while (!node.isClickable && node.parent != null) node = node.parent
-            return node
+        fun submit(enabled: Boolean): AccessibilityNodeInfo {
+            fun button(list: List<AccessibilityNodeInfo>): AccessibilityNodeInfo? {
+                var node = list.firstOrNull { it.text?.toString() == "Submit answer" } ?: return null
+                while (!node.isClickable && node.parent != null) node = node.parent
+                return node.takeIf { it.isEnabled == enabled }
+            }
+            return checkNotNull(button(await { button(it) != null }))
         }
         val labels = await { list -> list.count { it.isEditable } == 2 }.map { it.text?.toString() }
         check("Target?" in labels && "Reason?" in labels)
         setText(0, "android")
-        check(!submit().isEnabled) { "Form can submit without the second answer" }
+        submit(enabled = false)
         setText(1, "fixture reason")
-        check(submit().isEnabled && submit().performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        check(submit(enabled = true).performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "Cannot click enabled Submit answer" }
         waitForIdleSync()
         runOnMainSync {
             val answers = checkNotNull(result).getJSONObject("answers")
@@ -56,7 +58,7 @@ internal fun Instrumentation.openCodeTextFormPreview() {
         report.putString("result", "PASS: OpenCode two-field form renders and submits both answers")
         finish(-1, report)
     } catch (error: Throwable) {
-        report.putString("result", "FAIL: OpenCode text form: ${error.message}")
+        report.putString("result", "FAIL: OpenCode text form: ${error.message} at ${error.stackTrace.firstOrNull()}")
         finish(0, report)
     }
 }
