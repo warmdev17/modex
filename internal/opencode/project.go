@@ -75,14 +75,28 @@ type message struct {
 }
 
 type part struct {
-	Type string   `json:"type"`
-	Text string   `json:"text"`
-	Tool toolPart `json:"tool"`
-	File struct {
+	Type  string     `json:"type"`
+	Text  string     `json:"text"`
+	ID    string     `json:"id,omitempty"`
+	Name  string     `json:"name,omitempty"`
+	State *toolState `json:"state,omitempty"`
+	Tool  *toolPart  `json:"tool,omitempty"`
+	File  struct {
 		Mime     string `json:"mime"`
 		Filename string `json:"filename"`
 		URL      string `json:"url"`
 	} `json:"file"`
+}
+
+func (p part) toolCall() toolPart {
+	if p.Tool != nil {
+		return *p.Tool
+	}
+	call := toolPart{ID: p.ID, Name: p.Name}
+	if p.State != nil {
+		call.State = *p.State
+	}
+	return call
 }
 
 type toolPart struct {
@@ -228,24 +242,25 @@ func projectAssistant(m message, dir string) []map[string]any {
 			})
 		case "tool":
 			tools++
-			toolID := p.Tool.CallID
+			call := p.toolCall()
+			toolID := call.CallID
 			if toolID == "" {
-				toolID = p.Tool.ID
+				toolID = call.ID
 			}
 			if toolID == "" {
 				toolID = fmt.Sprintf("%s/t%d", m.ID, tools)
 			}
-			command := p.Tool.Tool
+			command := call.Tool
 			if command == "" {
-				command = p.Tool.Name
+				command = call.Name
 			}
 			entries = append(entries, map[string]any{
 				"id":        toolID,
 				"role":      "command",
-				"text":      boundedToolOutput(toolOutput(p.Tool)),
+				"text":      boundedToolOutput(toolOutput(call)),
 				"command":   command,
 				"cwd":       dir,
-				"status":    toolStatus(p.Tool.State.Status),
+				"status":    toolStatus(call.State.Status),
 				"exit_code": nil,
 			})
 		}

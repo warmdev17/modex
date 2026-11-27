@@ -654,7 +654,7 @@ func historyRevision(threadID string, messages []message) string {
 	hash := sha256.New()
 	// Bump the prefix when the projection changes so Android invalidates its
 	// cached pages even if the upstream content is identical.
-	hash.Write([]byte("opencode-history-v2\x00"))
+	hash.Write([]byte("opencode-history-v3\x00"))
 	hash.Write([]byte(threadID))
 	hash.Write([]byte{0})
 	for _, item := range messages {

@@ -322,18 +322,19 @@ func (s *Synthesizer) reconcile(session session, messages []message, expected *t
 				s.finishReasoning(state, item.ID, ordinal, part.Text)
 				ordinal++
 			case "tool":
-				id := part.Tool.CallID
+				call := part.toolCall()
+				id := call.CallID
 				if id == "" {
-					id = part.Tool.ID
+					id = call.ID
 				}
-				name := part.Tool.Tool
+				name := call.Tool
 				if name == "" {
-					name = part.Tool.Name
+					name = call.Name
 				}
 				s.ensureToolStarted(state, id, name)
-				status := toolStatus(part.Tool.State.Status)
+				status := toolStatus(call.State.Status)
 				if status == "completed" || status == "failed" {
-					s.completeTool(state, id, toolOutput(part.Tool), status)
+					s.completeTool(state, id, toolOutput(call), status)
 				}
 			}
 		}
