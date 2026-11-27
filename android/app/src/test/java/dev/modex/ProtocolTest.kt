@@ -5,6 +5,76 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ProtocolTest {
+    @Test fun readOnlyProjectsKeepSelectionWithoutAllowingCreation() {
+        val readOnly = BackendCapabilities.fromReady(JSONObject("""{
+          "ready":true,"instance":"open","backend":"opencode","capabilities":["projects_read"]
+        }"""))
+        assertTrue(readOnly.projects)
+        assertFalse(readOnly.projectCreation)
+        assertTrue(readOnly.supports("projects/list"))
+        assertFalse(readOnly.supports("projects/create"))
+        val start = readOnly.supportedNewThreadParams("open-model", "host-default", "/work/modex", "project-1")
+        assertEquals("/work/modex", start.getString("workspace"))
+        assertEquals("project-1", start.getString("project_id"))
+        assertFalse(start.has("standalone"))
+
+        val full = BackendCapabilities.fromReady(JSONObject("""{
+          "ready":true,"instance":"codex","backend":"codex","capabilities":["projects"]
+        }"""))
+        assertTrue(full.projects)
+        assertTrue(full.projectCreation)
+        assertTrue(full.supports("projects/create"))
+    }
+
+    @Test fun readyMetadataDefaultsLegacyFramesAndParsesExplicitCapabilities() {
+        val legacy = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"legacy"}"""))
+        assertEquals("Codex", legacy.label)
+        assertTrue(legacy.sessionStatus && legacy.planMode && legacy.permissionProfiles)
+        assertTrue(legacy.sessionLifecycle && legacy.projects && legacy.references && legacy.takeover)
+
+        val openCode = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"open","backend":"opencode","capabilities":[]}"""))
+        assertEquals("OpenCode", openCode.label)
+        assertFalse(openCode.sessionStatus || openCode.planMode || openCode.permissionProfiles)
+        assertFalse(openCode.sessionLifecycle || openCode.projects || openCode.references || openCode.takeover)
+
+        val codex = BackendCapabilities.fromReady(JSONObject("""{
+          "ready":true,"instance":"codex","backend":"codex",
+          "capabilities":["session_status","plan_mode","permission_profiles","session_lifecycle","projects","references","takeover"]
+        }"""))
+        assertEquals(legacy, codex)
+        assertFalse(legacy.supports("agents/list"))
+        assertFalse(openCode.supports("agents/list"))
+        val discovery = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery"]}"""))
+        assertTrue(discovery.supports("agents/list"))
+    }
+
+    @Test fun explicitBackendDisablesMalformedOrMissingOptionalCapabilitiesAndReplacementDoesNotLeak() {
+        val journal = JournalState()
+        journal.hello(JSONObject("""{"ready":true,"instance":"one","backend":"codex","capabilities":["references","takeover"]}"""))
+        var current = journal.backendCapabilities
+        assertTrue(current.references && current.takeover)
+        assertFalse(current.sessionStatus || current.projects)
+
+        journal.hello(JSONObject("""{"ready":true,"instance":"one","backend":"opencode","capabilities":["references",7]}"""))
+        current = journal.backendCapabilities
+        assertEquals("OpenCode", current.label)
+        assertFalse(current.references || current.takeover || current.projects)
+
+        journal.hello(JSONObject("""{"ready":true,"instance":"one","backend":"opencode"}"""))
+        current = journal.backendCapabilities
+        assertFalse(current.sessionStatus || current.planMode || current.permissionProfiles || current.sessionLifecycle || current.projects || current.references || current.takeover)
+    }
+
+    @Test fun openCodeCapabilitiesKeepCoreChatAndBlockEveryOptionalRequest() {
+        val capabilities = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"open","backend":"opencode","capabilities":[]}"""))
+        for (method in listOf("threads/list", "threads/read", "threads/start", "turn/start", "turn/steer", "turn/interrupt", "decision/respond", "models/list", "status")) {
+            assertTrue(method, capabilities.supports(method))
+        }
+        for (method in listOf("threads/status", "threads/mode", "threads/permissions", "threads/archive", "threads/unarchive", "threads/delete", "threads/fork", "threads/takeover", "projects/list", "projects/create", "references/list", "plans/respond")) {
+            assertFalse(method, capabilities.supports(method))
+        }
+    }
+
     @Test fun decisionResetAndReplayReconcilePendingWithoutReanswering() {
         val stale = JSONObject("""{"decision_id":"stale"}""")
         var decisions = updatePendingDecisions(listOf(stale), "decision/reset", JSONObject())

@@ -5,6 +5,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SessionSettingsTest {
+    @Test fun unsupportedOptionalFieldsAreOmittedWithoutChangingTextFilesOrDraftReferences() {
+        val skill = PromptReference("skill", "review", "/skill", "Review", "", "user", true, "\$review")
+        val file = Attachment("/tmp/report.txt", "report.txt", "file", 12)
+        val capabilities = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"open","backend":"opencode","capabilities":[]}"""))
+
+        val start = capabilities.supportedNewThreadParams("open-model", "full-access", "/cached/project", "cached-project")
+        assertEquals("open-model", start.getString("model"))
+        assertTrue(start.getBoolean("standalone"))
+        assertFalse(start.has("permission_mode"))
+        assertFalse(start.has("workspace"))
+        assertFalse(start.has("project_id"))
+
+        val turn = capabilities.supportedTurnStartParams("thread", "Use \$review as ordinary text", "open-model", files = listOf(file), references = listOf(skill))
+        assertEquals("Use \$review as ordinary text", turn.getString("text"))
+        assertEquals("/tmp/report.txt", turn.getJSONArray("attachments").getJSONObject(0).getString("path"))
+        assertFalse(turn.has("references"))
+    }
+
     @Test fun defaultInheritsHostWithoutPermissionOverride() {
         val params = newThreadParams("", "host-default")
         assertEquals(0, params.length())
@@ -35,6 +53,19 @@ class SessionSettingsTest {
         assertEquals("high", turnStartParams("t", "hello", "custom", "high").getString("effort"))
         assertFalse(turnStartParams("t", "hello", "custom", "").has("effort"))
         assertFalse(validEffort("bad\neffort"))
+    }
+    @Test fun openCodeCataloguePreservesProviderWhenModelsShareAName() {
+        val models = readModels(JSONObject("""{"data":[
+            {"id":"p1/m1","model":"p1/m1","displayName":"m1"},
+            {"id":"p2/m1","model":"p2/m1","displayName":"m1"}
+        ]}""")).distinctBy { it.model }
+        assertEquals(listOf("p1/m1", "p2/m1"), models.map { it.model })
+        val picked = models[1].model
+        assertTrue(ambiguousOpenCodeModel("m1", models))
+        assertFalse(ambiguousOpenCodeModel("m1", models.take(1)))
+        assertFalse(ambiguousOpenCodeModel(picked, models))
+        assertEquals("p2/m1", newThreadParams(picked, "host-default").getString("model"))
+        assertEquals("p2/m1", turnStartParams("thread", "hello", picked).getString("model"))
     }
     @Test fun projectsKeepSameNamedFoldersSeparateAcrossPlatforms() {
         assertEquals("modex", projectName("/home/me/modex"))

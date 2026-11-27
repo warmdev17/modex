@@ -27,6 +27,7 @@ type Decision struct {
 
 	sessionID string
 	requestID string
+	formKeys  []string
 }
 
 type permissionRequest struct {
@@ -46,13 +47,16 @@ type permissionRequest struct {
 // Decisions stores pending OpenCode permissions and answers them through the
 // verified v2 reply endpoint.
 type Decisions struct {
-	mu         sync.Mutex
-	emit       func(string, json.RawMessage)
-	reply      func(context.Context, string, string, string) error
-	turnID     func(string) string
-	defaultDir string
-	pending    map[string]*Decision
-	consumed   map[string]struct{}
+	mu           sync.Mutex
+	emit         func(string, json.RawMessage)
+	reply        func(context.Context, string, string, string) error
+	turnID       func(string) string
+	defaultDir   string
+	pending      map[string]*Decision
+	consumed     map[string]struct{}
+	formRevision uint64
+
+	ReplyForm func(context.Context, string, string, map[string]string) error
 
 	// OnUnsupportedInput surfaces an input request this slice cannot render
 	// (form.created / unknown *.asked) so the turn fails visibly instead of
@@ -77,9 +81,7 @@ func NewDecisions(defaultDir string, emit func(string, json.RawMessage), turnID 
 	}
 }
 
-// Handle consumes permission SSE events. OpenCode 2.4.x has no /api/question
-// endpoint; form.created and unknown *.asked inputs fail the turn visibly
-// through OnUnsupportedInput instead of stalling it silently.
+// Handle consumes permission and form SSE events.
 func (d *Decisions) Handle(typ string, properties json.RawMessage, directory string) {
 	switch typ {
 	case "permission.asked", "permission.updated":
@@ -96,7 +98,19 @@ func (d *Decisions) Handle(typ string, properties json.RawMessage, directory str
 		if json.Unmarshal(properties, &event) == nil {
 			d.resolve(event.SessionID, event.RequestID)
 		}
-	case "form.created", "question.created", "question.asked", "input.asked":
+	case "form.created":
+		if !d.handleTextForm(properties) {
+			d.unsupportedInput(properties)
+		}
+	case "form.replied", "form.cancelled":
+		var event struct {
+			SessionID string `json:"sessionID"`
+			ID        string `json:"id"`
+		}
+		if json.Unmarshal(properties, &event) == nil && validFormIdentity(event.SessionID, event.ID) {
+			d.settleForm(event.SessionID, event.ID)
+		}
+	case "question.created", "question.asked", "input.asked":
 		d.unsupportedInput(properties)
 	default:
 		if strings.HasSuffix(typ, ".asked") {
@@ -130,7 +144,7 @@ func (d *Decisions) unsupportedInput(properties json.RawMessage) {
 	if sessionID == "" {
 		return
 	}
-	d.failVisible(sessionID, "OpenCode is waiting for an input form that this Modex build cannot display. Resolve it on the computer and retry.")
+	d.failVisible(sessionID, unsupportedFormNotice)
 }
 
 // failVisible escalates an input/approval state the phone cannot handle so the
@@ -159,9 +173,9 @@ func (d *Decisions) failVisible(sessionID, message string) {
 	d.mu.Unlock()
 }
 
-func (d *Decisions) failPendingCap(sessionID string) {
-	d.failVisible(sessionID, "OpenCode requested too many pending approvals or reached the answered approval limit. Review them on the computer and reconnect.")
-}
+const pendingCapNotice = "OpenCode requested too many pending approvals or reached the answered approval limit. Review them on the computer and reconnect."
+
+func (d *Decisions) failPendingCap(sessionID string) { d.failVisible(sessionID, pendingCapNotice) }
 
 func (d *Decisions) add(request permissionRequest, directory string) {
 	if request.ID == "" || request.SessionID == "" || request.Action == "" {
@@ -232,6 +246,8 @@ func (d *Decisions) resolve(sessionID, requestID string) {
 		return
 	}
 	delete(d.pending, key)
+	// An overlapping poll can still contain the request that was just answered.
+	d.consumed[key] = struct{}{}
 	d.emitEvent("decision/resolved", map[string]string{"decision_id": decision.ID})
 }
 
@@ -258,6 +274,10 @@ func (d *Decisions) Resolve(sessionID, turnID string) {
 			continue
 		}
 		delete(d.pending, key)
+		if len(decision.formKeys) != 0 {
+			d.formRevision++
+			d.consumed[key] = struct{}{}
+		}
 		d.emitEvent("decision/resolved", map[string]string{"decision_id": decision.ID})
 	}
 }
@@ -265,11 +285,26 @@ func (d *Decisions) Resolve(sessionID, turnID string) {
 // Answer maps Modex accept/decline/cancel to OpenCode once/reject. always is
 // intentionally not reachable: a one-shot accept must never persist a grant.
 func (d *Decisions) Answer(ctx context.Context, id string, result json.RawMessage) error {
-	if looksLikeQuestionResult(result) {
-		return errors.New("questions are unsupported by the opencode backend")
-	}
 	d.mu.Lock()
 	decision, ok := d.pending[id]
+	if ok && len(decision.formKeys) != 0 {
+		answer, err := textFormAnswer(decision.formKeys, result)
+		if err != nil {
+			d.mu.Unlock()
+			return err
+		}
+		delete(d.pending, id)
+		d.consumed[id] = struct{}{}
+		d.formRevision++
+		d.mu.Unlock()
+		return d.deliver(ctx, id, func() error {
+			return d.ReplyForm(ctx, decision.sessionID, decision.requestID, answer)
+		})
+	}
+	if looksLikeQuestionResult(result) {
+		d.mu.Unlock()
+		return errors.New("questions are unsupported by the opencode backend")
+	}
 	if !ok {
 		d.mu.Unlock()
 		return errors.New("decision is missing or already resolved")
@@ -305,10 +340,14 @@ func (d *Decisions) Answer(ctx context.Context, id string, result json.RawMessag
 	if response.Decision == "accept" {
 		reply = "once"
 	}
+	return d.deliver(ctx, id, func() error { return d.reply(ctx, sessionID, requestID, reply) })
+}
+
+func (d *Decisions) deliver(ctx context.Context, id string, send func() error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := d.reply(ctx, sessionID, requestID, reply); err != nil {
+	if err := send(); err != nil {
 		// The decision was consumed before delivery; never replay it.
 		return errors.New("decision delivery failed; do not replay")
 	}
@@ -336,7 +375,7 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 	var response struct {
 		Data []permissionRequest `json:"data"`
 	}
-	if json.Unmarshal(raw, &response) != nil {
+	if json.Unmarshal(raw, &response) != nil || response.Data == nil {
 		return
 	}
 	turnID := ""
@@ -368,7 +407,7 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 	sort.Strings(ids)
 	for _, id := range ids {
 		request := d.pending[id]
-		if request.sessionID != sessionID || current[id] {
+		if request.sessionID != sessionID || len(request.formKeys) != 0 || current[id] {
 			continue
 		}
 		delete(d.pending, id)

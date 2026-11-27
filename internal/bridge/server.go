@@ -16,6 +16,7 @@ import (
 
 type Caller func(context.Context, string, any) (json.RawMessage, error)
 type EventCaller func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error)
+type CommandHandler func(context.Context, Command, func(string, json.RawMessage)) (any, error)
 
 type Thread struct {
 	ID        string        `json:"id"`
@@ -582,16 +583,20 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						Items []struct {
 							toolActivity
 							nativeAgentActivity
-							ID       string          `json:"id"`
-							Command  string          `json:"command"`
-							Cwd      string          `json:"cwd"`
-							Status   string          `json:"status"`
-							Output   string          `json:"aggregatedOutput"`
-							ExitCode *int            `json:"exitCode"`
-							Type     string          `json:"type"`
-							Text     string          `json:"text"`
-							Summary  []string        `json:"summary"`
-							Content  json.RawMessage `json:"content"`
+							ID        string          `json:"id"`
+							Command   string          `json:"command"`
+							Cwd       string          `json:"cwd"`
+							Status    string          `json:"status"`
+							Output    string          `json:"aggregatedOutput"`
+							ExitCode  *int            `json:"exitCode"`
+							Type      string          `json:"type"`
+							Text      string          `json:"text"`
+							Summary   []string        `json:"summary"`
+							Content   json.RawMessage `json:"content"`
+							Questions []struct {
+								Title   string   `json:"title"`
+								Options []string `json:"options,omitempty"`
+							} `json:"questions"`
 						} `json:"items"`
 					} `json:"turns"`
 				} `json:"thread"`
@@ -695,8 +700,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						text = item.Text
 						displayText = item.Text
 					}
-					if role != "" && text != "" {
+					if role != "" && (text != "" || role == "assistant" && len(item.Questions) > 0) {
 						message := map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments}
+						if role == "assistant" && len(item.Questions) > 0 {
+							message["questions"] = item.Questions
+						}
 						if role == "plan" {
 							state, stateErr := fetch("modex/plan/state", map[string]any{"threadId": id, "turnId": turn.ID, "itemId": item.ID})
 							if stateErr == nil {
@@ -782,6 +790,12 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cwd string, call Ca
 }
 
 func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, call EventCaller) error {
+	return ServeCommands(ctx, in, out, func(ctx context.Context, cmd Command, emit func(string, json.RawMessage)) (any, error) {
+		return HandleEvents(ctx, cwd, cmd, call, emit)
+	})
+}
+
+func ServeCommands(ctx context.Context, in io.Reader, out io.Writer, handler CommandHandler) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 4096), 4*1024*1024)
 	var outputMu sync.Mutex
@@ -809,7 +823,7 @@ func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, c
 		write(response)
 	}
 	handle := func(cmd Command) {
-		result, err := HandleEvents(ctx, cwd, cmd, call, emit)
+		result, err := handler(ctx, cmd, emit)
 		respond(cmd, result, err)
 	}
 	// Stop and decision replies must reach Codex even while an ordinary RPC is pending.

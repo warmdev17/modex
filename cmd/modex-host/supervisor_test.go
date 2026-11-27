@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestSupervisorStateExclusiveAndPrivate(t *testing.T) {
@@ -78,5 +83,103 @@ func TestSupervisorRefusesStaleEndpointWithoutDeletingIt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "owner.lock")); !os.IsNotExist(err) {
 		t.Fatal("left lock on failed claim")
+	}
+}
+
+func TestSupervisorAttachCLIAdvertisesRunningBackend(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix executable fixture")
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 unavailable")
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "modex-host")
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(ctx, "go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v: %s", err, out)
+	}
+	cases := []struct{ kind, attachKind, script, capabilities string }{
+		{"opencode", "codex", `
+import http.server, socketserver, time
+class Handler(http.server.BaseHTTPRequestHandler):
+ def log_message(self, *args): pass
+ def do_GET(self):
+  if self.path.startswith('/api/event'):
+   self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.end_headers()
+   try:
+    while True: self.wfile.write(b': keepalive\n\n'); self.wfile.flush(); time.sleep(.2)
+   except Exception: pass
+  else:
+   body = b'[]' if self.path.startswith('/api/config') else b'{}'
+   self.send_response(200); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+class Server(socketserver.ThreadingMixIn, http.server.HTTPServer): daemon_threads = True
+s=Server(('127.0.0.1',0),Handler)
+print('server listening on http://127.0.0.1:%d' % s.server_port,flush=True)
+s.serve_forever()
+`, `["projects_read"]`},
+		{"codex", "opencode", `
+import json,sys
+for line in sys.stdin:
+ r=json.loads(line)
+ if r.get('method') != 'initialized':
+  result={'config':{'model':'fixture','model_provider':'fixture'}} if r.get('method') == 'config/read' else {}
+  print(json.dumps({'id':r.get('id'),'result':result}),flush=True)
+`, `["session_status","plan_mode","permission_profiles","session_lifecycle","projects","references","takeover","agent_discovery"]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			dir := t.TempDir()
+			fake := filepath.Join(dir, tc.kind)
+			if err := os.WriteFile(fake, []byte("#!"+python+"\n"+tc.script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			state := filepath.Join(dir, "state")
+			t.Cleanup(func() {
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				for {
+					if _, err := os.Stat(filepath.Join(state, "endpoint.json")); err == nil {
+						if out, err := exec.CommandContext(cleanupCtx, binary, "--stop", "--state-dir", state).CombinedOutput(); err != nil {
+							t.Errorf("stop fixture supervisor: %v: %s", err, out)
+						}
+						return
+					}
+					select {
+					case <-cleanupCtx.Done():
+						return
+					case <-time.After(50 * time.Millisecond):
+					}
+				}
+			})
+			start := exec.CommandContext(ctx, binary, "--background", "--workspace", dir, "--state-dir", state, "--backend", tc.kind, "--"+tc.kind, fake)
+			if out, err := start.CombinedOutput(); err != nil {
+				t.Fatalf("start: %v: %s", err, out)
+			}
+			attach := exec.CommandContext(ctx, binary, "--attach", "--state-dir", state, "--backend", tc.attachKind)
+			stdin, err := attach.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stdin.Close()
+			stdout, err := attach.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := attach.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer func() { attach.Process.Kill(); attach.Wait() }()
+			line, err := bufio.NewReader(stdout).ReadBytes('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ready map[string]json.RawMessage
+			if err := json.Unmarshal(line, &ready); err != nil || string(ready["backend"]) != `"`+tc.kind+`"` || string(ready["capabilities"]) != tc.capabilities || string(ready["ready"]) != `true` {
+				t.Fatalf("ready=%s err=%v", line, err)
+			}
+		})
 	}
 }

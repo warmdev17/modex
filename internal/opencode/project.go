@@ -3,8 +3,31 @@ package opencode
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+type nativeProject struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	Canonical string   `json:"canonical"`
+	Sandboxes []string `json:"sandboxes"`
+}
+
+func (p nativeProject) roots() []map[string]string {
+	if p.ID == "" || p.ID == "global" || len(p.ID) > 256 || strings.ContainsAny(p.ID, "\r\n\x00") {
+		return nil
+	}
+	var roots []map[string]string
+	seen := make(map[string]bool)
+	for _, path := range append([]string{p.Canonical}, p.Sandboxes...) {
+		if !seen[path] && filepath.IsAbs(path) && len(path) <= 32768 && !strings.ContainsAny(path, "\r\n\x00") {
+			roots = append(roots, map[string]string{"path": path})
+			seen[path] = true
+		}
+	}
+	return roots
+}
 
 // Native OpenCode shapes (subset). OpenCode v2 carries user text directly on
 // the message and assistant parts inside content; tool calls identify
@@ -12,6 +35,7 @@ import (
 type session struct {
 	ID        string `json:"id"`
 	ProjectID string `json:"projectID"`
+	ParentID  string `json:"parentID"`
 	Agent     string `json:"agent"`
 	Model     struct {
 		ID         string `json:"id"`
@@ -32,14 +56,15 @@ type session struct {
 }
 
 type message struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
-	Outcome  string          `json:"outcome"`
-	Agent    string          `json:"agent"`
-	Text     string          `json:"text"`
-	Content  []part          `json:"content"`
-	Error    json.RawMessage `json:"error"`
-	Finish   string          `json:"finish"`
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Outcome  string             `json:"outcome"`
+	Agent    string             `json:"agent"`
+	Text     string             `json:"text"`
+	Content  []part             `json:"content"`
+	Files    []nativeAttachment `json:"files,omitempty"`
+	Error    json.RawMessage    `json:"error"`
+	Finish   string             `json:"finish"`
 	Metadata struct {
 		TurnID string `json:"modex_turn_id"`
 	} `json:"metadata"`
@@ -50,14 +75,28 @@ type message struct {
 }
 
 type part struct {
-	Type string   `json:"type"`
-	Text string   `json:"text"`
-	Tool toolPart `json:"tool"`
-	File struct {
+	Type  string     `json:"type"`
+	Text  string     `json:"text"`
+	ID    string     `json:"id,omitempty"`
+	Name  string     `json:"name,omitempty"`
+	State *toolState `json:"state,omitempty"`
+	Tool  *toolPart  `json:"tool,omitempty"`
+	File  struct {
 		Mime     string `json:"mime"`
 		Filename string `json:"filename"`
 		URL      string `json:"url"`
 	} `json:"file"`
+}
+
+func (p part) toolCall() toolPart {
+	if p.Tool != nil {
+		return *p.Tool
+	}
+	call := toolPart{ID: p.ID, Name: p.Name}
+	if p.State != nil {
+		call.State = *p.State
+	}
+	return call
 }
 
 type toolPart struct {
@@ -98,7 +137,10 @@ func projectThread(s session) map[string]any {
 		"modelProvider": s.Model.ProviderID,
 	}
 	if s.Model.ID != "" {
-		thread["model"] = s.Model.ID
+		thread["model"] = modelChoiceID(s.Model.ProviderID, s.Model.ID)
+	}
+	if s.ProjectID != "" && s.ProjectID != "global" {
+		thread["projectId"] = s.ProjectID
 	}
 	// An empty model/provider is valid until OpenCode attaches one. Android
 	// always sends a model for threads/start and renders an empty provider as
@@ -106,8 +148,6 @@ func projectThread(s session) map[string]any {
 	return thread
 }
 
-// projectSessionList omits projectId/projectless deliberately: OpenCode has no
-// project concept, so Android falls back to workspace matching.
 func projectSessionList(sessions []session) map[string]any {
 	data := make([]map[string]any, 0, len(sessions))
 	for _, s := range sessions {
@@ -141,8 +181,14 @@ func projectMessages(id, dir string, messages []message) ([]map[string]any, bool
 			if m.Metadata.TurnID != "" {
 				userID = m.Metadata.TurnID
 			}
-			if text := messageText(m); text != "" {
-				entries = append(entries, map[string]any{"id": m.ID, "role": "user", "text": text, "display_text": text})
+			text := messageText(m)
+			attachments := projectAttachments(m.Files)
+			if text != "" || len(attachments) != 0 {
+				entry := map[string]any{"id": m.ID, "role": "user", "text": text, "display_text": text}
+				if len(attachments) != 0 {
+					entry["attachments"] = attachments
+				}
+				entries = append(entries, entry)
 			}
 		case "assistant":
 			entries = append(entries, projectAssistant(m, dir)...)
@@ -196,24 +242,25 @@ func projectAssistant(m message, dir string) []map[string]any {
 			})
 		case "tool":
 			tools++
-			toolID := p.Tool.CallID
+			call := p.toolCall()
+			toolID := call.CallID
 			if toolID == "" {
-				toolID = p.Tool.ID
+				toolID = call.ID
 			}
 			if toolID == "" {
 				toolID = fmt.Sprintf("%s/t%d", m.ID, tools)
 			}
-			command := p.Tool.Tool
+			command := call.Tool
 			if command == "" {
-				command = p.Tool.Name
+				command = call.Name
 			}
 			entries = append(entries, map[string]any{
 				"id":        toolID,
 				"role":      "command",
-				"text":      boundedToolOutput(toolOutput(p.Tool)),
+				"text":      boundedToolOutput(toolOutput(call)),
 				"command":   command,
 				"cwd":       dir,
-				"status":    toolStatus(p.Tool.State.Status),
+				"status":    toolStatus(call.State.Status),
 				"exit_code": nil,
 			})
 		}

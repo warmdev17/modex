@@ -19,6 +19,17 @@ class ChatEntryTest {
         assertEquals(123L,adopted.single().startedAtMs)
         assertEquals(adopted,updateChat(adopted,"item/completed",params))
     }
+    @Test fun showsConfirmedFileOnlyFollowUpWithoutChangingPromptText() {
+        val params = JSONObject("""{"turnId":"t","item":{"id":"u","type":"userMessage",
+            "content":[{"type":"text","text":""}],"attachments":[
+                {"path":"/tmp/notes #1.txt","name":"notes #1.txt","kind":"file"},
+                {"path":"https://example.test/not-local.txt","kind":"file"}
+            ]}}""")
+        val entry = updateChat(emptyList(), "item/completed", params).single()
+        assertEquals("", entry.text)
+        assertEquals(listOf(Attachment("/tmp/notes #1.txt", "notes #1.txt", "file")), entry.attachments)
+    }
+
     private fun event(raw: String) = JSONObject(raw)
     @Test fun separatesAgentMessagesAndCompletesWithoutDuplicating() {
         var items = emptyList<ChatEntry>()

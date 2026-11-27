@@ -31,8 +31,101 @@ build, scoped re-review and isolated OpenCode session creation passed. The
 earlier isolated supervisor run at `771c518` verified standalone creation,
 same-turn steer admission and exact-turn interrupt. The final live steer
 transcript, paid-provider completion, physical Android and production
-activation were not exercised. No release or merge. Next is Stage 2
-capability gating and conversation parity.
+activation were not exercised. [PR #36](https://github.com/warmdev17/modex/pull/36)
+merged Stage 1 as `ebe7825` after all five GitHub Verify jobs passed.
+
+Stage 2 capability milestone verified 2026-11-26T20:15:12+07:00 on
+`feat/opencode-capabilities`, source `88c7a7c`. The
+[capabilities plan](docs/superpowers/plans/2026-11-26-opencode-capabilities.md)
+covers authenticated SSH backend identity, compatible legacy Codex defaults,
+and Android controls and requests gated to the current connection.
+
+- Host `8ad1cab` and test cleanup `b37e8d0` passed independent review and
+  isolated OpenCode 2.4.1 attach, session creation and history read.
+  `umask 022; go test -race ./... -timeout=90s` and `go vet ./...` passed.
+- Android `b24779e` plus fix `88c7a7c` passed scoped re-review, 154 JVM
+  tests, both debug APK builds and debug lint (0 errors). On API 33,
+  `skill-picker` at 412 dp reproduced the missing Codex menu before
+  the fix and passed after it. `opencode-capabilities` passed at 320 dp
+  after the fix. Earlier checks at `b24779e` passed native Codex controls,
+  loopback SSH reconnect/wrong pin and attachment transfer.
+- Capability branch is local. No delivery build, service activation,
+  physical device check or live provider inference.
+
+Stage 2 model identity verified 2026-11-26T20:51:43+07:00 on `feat/opencode-models`,
+source `b808702`, based on capability milestone `df35920`. OpenCode reports
+`provider/model` as the selectable ID and carries it through default status,
+creation, read and resume. Legacy unique bare IDs still resolve. Ambiguous
+bare IDs require an explicit provider, and Android retains the draft when
+its loaded catalogue detects the ambiguity before send. Active steer keeps
+the current model.
+
+- `umask 022; go test -race ./... -timeout=90s`, `go vet ./...` and
+  independent review passed. Fixture regression tests cover equal model names
+  across providers, exact prompt provider and rejected ambiguous mutations.
+- Android `./gradlew :app:testDebugUnitTest :app:lintDebug --offline` passed
+  with 155 tests and zero lint errors. An isolated OpenCode 2.4.1 supervisor
+  passed catalogue, qualified session creation, resume and read.
+- Work is local. Phone/emulator UI and real inference were not exercised
+  for this milestone.
+
+Stage 2 attachment projection verified 2026-11-26T21:00:26+07:00 on
+`feat/opencode-attachments`, source `ddcc0ab`, based on model milestone
+`2950f50`. Confirmations and history expose local file and image metadata,
+including file-only messages. History decodes OpenCode's persisted file URI
+without forwarding embedded bytes. Android still accepts legacy attachment
+formats. The history projection revision was bumped.
+
+- `umask 022; go test -race ./... -timeout=90s`, `go vet ./...`, 156
+  Android JVM tests, debug lint (0 errors), and independent review passed.
+  An earlier race-suite run failed the interrupt reply order assertion;
+  a baseline 100-run focused check and the full rerun passed without changing
+  that test or interrupt behavior.
+- With isolated OpenCode 2.4.1 and a null native default model, the real
+  client/bridge admitted a text file with an escaped name and a PNG with
+  blank prompt text. The confirmation and persisted history matched.
+- No physical/emulator UI test or APK release in the attachment projection
+  milestone.
+
+Stage 2 large attachments verified 2026-11-26T21:09:15+07:00 on
+`feat/opencode-large-attachments`, source `4fe7fbf`. Prompt acknowledgments
+and history discard embedded attachment bytes under bounded wire and output
+limits. Oversized history pages retry with the same cursor and a smaller
+limit. Turn polling retains the 100-message anchor window. Prompts are not
+reposted in response to a read failure.
+
+- Go race suite, vet, staged diff check, independent review and isolated
+  exact-binary supervisor tests passed. OpenCode 2.4.1 with no default model
+  preserved the message ID and file metadata across confirmation and history
+  for a 20 MiB fixture. History was 27,962,727 bytes on the wire. Native
+  pagination with varied limits preserved order and IDs.
+- Tested host binary installed at `/home/warmdev/.local/bin/modex-host`
+  with SHA-256 `216be265d40071e3dcd9e04975c37bfba87da1a95566c129ca24959ae7005f9d`.
+  Previous binary saved to `/home/warmdev/.local/state/modex-host-rollback.0ZZPU1pW/modex-host`.
+  Activation prepared for one external 30-second restart. Running PID was
+  still 1129122 at installation. Service remains configured for Codex.
+  After restart, Android: Connection settings → Reset session cursor →
+  reconnect. This snapshot does not verify timer execution or activation.
+- No Android source change, APK release, physical phone run or real provider
+  inference in this milestone.
+
+Stage 2 permission replay fix verified 2026-11-26T22:51:14+07:00 on
+`fix/opencode-permission-replay`, source `c2ce61c`. A native reply to a known
+pending approval prevents stale SSE events or poll snapshots from reopening
+it. Missing or null snapshot data preserves pending approvals.
+
+- Both regressions failed before the fix. `go test -race ./... -count=1`
+  (umask 022), `go vet ./...`, diff checks and the two isolated
+  `scripts/test_supervisor.py` tests passed using the built host.
+- Verified that the previous binary had activated. Installed the new
+  exact tested binary with SHA-256
+  `b9978f2f1c3531c7968dd93a84d912ec3d8f39ff68ada9dafabea2b0ca37e424`.
+  Previous binary backed up at
+  `/home/warmdev/.local/state/modex-host-rollback.lO454w/modex-host`.
+  One delayed restart is prepared as the final operational step. Service
+  runs Codex. This snapshot does not verify activation.
+- Phone and live OpenCode approval were not exercised. Android source is
+  unchanged. Next: native OpenCode forms and remaining permission parity.
 
 ## Stale Android attachment lease
 

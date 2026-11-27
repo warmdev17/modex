@@ -39,6 +39,20 @@ func TestHistoryPageUsesNativeTurnsAndReturnsChronologicalMessages(t *testing.T)
 	}
 }
 
+func TestHistoryPreservesQueuedQuestions(t *testing.T) {
+	caller := func(_ context.Context, _ string, _ any) (json.RawMessage, error) {
+		return json.RawMessage(`{"thread":{"id":"one","cwd":"/work","turns":[{"id":"turn","items":[{"id":"call_fixture","type":"agentMessage","text":"","questions":[{"title":"Platform?","options":["Android","Linux"]}]}]}]}}`), nil
+	}
+	result, err := Handle(context.Background(), "/work", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true}`)}, caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := result.(map[string]any)["messages"].([]map[string]any)
+	if len(messages) != 1 || !strings.Contains(fmt.Sprint(messages[0]["questions"]), "Platform?") {
+		t.Fatalf("queued question missing from history: %v", messages)
+	}
+}
+
 func TestHistoryPageRejectsInvalidParametersAndWrongWorkspace(t *testing.T) {
 	for _, params := range []string{`"limit":0`, `"limit":51`, `"limit":null`, `"limit":1.5`, `"limit":10,"cursor":123`, `"cursor":"x"`} {
 		_, err := Handle(context.Background(), "/work", Command{Method: "threads/read", Params: json.RawMessage(`{"thread_id":"one","include_turns":true,` + params + `}`)}, func(context.Context, string, any) (json.RawMessage, error) {

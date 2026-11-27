@@ -89,7 +89,7 @@ class SshTransport {
     private val fileLock = Any()
     @Volatile private var fileChannel: ChannelSftp? = null
 
-    fun open(config: Connection, key: ByteArray, journal: JournalState, onHello: () -> Unit, onFrame: (JSONObject) -> Unit) {
+    internal fun open(config: Connection, key: ByteArray, journal: JournalState, onHello: (BackendCapabilities) -> Unit, onFrame: (JSONObject) -> Unit) {
         var stage = "config"
         var heartbeat: Thread? = null
         val remoteError = object : java.io.OutputStream() {
@@ -158,7 +158,7 @@ class SshTransport {
                         exec.disconnect()
                     }
                 }, "modex-attach-heartbeat").apply { isDaemon = true; start() }
-                onHello()
+                onHello(journal.backendCapabilities)
                 while (!Thread.currentThread().isInterrupted) {
                     val frame = readFrame(input) ?: error("Supervisor stream closed")
                     onFrame(frame)

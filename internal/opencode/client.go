@@ -85,6 +85,7 @@ const (
 	callSessionMessages  = "session/messages"
 	callSessionInterrupt = "session/interrupt"
 	callModels           = "models"
+	callProjects         = "project/list"
 	callClientAttached   = "client/attached"
 	callTurnStart        = "turn/start"
 	callTurnInterrupt    = "turn/interrupt"
@@ -110,7 +111,7 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 	case callConfig:
 		value, err = c.Config(ctx)
 	case callSessionList:
-		value, err = c.ListSessions(ctx, intParam(values, "limit", 20))
+		value, err = c.ListSessions(ctx, intParam(values, "limit", 20), stringParam(values, "project"))
 	case callSessionCreate:
 		var model *modelRef
 		providerID := stringParam(values, "providerID")
@@ -132,6 +133,10 @@ func (c *Client) Call(ctx context.Context, method string, params any, emit func(
 		value = map[string]any{}
 	case callModels:
 		value, err = c.ListModels(ctx)
+	case callProjects:
+		var projects []nativeProject
+		err = c.request(ctx, http.MethodGet, "/api/project", nil, nil, &projects)
+		value = projects
 	case callTurnStart, "turn/steer":
 		rawParams, _ := json.Marshal(params)
 		var input struct {
@@ -195,11 +200,8 @@ func (c *Client) Config(ctx context.Context) ([]configDocument, error) {
 	return out, err
 }
 
-// ListSessions collects newest sessions first and slices to limit. OpenCode
-// exposes cursor pagination, but the Modex list contract returns a null cursor,
-// so the client walks every page (bounded) and slices afterwards rather than
-// hiding older sessions in an undelivered cursor.
-func (c *Client) ListSessions(ctx context.Context, limit int) ([]session, error) {
+// ListSessions collects newest top-level sessions, up to the requested limit.
+func (c *Client) ListSessions(ctx context.Context, limit int, project string) ([]session, error) {
 	if limit <= 0 {
 		limit = 20
 	}
@@ -210,6 +212,10 @@ func (c *Client) ListSessions(ctx context.Context, limit int) ([]session, error)
 		query := url.Values{}
 		query.Set("limit", "100")
 		query.Set("order", "desc")
+		query.Set("parentID", "null")
+		if project != "" {
+			query.Set("project", project)
+		}
 		if cursor != "" {
 			query.Set("cursor", cursor)
 		}
@@ -218,19 +224,19 @@ func (c *Client) ListSessions(ctx context.Context, limit int) ([]session, error)
 			return nil, err
 		}
 		for _, item := range response.Data {
-			if item.ID == "" || seen[item.ID] {
+			if item.ID == "" || item.ParentID != "" || seen[item.ID] || (project != "" && item.ProjectID != project) {
 				continue
 			}
 			seen[item.ID] = true
 			all = append(all, item)
+			if len(all) == limit {
+				return all, nil
+			}
 		}
 		if response.Cursor.Next == nil || *response.Cursor.Next == "" {
 			break
 		}
 		cursor = *response.Cursor.Next
-	}
-	if len(all) > limit {
-		all = all[:limit]
 	}
 	return all, nil
 }
@@ -265,6 +271,8 @@ func (c *Client) ListMessages(ctx context.Context, id string, limit int, order s
 }
 
 func (c *Client) ListMessagesPage(ctx context.Context, id string, limit int, order, cursor string) (messagePage, error) {
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
 	query := url.Values{}
 	// OpenCode encodes the order in the cursor and rejects a cursor combined
 	// with order, so only the first page may specify one.
@@ -277,9 +285,19 @@ func (c *Client) ListMessagesPage(ctx context.Context, id string, limit int, ord
 	if cursor != "" {
 		query.Set("cursor", cursor)
 	}
-	var page messagePage
-	err := c.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id)+"/message", query, nil, &page)
-	return page, err
+	for {
+		var page messagePage
+		err := c.request(ctx, http.MethodGet, "/api/session/"+url.PathEscape(id)+"/message", query, nil, &page, historyAttachmentPath)
+		if !errors.Is(err, errResponseTooLarge) || limit == 1 {
+			return page, err
+		}
+		if limit <= 0 {
+			limit = 10
+		} else {
+			limit /= 2
+		}
+		query.Set("limit", strconv.Itoa(limit))
+	}
 }
 
 // Interrupt stops the active execution and reports whether one was running.
@@ -336,7 +354,7 @@ func (c *Client) prompt(ctx context.Context, sessionID, text string, files []pro
 			Type string `json:"type"`
 		} `json:"data"`
 	}
-	if err := c.request(ctx, http.MethodPost, path+"/prompt", nil, body, &response); err != nil {
+	if err := c.request(ctx, http.MethodPost, path+"/prompt", nil, body, &response, promptAttachmentPath); err != nil {
 		return "", err
 	}
 	if response.Data.ID != "" {
@@ -345,18 +363,7 @@ func (c *Client) prompt(ctx context.Context, sessionID, text string, files []pro
 	if expectedTurn != "" {
 		return "", errors.New("opencode did not confirm the follow-up; check the conversation before resending")
 	}
-	// Older or asynchronous prompt responses may omit the message; resolve the
-	// newest user message instead.
-	page, err := c.ListMessagesPage(ctx, sessionID, 5, "desc", "")
-	if err != nil {
-		return "", err
-	}
-	for _, item := range page.Data {
-		if item.Type == "user" && item.ID != "" {
-			return item.ID, nil
-		}
-	}
-	return "", errors.New("opencode did not return the user message")
+	return "", errors.New("opencode did not confirm the prompt; check the conversation before resending")
 }
 
 // ListPermissions returns the pending permission requests for a session.
@@ -435,7 +442,7 @@ func (c *Client) locationQuery() url.Values {
 	return query
 }
 
-func (c *Client) request(ctx context.Context, method, path string, query url.Values, body, out any) error {
+func (c *Client) request(ctx context.Context, method, path string, query url.Values, body, out any, attachmentPath ...[]string) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 	endpoint := c.baseURL + path
@@ -471,9 +478,20 @@ func (c *Client) request(ctx context.Context, method, path string, query url.Val
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxResponse))
 		return nil
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse))
-	if err != nil {
-		return errRequestFailed
+	var raw []byte
+	if len(attachmentPath) > 0 {
+		if resp.ContentLength > maxAttachmentWire {
+			return errResponseTooLarge
+		}
+		raw, err = readAttachmentResponse(resp.Body, attachmentPath[0], maxAttachmentWire)
+		if err != nil {
+			return err
+		}
+	} else {
+		raw, err = io.ReadAll(io.LimitReader(resp.Body, maxResponse))
+		if err != nil {
+			return errRequestFailed
+		}
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return errInvalidResponse

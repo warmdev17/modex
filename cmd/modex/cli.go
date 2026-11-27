@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 )
@@ -21,10 +22,15 @@ func launchCLI(args []string) error {
 	if err != nil {
 		return err
 	}
+	sibling := filepath.Join(filepath.Dir(executable), "codex-modex-plan")
+	defaultCodex := "codex"
+	if _, err := exec.LookPath(sibling); err == nil {
+		defaultCodex = sibling
+	}
 	flags := flag.NewFlagSet("modex cli", flag.ContinueOnError)
 	host := flags.String("host-binary", filepath.Join(filepath.Dir(executable), "modex-host"), "Modex host executable (defaults to sibling of modex)")
 	workspace := flags.String("workspace", cwd, "Workspace directory (defaults to current directory)")
-	codex := flags.String("codex", "codex", "Codex executable")
+	codex := flags.String("codex", defaultCodex, "Codex executable")
 	home := flags.String("codex-home", "", "Override CODEX_HOME")
 	thread := flags.String("thread", "", "Optional existing session UUID; omit for the picker")
 	state := flags.String("state-dir", "", "Supervisor state directory (defaults to ~/.local/state/modex-phone)")

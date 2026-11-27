@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/warmdev/modex/internal/acp"
 	"github.com/warmdev/modex/internal/diagnostic"
 	"github.com/warmdev/modex/internal/version"
 )
@@ -24,6 +25,7 @@ type backendSpec struct {
 	kind     string // "codex" | "opencode"
 	codex    string
 	opencode string
+	agy      string
 	home     string // codex-home; codex only
 }
 
@@ -79,6 +81,8 @@ func run() error {
 	binary := flag.String("codex", "codex", "Codex executable")
 	backend := flag.String("backend", "codex", "Agent backend: codex or opencode")
 	opencodeBinary := flag.String("opencode", "opencode", "OpenCode executable (only with --backend opencode)")
+	probeAntigravity := flag.Bool("probe-antigravity", false, "Probe Antigravity ACP compatibility without running a turn")
+	agy := flag.String("agy", "agy", "Antigravity CLI executable")
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")
 	profile := flag.String("profile", "", "Named profile (not yet supported; fails explicitly)")
 	cli := flag.Bool("cli", false, "Open a native Codex TUI on the shared supervisor backend (Linux/macOS)")
@@ -95,7 +99,7 @@ func run() error {
 	instance := flag.String("instance", "", "Supervisor instance from the attach acknowledgement")
 	flag.Parse()
 	modes := 0
-	for _, enabled := range []bool{*serve, *background, *supervise, *attach, *stop, *cli} {
+	for _, enabled := range []bool{*serve, *background, *supervise, *attach, *stop, *cli, *probeAntigravity} {
 		if enabled {
 			modes++
 		}
@@ -189,6 +193,9 @@ func run() error {
 	if !stat.IsDir() {
 		return fmt.Errorf("workspace must be a directory")
 	}
+	if *probeAntigravity {
+		return runAntigravityProbe(cwd, *agy)
+	}
 	if *home != "" {
 		absolute, err := filepath.Abs(*home)
 		if err != nil {
@@ -203,7 +210,7 @@ func run() error {
 		}
 		return err
 	}
-	spec := backendSpec{kind: *backend, codex: *binary, opencode: *opencodeBinary, home: *home}
+	spec := backendSpec{kind: *backend, codex: *binary, opencode: *opencodeBinary, agy: *agy, home: *home}
 	if *background {
 		return startBackground(cwd, spec, *stateDir)
 	}
@@ -278,4 +285,21 @@ func run() error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(report)
+}
+
+func runAntigravityProbe(cwd, binary string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	client, err := acp.Start(ctx, binary, cwd, nil)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	return json.NewEncoder(os.Stdout).Encode(struct {
+		Backend        string `json:"backend"`
+		Authentication string `json:"authentication"`
+		acp.Info
+	}{
+		Backend: "antigravity", Authentication: "unverified", Info: client.Info(),
+	})
 }

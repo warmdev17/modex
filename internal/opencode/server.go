@@ -33,7 +33,6 @@ var unsupportedMethods = map[string]bool{
 	"threads/status":      true,
 	"threads/permissions": true,
 	"plans/respond":       true,
-	"projects/list":       true,
 	"projects/create":     true,
 	"references/list":     true,
 }
@@ -104,6 +103,8 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 	case "models/list":
 		allowed["limit"] = true
 		allowed["cursor"] = true
+	case "projects/list":
+		allowed["limit"] = true
 	case "client/attached":
 		allowed["attached"] = true
 	default:
@@ -149,8 +150,57 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		provider, model := resolveDefaultModel(docs)
 		return map[string]any{
 			"workspace": cwd,
-			"config":    map[string]any{"provider": provider, "model": model},
+			"config":    map[string]any{"provider": provider, "model": modelChoiceID(provider, model)},
 		}, nil
+	case "projects/list":
+		if raw, ok := p["limit"]; ok {
+			if _, err := limitParam(raw); err != nil {
+				return nil, err
+			}
+		}
+		projects, err := callInto[[]nativeProject](ctx, call, callProjects, nil, emit)
+		if err != nil {
+			return nil, err
+		}
+		duplicates := make(map[string][]string)
+		for _, project := range projects {
+			if filepath.IsAbs(project.Canonical) && len(project.roots()) != 0 {
+				root := filepath.Clean(project.Canonical)
+				duplicates[root] = append(duplicates[root], project.ID)
+			}
+		}
+		hidden := make(map[string]bool)
+		for _, ids := range duplicates {
+			if len(ids) < 2 {
+				continue
+			}
+			hasChats := false
+			for _, id := range ids {
+				sessions, err := callInto[[]session](ctx, call, callSessionList, map[string]any{"limit": 1, "project": id}, emit)
+				if err != nil {
+					return nil, err
+				}
+				hidden[id] = len(sessions) == 0
+				hasChats = hasChats || len(sessions) != 0
+			}
+			if !hasChats {
+				delete(hidden, ids[0])
+			}
+		}
+		// The native endpoint returns a single bounded snapshot.
+		data := make([]map[string]any, 0, len(projects))
+		for _, project := range projects {
+			roots := project.roots()
+			if len(roots) == 0 || hidden[project.ID] {
+				continue
+			}
+			name := safePreview(project.Name)
+			if name == "" {
+				name = safePreview(filepath.Base(roots[0]["path"]))
+			}
+			data = append(data, map[string]any{"id": project.ID, "name": name, "roots": roots})
+		}
+		return map[string]any{"data": data, "next_cursor": nil}, nil
 	case "threads/list":
 		limit := 20
 		if raw, ok := p["limit"]; ok {
@@ -185,8 +235,27 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		}
 		return projectSessionList(sessions), nil
 	case "threads/start":
+		var projectID string
 		if raw, ok := p["project_id"]; ok && string(raw) != "null" {
-			return nil, errors.New("project_id is unsupported by the opencode backend")
+			if standalone || len(p["workspace"]) == 0 || json.Unmarshal(raw, &projectID) != nil ||
+				projectID == "" || len(projectID) > 256 || strings.ContainsAny(projectID, "\r\n\x00") {
+				return nil, errors.New("project_id requires an explicit project workspace")
+			}
+			projects, err := callInto[[]nativeProject](ctx, call, callProjects, nil, emit)
+			if err != nil {
+				return nil, err
+			}
+			belongs := false
+			for _, project := range projects {
+				if project.ID == projectID {
+					for _, root := range project.roots() {
+						belongs = belongs || root["path"] == cwd
+					}
+				}
+			}
+			if !belongs {
+				return nil, errors.New("workspace does not belong to the selected OpenCode project")
+			}
 		}
 		if raw, ok := p["permission_mode"]; ok && string(raw) != "null" {
 			return nil, errors.New("permission_mode is unsupported by the opencode backend")
@@ -222,10 +291,10 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		if err != nil {
 			return nil, err
 		}
-		if created.ID == "" || created.Location.Directory != cwd {
+		if created.ID == "" || created.Location.Directory != cwd || (projectID != "" && created.ProjectID != projectID) {
 			return nil, errors.New("invalid thread response")
 		}
-		return map[string]any{"thread": projectThread(created), "model": created.Model.ID}, nil
+		return map[string]any{"thread": projectThread(created), "model": modelChoiceID(created.Model.ProviderID, created.Model.ID)}, nil
 	case "turn/start", "turn/steer":
 		id, err := requiredThreadID(p)
 		if err != nil {
@@ -252,6 +321,7 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			}
 		}
 		var files []promptFile
+		var confirmedAttachments []chatAttachment
 		content := []map[string]string{{"type": "text", "text": text}}
 		if raw, ok := p["attachments"]; ok && string(raw) != "null" {
 			var attachments []struct {
@@ -262,7 +332,8 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 				return nil, errors.New("invalid attachments")
 			}
 			for _, attachment := range attachments {
-				if !filepath.IsAbs(attachment.Path) || len(attachment.Path) > 32768 || strings.ContainsAny(attachment.Path, "\r\n\x00") {
+				attachment.Path = attachmentPath(attachment.Path)
+				if !validAttachmentPath(attachment.Path) {
 					return nil, errors.New("attachment path must be an absolute path")
 				}
 				if attachment.Kind != "" && attachment.Kind != "image" && attachment.Kind != "file" {
@@ -276,6 +347,11 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 					uri.Path = "/" + path
 				}
 				files = append(files, promptFile{URI: uri.String(), Name: filepath.Base(attachment.Path)})
+				kind := attachment.Kind
+				if kind == "" {
+					kind = "file"
+				}
+				confirmedAttachments = append(confirmedAttachments, chatAttachment{Path: attachment.Path, Name: filepath.Base(attachment.Path), Kind: kind})
 				if attachment.Kind == "image" {
 					content = append(content, map[string]string{"type": "localImage", "path": attachment.Path})
 				}
@@ -330,9 +406,13 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 			return nil, errors.New("invalid turn response")
 		}
 		if emit != nil && result.UserMessageID != "" {
+			item := map[string]any{"id": result.UserMessageID, "type": "userMessage", "content": content}
+			if len(confirmedAttachments) != 0 {
+				item["attachments"] = confirmedAttachments
+			}
 			event, err := json.Marshal(map[string]any{
 				"threadId": id, "turnId": result.Turn.ID,
-				"item": map[string]any{"id": result.UserMessageID, "type": "userMessage", "content": content},
+				"item": item,
 			})
 			if err != nil {
 				return nil, err
@@ -451,7 +531,7 @@ func handleEvents(ctx context.Context, cwd string, cmd bridge.Command, call Even
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"thread": projectThread(thread), "model": thread.Model.ID}, nil
+		return map[string]any{"thread": projectThread(thread), "model": modelChoiceID(thread.Model.ProviderID, thread.Model.ID)}, nil
 	case "models/list":
 		if raw, ok := p["limit"]; ok {
 			if _, err := limitParam(raw); err != nil {
@@ -574,7 +654,7 @@ func historyRevision(threadID string, messages []message) string {
 	hash := sha256.New()
 	// Bump the prefix when the projection changes so Android invalidates its
 	// cached pages even if the upstream content is identical.
-	hash.Write([]byte("opencode-history-v1\x00"))
+	hash.Write([]byte("opencode-history-v3\x00"))
 	hash.Write([]byte(threadID))
 	hash.Write([]byte{0})
 	for _, item := range messages {
@@ -659,10 +739,13 @@ func resolveModelChoice(ctx context.Context, call EventCaller, model string, emi
 			return nil, err
 		}
 		for _, candidate := range models {
-			if candidate.ModelID == id {
-				provider = candidate.ProviderID
-				break
+			if candidate.ModelID != id || candidate.ProviderID == "" {
+				continue
 			}
+			if provider != "" && provider != candidate.ProviderID {
+				return nil, errors.New("model is offered by multiple OpenCode providers; select a provider-qualified model")
+			}
+			provider = candidate.ProviderID
 		}
 	}
 	if provider == "" {

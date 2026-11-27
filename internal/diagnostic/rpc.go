@@ -13,9 +13,13 @@ import (
 const maxFrame = 4 * 1024 * 1024
 
 // RPCError is a valid request rejection, not a broken transport.
-type RPCError struct{ category, steerTarget string }
+type RPCError struct {
+	category, steerTarget string
+	code                  int
+}
 
 func (e *RPCError) SteerTarget() string { return e.steerTarget }
+func (e *RPCError) Code() int           { return e.code }
 
 func (*RPCError) Error() string {
 	return "app-server rejected request; raw error suppressed to protect credentials"
@@ -46,7 +50,9 @@ func NewRPCError(raw json.RawMessage) *RPCError {
 			}
 		}
 	}
-	return &RPCError{category: category, steerTarget: target}
+	var code int
+	_ = json.Unmarshal(detail.Code, &code)
+	return &RPCError{category: category, steerTarget: target, code: code}
 }
 
 func classifyRPCError(code json.RawMessage, message string) string {

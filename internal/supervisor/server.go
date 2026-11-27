@@ -26,6 +26,8 @@ type Hello struct {
 
 type Server struct {
 	Journal         *Journal
+	Backend         string
+	Capabilities    []string
 	ctx             context.Context
 	token, instance string
 	child           io.Writer
@@ -129,6 +131,9 @@ func (s *Server) Handle(conn net.Conn) {
 		return
 	}
 	ready := map[string]any{"ready": true, "instance": s.instance}
+	if s.Backend != "" {
+		ready["backend"], ready["capabilities"] = s.Backend, s.Capabilities
+	}
 	if resynced {
 		ready["resynced"], ready["cursor"] = true, cursor
 	}

@@ -4,6 +4,58 @@ import java.security.MessageDigest
 import java.util.Base64
 import org.json.JSONObject
 
+internal data class BackendCapabilities(
+    val backend: String,
+    val sessionStatus: Boolean,
+    val planMode: Boolean,
+    val permissionProfiles: Boolean,
+    val sessionLifecycle: Boolean,
+    val projects: Boolean,
+    val projectCreation: Boolean,
+    val references: Boolean,
+    val takeover: Boolean,
+    val agentDiscovery: Boolean = false,
+) {
+    val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; else -> "Agent" }
+    fun supports(method: String): Boolean = when (method) {
+        "agents/list" -> agentDiscovery
+        "threads/status" -> sessionStatus
+        "threads/mode", "plans/respond" -> planMode
+        "threads/permissions" -> permissionProfiles
+        "threads/archive", "threads/unarchive", "threads/delete", "threads/fork" -> sessionLifecycle
+        "projects/list" -> projects
+        "projects/create" -> projectCreation
+        "references/list" -> references
+        "threads/takeover" -> takeover
+        else -> true
+    }
+
+    companion object {
+        val LegacyCodex = BackendCapabilities("codex", true, true, true, true, true, true, true, true)
+
+        fun fromReady(frame: JSONObject): BackendCapabilities {
+            if (!frame.has("backend") && !frame.has("capabilities")) return LegacyCodex
+            val backend = frame.optString("backend")
+            val raw = frame.optJSONArray("capabilities")
+            val valid = backend in setOf("codex", "opencode") && raw != null &&
+                (0 until raw.length()).all { raw.opt(it) is String }
+            val keys = if (valid) (0 until raw!!.length()).map { raw.getString(it) }.toSet() else emptySet()
+            return BackendCapabilities(
+                backend,
+                "session_status" in keys,
+                "plan_mode" in keys,
+                "permission_profiles" in keys,
+                "session_lifecycle" in keys,
+                "projects" in keys || "projects_read" in keys,
+                "projects" in keys,
+                "references" in keys,
+                "takeover" in keys,
+                backend == "codex" && "agent_discovery" in keys,
+            )
+        }
+    }
+}
+
 fun fingerprint(key: ByteArray): String = "SHA256:" + Base64.getEncoder().withoutPadding().encodeToString(MessageDigest.getInstance("SHA-256").digest(key))
 
 fun remoteCommand(binary: String, state: String, cursor: Long, instance: String?): String {
@@ -22,6 +74,8 @@ class JournalState(instance: String? = null, cursor: Long = 0) {
         private set
     var cursor = cursor
         private set
+    internal var backendCapabilities = BackendCapabilities.LegacyCodex
+        private set
     fun hello(frame: JSONObject) {
         require(frame.optBoolean("ready") && frame.optString("instance").isNotBlank()) { "Supervisor did not acknowledge attach" }
         val incoming = frame.getString("instance")
@@ -34,6 +88,7 @@ class JournalState(instance: String? = null, cursor: Long = 0) {
         } else cursor
         instance = incoming
         cursor = checkpoint
+        backendCapabilities = BackendCapabilities.fromReady(frame)
     }
     fun frame(frame: JSONObject, apply: (JSONObject) -> Unit = {}): JSONObject? {
         require(!frame.has("error")) { "Replay unavailable. Reset connection after reviewing session state." }

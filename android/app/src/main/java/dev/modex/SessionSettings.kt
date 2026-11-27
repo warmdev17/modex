@@ -2,6 +2,25 @@ package dev.modex
 
 import org.json.JSONObject
 
+internal const val CODEX_AGENT = "codex"
+internal const val ANTIGRAVITY_AGENT = "antigravity"
+
+internal data class ChatAgent(val id: String, val label: String, val ready: Boolean, val reason: String = "")
+
+internal fun readChatAgents(result: JSONObject): List<ChatAgent> {
+    val data = result.optJSONArray("data") ?: return emptyList()
+    return (0 until data.length()).mapNotNull { index ->
+        val item = data.optJSONObject(index) ?: return@mapNotNull null
+        val id = item.optString("id")
+        if (id !in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT)) return@mapNotNull null
+        ChatAgent(id, item.optString("label").ifBlank { id }, item.optBoolean("ready"), item.optString("reason"))
+    }.distinctBy { it.id }
+}
+
+internal fun threadAgent(thread: JSONObject): String =
+    thread.optString("agent").takeIf { it in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT) }
+        ?: if (thread.optString("id").startsWith("agy:")) ANTIGRAVITY_AGENT else CODEX_AGENT
+
 internal data class SessionPermissionProfile(val id: String, val description: String, val allowed: Boolean) {
     val label get() = when (id) {
         ":read-only" -> "Read-only"
@@ -18,26 +37,48 @@ internal val permissionModes = linkedMapOf(
     "full-access" to "Full access"
 )
 
-internal fun newThreadParams(model: String, mode: String, workspace: String = "", projectId: String = "", standalone: Boolean = false): JSONObject {
+internal fun newThreadParams(model: String, mode: String, workspace: String = "", projectId: String = "", standalone: Boolean = false, agent: String = CODEX_AGENT): JSONObject {
     require(mode in permissionModes)
+    require(agent in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT))
     require(!standalone || (workspace.isBlank() && projectId.isBlank()))
     return JSONObject().apply {
+        if (agent == ANTIGRAVITY_AGENT) put("agent", agent)
         if (standalone) put("standalone", true)
         if (workspace.isNotBlank()) put("workspace", workspace)
         if (projectId.isNotBlank()) put("project_id", projectId)
-        if (model.isNotBlank()) put("model", model)
-        if (mode != "host-default") put("permission_mode", mode)
+        if (agent == CODEX_AGENT && model.isNotBlank()) put("model", model)
+        if (agent == CODEX_AGENT && mode != "host-default") put("permission_mode", mode)
     }
 }
 
-internal fun turnStartParams(thread: String, text: String, model: String, effort: String = "", attachments: List<Attachment> = emptyList(), references: List<PromptReference> = emptyList()): JSONObject =
+internal fun turnStartParams(thread: String, text: String, model: String, effort: String = "", attachments: List<Attachment> = emptyList(), references: List<PromptReference> = emptyList(), agent: String = CODEX_AGENT): JSONObject =
     JSONObject().put("thread_id", thread).put("text", text).apply {
+        require(agent in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT))
+        if (agent == ANTIGRAVITY_AGENT) return@apply
         if (references.isNotEmpty()) put("references", org.json.JSONArray().apply { references.forEach { put(it.selectionJson()) } })
         require(validModelId(model) && validEffort(effort))
         if (attachments.isNotEmpty()) put("attachments", org.json.JSONArray().apply { attachments.forEach { put(it.toJson()) } })
         if (model.isNotBlank()) put("model", model.trim())
         if (effort.isNotBlank()) put("effort", effort)
     }
+
+internal fun BackendCapabilities.supportedNewThreadParams(model: String, mode: String, workspace: String = "", projectId: String = ""): JSONObject =
+    newThreadParams(
+        model,
+        if (permissionProfiles) mode else "host-default",
+        if (projects) workspace else "",
+        if (projects) projectId else "",
+        standalone = !projects || (workspace.isBlank() && projectId.isBlank()),
+    )
+
+internal fun BackendCapabilities.supportedTurnStartParams(
+    thread: String,
+    text: String,
+    model: String,
+    effort: String = "",
+    files: List<Attachment> = emptyList(),
+    references: List<PromptReference> = emptyList(),
+): JSONObject = turnStartParams(thread, text, model, effort, files, if (this.references) references else emptyList())
 
 internal fun validModelId(value: String): Boolean = value.isEmpty() ||
     (value.isNotBlank() && value.toByteArray(Charsets.UTF_8).size <= 256 && value.none { it == '\r' || it == '\n' || it == '\u0000' })

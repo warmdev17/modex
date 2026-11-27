@@ -45,6 +45,45 @@ func assertJSON(t *testing.T, got any, want string) {
 
 const sessionBody = `{"id":"ses_1","projectID":"p","agent":"builder","model":{"id":"m1","providerID":"p1","variant":"default"},"title":"Thread title","location":{"directory":"/work"},"time":{"created":1,"updated":2}}`
 
+func TestNativeProjectsListAndCreateChat(t *testing.T) {
+	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api/project":
+			jsonResponse(w, 200, `[{"id":"global","canonical":"/","sandboxes":[]},{"id":"p-empty","canonical":"/work/","name":"Workspace","sandboxes":[]},{"id":"p","canonical":"/work","name":"Workspace","sandboxes":[]}]`)
+		case "GET /api/session":
+			data := "[]"
+			if r.URL.Query().Get("project") == "p" {
+				data = "[" + sessionBody + "]"
+			}
+			jsonResponse(w, 200, `{"data":`+data+`}`)
+		case "POST /api/session":
+			assertJSON(t, json.RawMessage(body), `{"location":{"directory":"/work"}}`)
+			jsonResponse(w, 200, `{"data":`+sessionBody+`}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/default")
+	result, err := runCommand(t, client, "/default", "projects/list", map[string]any{"limit": 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, result, `{"data":[{"id":"p","name":"Workspace","roots":[{"path":"/work"}]}],"next_cursor":null}`)
+	if _, err := runCommand(t, client, "/default", "threads/start", map[string]any{"workspace": "/wrong", "project_id": "p"}); err == nil {
+		t.Fatal("mismatched workspace accepted")
+	}
+	for _, request := range *requests {
+		if request.Method == http.MethodPost {
+			t.Fatal("mismatched workspace reached a native mutation")
+		}
+	}
+	created, err := runCommand(t, client, "/default", "threads/start", map[string]any{"workspace": "/work", "project_id": "p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSON(t, created, `{"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"},"model":"p1/m1"}`)
+}
+
 func TestStatusProjectsDefaultAgent(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		switch r.URL.Path {
@@ -61,7 +100,7 @@ func TestStatusProjectsDefaultAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertJSON(t, result, `{"workspace":"/work","config":{"provider":"opencode-go","model":"deepseek-v4-pro"}}`)
+	assertJSON(t, result, `{"workspace":"/work","config":{"provider":"opencode-go","model":"opencode-go/deepseek-v4-pro"}}`)
 	for _, request := range *requests {
 		if request.Path == "/api/config" && request.Query != "directory=%2Fwork" {
 			t.Fatalf("config query=%q", request.Query)
@@ -73,6 +112,7 @@ func TestThreadsListProjectsSessions(t *testing.T) {
 	longTitle := strings.Repeat("t", 200)
 	page, _ := json.Marshal(map[string]any{
 		"data": []map[string]any{
+			{"id": "ses_child", "parentID": "ses_1", "location": map[string]string{"directory": "/work"}},
 			{"id": "ses_1", "model": map[string]any{"id": "m1", "providerID": "p1"}, "title": longTitle, "location": map[string]string{"directory": "/work"}},
 			{"id": "ses_2", "title": "", "location": map[string]string{"directory": "/other"}},
 		},
@@ -92,10 +132,10 @@ func TestThreadsListProjectsSessions(t *testing.T) {
 	}
 	title, _ := json.Marshal(safePreview(longTitle))
 	assertJSON(t, result, `{"data":[
-		{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1","preview":`+string(title)+`,"name":`+string(title)+`},
+		{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"p1/m1","preview":`+string(title)+`,"name":`+string(title)+`},
 		{"id":"ses_2","cwd":"/other","modelProvider":"","preview":"","name":""}
 	],"next_cursor":null}`)
-	if len(*requests) != 1 || (*requests)[0].Query != "limit=100&order=desc" {
+	if len(*requests) != 1 || (*requests)[0].Query != "limit=100&order=desc&parentID=null" {
 		t.Fatalf("requests=%+v", *requests)
 	}
 }
@@ -116,7 +156,7 @@ func TestThreadsStartCreatesSessionAndResolvesModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertJSON(t, result, `{"thread":{"id":"ses_new","cwd":"/work","modelProvider":"p1","model":"m1"},"model":"m1"}`)
+	assertJSON(t, result, `{"thread":{"id":"ses_new","cwd":"/work","modelProvider":"p1","model":"p1/m1"},"model":"p1/m1"}`)
 	var createBody string
 	for _, request := range *requests {
 		if request.Method == http.MethodPost && request.Path == "/api/session" {
@@ -186,7 +226,7 @@ func TestThreadsReadMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1"}}`)
+	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"}}`)
 }
 
 func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
@@ -218,7 +258,7 @@ func TestThreadsReadIncludeTurnsProjectsParts(t *testing.T) {
 	}
 	notice := `{"category":"turn_failed","message":"OpenCode could not complete this turn. Review the conversation before trying again.","retrying":false}`
 	assertJSON(t, result, `{
-		"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1"},
+		"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"},
 		"messages":[
 			{"id":"msg_user","role":"user","text":"hello","display_text":"hello"},
 			{"id":"msg_asst/r1","role":"reasoning","text":"think","display_text":"think","summary_parts":["think"]},
@@ -330,7 +370,7 @@ func TestThreadsResumeReturnsModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","modelProvider":"p1","model":"m1"},"model":"m1"}`)
+	assertJSON(t, result, `{"thread":{"id":"ses_1","cwd":"/work","projectId":"p","modelProvider":"p1","model":"p1/m1"},"model":"p1/m1"}`)
 }
 
 func TestModelsListProjection(t *testing.T) {
@@ -341,7 +381,7 @@ func TestModelsListProjection(t *testing.T) {
 		}
 		jsonResponse(w, http.StatusOK, `{"location":{"directory":"/work"},"data":[
 			{"id":"m1","modelID":"m1","providerID":"p1","name":"M1"},
-			{"id":"m2","modelID":"m2","providerID":"p2","name":"M2"},
+			{"id":"m1","modelID":"m1","providerID":"p2","name":"Other M1"},
 			{"id":"m1","modelID":"m1","providerID":"p1","name":"duplicate"}
 		]}`)
 	})
@@ -351,9 +391,33 @@ func TestModelsListProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertJSON(t, result, `{"data":[
-		{"id":"p1/m1","model":"m1","displayName":"m1","defaultReasoningEffort":"","supportedReasoningEfforts":[]},
-		{"id":"p2/m2","model":"m2","displayName":"m2","defaultReasoningEffort":"","supportedReasoningEfforts":[]}
+		{"id":"p1/m1","model":"p1/m1","displayName":"m1","defaultReasoningEffort":"","supportedReasoningEfforts":[]},
+		{"id":"p2/m1","model":"p2/m1","displayName":"m1","defaultReasoningEffort":"","supportedReasoningEfforts":[]}
 	],"next_cursor":null}`)
+}
+
+func TestOpenCodeRejectsAmbiguousLegacyModelBeforeMutation(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, _ string) {
+		switch r.URL.Path {
+		case "/api/model":
+			jsonResponse(w, http.StatusOK, `{"data":[{"modelID":"m1","providerID":"p1"},{"modelID":"m1","providerID":"p2"}]}`)
+		case "/api/session/ses_1":
+			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
+		default:
+			t.Errorf("unexpected OpenCode request %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	})
+	client := NewClient(server.URL, server.Client(), "/work")
+	for method, params := range map[string]map[string]any{
+		"threads/start": {"workspace": "/work", "model": "m1"},
+		"turn/start":    {"workspace": "/work", "model": "m1", "thread_id": "ses_1", "text": "hello"},
+	} {
+		_, err := runCommand(t, client, "/work", method, params)
+		if err == nil || err.Error() != "model is offered by multiple OpenCode providers; select a provider-qualified model" {
+			t.Errorf("%s: err=%v", method, err)
+		}
+	}
 }
 
 func TestClientAttached(t *testing.T) {
@@ -381,7 +445,7 @@ func TestUnsupportedMethods(t *testing.T) {
 	methods := []string{
 		"threads/archive", "threads/unarchive", "threads/delete", "threads/fork",
 		"threads/takeover", "threads/mode", "threads/status", "threads/permissions",
-		"plans/respond", "projects/list", "projects/create", "references/list",
+		"plans/respond", "projects/create", "references/list",
 	}
 	for _, method := range methods {
 		_, err := runCommand(t, client, "/work", method, map[string]any{})
@@ -409,7 +473,7 @@ func TestValidationErrors(t *testing.T) {
 		{"status", map[string]any{"unexpected": 1}, "unknown parameter"},
 		{"threads/list", map[string]any{"limit": 0}, "limit must be an integer from 1 to 100"},
 		{"threads/list", map[string]any{"archived": true}, "archived is unsupported by the opencode backend"},
-		{"threads/start", map[string]any{"project_id": "p1"}, "project_id is unsupported by the opencode backend"},
+		{"threads/start", map[string]any{"project_id": "p1"}, "project_id requires an explicit project workspace"},
 		{"threads/start", map[string]any{"permission_mode": "read-only"}, "permission_mode is unsupported by the opencode backend"},
 		{"threads/start", map[string]any{"model": ""}, "model must be a nonempty single-line string up to 256 bytes"},
 		{"threads/read", map[string]any{"thread_id": ""}, "thread_id must be a nonempty single-line string up to 256 bytes"},
@@ -447,7 +511,8 @@ func TestTurnStartSendsPromptAndReturnsUserTurn(t *testing.T) {
 		case "/api/session/ses_1":
 			jsonResponse(w, http.StatusOK, `{"data":`+sessionBody+`}`)
 		case "/api/model":
-			jsonResponse(w, http.StatusOK, `{"location":{"directory":"/work"},"data":[{"id":"m1","modelID":"m1","providerID":"p1","name":"M1"}]}`)
+			t.Error("a provider-qualified choice must not be resolved by catalogue order")
+			http.NotFound(w, r)
 		case "/api/session/ses_1/model":
 			jsonResponse(w, http.StatusOK, `{}`)
 		case "/api/session/ses_1/prompt":
@@ -461,7 +526,7 @@ func TestTurnStartSendsPromptAndReturnsUserTurn(t *testing.T) {
 		"thread_id": "ses_1",
 		"workspace": "/work",
 		"text":      "hi",
-		"model":     "m1",
+		"model":     "p2/m1",
 		"effort":    "high",
 		"attachments": []map[string]string{
 			{"path": "/tmp/a.png", "kind": "image"},
@@ -481,7 +546,7 @@ func TestTurnStartSendsPromptAndReturnsUserTurn(t *testing.T) {
 			promptBody = request.Body
 		}
 	}
-	if modelBody != `{"model":{"id":"m1","providerID":"p1"}}` {
+	if modelBody != `{"model":{"id":"m1","providerID":"p2"}}` {
 		t.Fatalf("model body=%s", modelBody)
 	}
 	if promptBody != `{"files":[{"uri":"file:///tmp/a.png","name":"a.png"}],"text":"hi"}` {
@@ -748,7 +813,7 @@ func TestServeEventsSupervisorReadiness(t *testing.T) {
 		} `json:"result"`
 		Error json.RawMessage `json:"error"`
 	}
-	if json.Unmarshal([]byte(lines[0]), &status) != nil || status.ID != 2147483647 || status.Result.Workspace != "/work" || status.Result.Config.Provider != "p1" || status.Result.Config.Model != "m1" || len(status.Error) != 0 {
+	if json.Unmarshal([]byte(lines[0]), &status) != nil || status.ID != 2147483647 || status.Result.Workspace != "/work" || status.Result.Config.Provider != "p1" || status.Result.Config.Model != "p1/m1" || len(status.Error) != 0 {
 		t.Fatalf("status line=%s", lines[0])
 	}
 	var attached struct {

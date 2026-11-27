@@ -81,7 +81,7 @@ internal fun HostWorkspace(
             OutlinedTextField(projectNameInput, { projectNameInput = it }, label = { Text("Project name") }, singleLine = true)
             Text(projectFolder, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
         } },
-        confirmButton = { TextButton(enabled = vm.connected && !vm.projectCreating && projectNameInput.isNotBlank() && projectNameInput.toByteArray().size <= 256 && projectNameInput.none { it.isISOControl() }, onClick = { vm.createProject(projectNameInput, projectFolder); projectFolder = "" }) { Text("Create project") } },
+        confirmButton = { TextButton(enabled = vm.backendCapabilities.projectCreation && vm.connected && !vm.projectCreating && projectNameInput.isNotBlank() && projectNameInput.toByteArray().size <= 256 && projectNameInput.none { it.isISOControl() }, onClick = { vm.createProject(projectNameInput, projectFolder); projectFolder = "" }) { Text("Create project") } },
         dismissButton = { TextButton(onClick = { projectFolder = "" }) { Text("Cancel") } }
     )
     if (remoteThread.isNotEmpty()) RemoteFilePicker(
@@ -95,6 +95,7 @@ internal fun HostWorkspace(
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
         ChatWorkspace(
             host = hostName, connected = vm.connected, connecting = vm.connecting,
+            backendCapabilities = vm.backendCapabilities,
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
             runningThreads = vm.runningThreads, busy = vm.busy, activeTurnId = vm.activeTurnId, steerSending = vm.steerSending, stopping = vm.stopping, onStop = vm::stop, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,
@@ -108,11 +109,14 @@ internal fun HostWorkspace(
             archived = vm.archived, onArchived = vm::showArchived, actionThreads = vm.actionThreads,
             onSessionAction = { action, target, confirmed -> vm.lifecycle(action, target, confirmed) },
             onSelect = vm::select, onRefresh = vm::refreshThreads, onMore = vm::more,
-            onCreate = { model, mode, effort -> vm.create(model, mode, effort) }, onCreateInProject = vm::create,
+            onCreate = { model, mode, effort -> vm.create(model, mode, effort) },
+            onCreateInProject = { model, mode, effort, workspace, project -> vm.create(model, mode, effort, workspace, project) },
+            onCreateWithAgent = { agent, model, mode, effort, workspace, project -> vm.create(model, mode, effort, workspace, project, agent) },
             onNewProject = { vm.attachments.browse("~"); projectBrowser = true }, onSend = vm::send, onAnswer = vm::answer,
             onConnection = { connectionSettings = true }, onDisconnect = vm::disconnect, onHome = onHome,
             takeoverSession = vm.takeoverThread, onTakeover = vm::takeOver,
             models = vm.models, modelCatalogStatus = vm.modelCatalogStatus,
+            chatAgents = vm.chatAgents, agentsLoading = vm.agentsLoading, sessionAgent = vm.sessionAgent, threadAgents = vm.threadAgents,
             referenceCatalog = vm.references.catalog, referencesLoading = vm.references.loading, referenceStatus = vm.references.status, onRefreshReferences = { vm.refreshReferences() },
             threadWorkspaces = vm.threadWorkspaces, threadListLoading = vm.threadListLoading,
             registeredProjects = vm.projects, projectMembership = vm.projectMembership, projectStatus = vm.projectStatus,

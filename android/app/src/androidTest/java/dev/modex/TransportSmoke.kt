@@ -14,6 +14,8 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "stream-performance") { streamingPerformanceSmoke(); return }
         if (args.getString("preview") == "composer-responsiveness") { composerResponsivenessSmoke(args); return }
         if (args.getString("preview") == "native-session-controls") { nativeSessionControlsSmoke(); return }
+        if (args.getString("preview") == "opencode-capabilities") { openCodeCapabilitiesSmoke(); return }
+        if (args.getString("preview") == "opencode-projects-read") { openCodeCapabilitiesSmoke(projectsRead = true); return }
         if (args.getString("preview") == "session-management") { sessionManagementSmoke(); return }
         if (args.getString("preview") == "plan-review") { planReviewSmoke(); return }
         if (args.getString("preview") == "prompt-drafts") { promptDraftSmoke(args); return }
@@ -32,6 +34,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "attachments") { attachmentTransportSmoke(args); return }
         if (args.getString("preview") == "remote-project") { remoteProjectSmoke(); return }
         if (args.getString("preview") == "new-chat") { newChatSmoke(); return }
+        if (args.getString("preview") == "antigravity-picker") { antigravityPickerSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
         if (args.getString("preview") == "markdown-table") { markdownTableSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }
@@ -69,6 +72,7 @@ class TransportSmoke : Instrumentation() {
             return
         }
         if (args.getString("preview") == "approval") { approvalPreview(); return }
+        if (args.getString("preview") == "opencode-text-form") { openCodeTextFormPreview(); return }
         val result = Bundle()
         try {
             val config = Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,

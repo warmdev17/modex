@@ -17,7 +17,6 @@ const (
 	sseRetryMax  = 8 * time.Second
 	sseLineLimit = 4 << 20
 	pollActive   = time.Second
-	pollIdle     = 10 * time.Second
 	pollMessages = 20
 )
 
@@ -32,6 +31,7 @@ type Stream struct {
 	// OnPermissions receives a session's pending-permission snapshot from the
 	// polling reconciler (nil disables the M4 reconciliation).
 	OnPermissions func(sessionID, directory string, raw json.RawMessage)
+	Forms         *Decisions
 
 	seenMu    sync.Mutex
 	seen      map[string]bool
@@ -150,7 +150,13 @@ func (s *Stream) dispatch(payload string) {
 	if len(properties) == 0 {
 		properties = json.RawMessage("null")
 	}
-	s.synth.Handle(envelope.Type, properties)
+	switch envelope.Type {
+	case "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted", "session.idle", "session.error":
+		// These events carry only the session id. Polling requires an idle
+		// marker after the accepted user message before closing its turn.
+	default:
+		s.synth.Handle(envelope.Type, properties)
+	}
 	for _, observer := range s.observers {
 		observer(envelope.Type, properties, envelope.Location.Directory)
 	}
@@ -172,17 +178,13 @@ func (s *Stream) alreadySeen(id string) bool {
 }
 
 func (s *Stream) poll(ctx context.Context) {
-	var lastIdle time.Time
 	for {
-		sessionID, inFlight := s.synth.ActiveSession()
-		if sessionID != "" && (inFlight || time.Since(lastIdle) >= pollIdle) {
-			s.reconcile(ctx, sessionID, inFlight)
-			if !inFlight {
-				lastIdle = time.Now()
+		for _, sessionID := range s.synth.ActiveSessions() {
+			if ctx.Err() != nil {
+				return
 			}
+			s.reconcile(ctx, sessionID, true)
 		}
-		// Wake every second so a newly started turn is reconciled promptly;
-		// idle sessions only issue requests once per pollIdle.
 		select {
 		case <-ctx.Done():
 			return
@@ -194,9 +196,26 @@ func (s *Stream) poll(ctx context.Context) {
 func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool) {
 	s.synth.mu.Lock()
 	turn := s.synth.turns[sessionID]
-	s.synth.mu.Unlock()
-	if turn == nil {
+	if turn == nil || turn.completed {
+		s.synth.mu.Unlock()
 		return
+	}
+	anchor := turn.historyAnchor
+	s.synth.mu.Unlock()
+	if inFlight && s.Forms != nil {
+		epoch := s.Forms.formEpoch()
+		formCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		forms, err := s.client.listForms(formCtx, sessionID)
+		cancel()
+		if err == nil {
+			s.synth.mu.Lock()
+			if s.synth.turns[sessionID] == turn && !turn.completed {
+				if notice := s.Forms.reconcileForms(sessionID, turn.userID, epoch, forms); notice != "" {
+					s.synth.completeWithNotice(turn, "failed", "unsupported_input", notice)
+				}
+			}
+			s.synth.mu.Unlock()
+		}
 	}
 	session, err := s.client.ReadSession(ctx, sessionID)
 	if err != nil {
@@ -204,24 +223,34 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 	}
 	var messages []message
 	cursor := ""
-	// shortcut: recover from at most 100 messages per poll, expand when longer offline turns need recovery.
-	for range 5 {
-		page, err := s.client.ListMessagesPage(ctx, sessionID, pollMessages, "desc", cursor)
+	seen := map[string]bool{}
+	limit := pollMessages
+	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+	defer cancel()
+	// shortcut: recover at most 100 messages per poll from the last verified
+	// history position; widen this window for larger gaps during outages.
+	for len(messages) < 100 {
+		page, err := s.client.ListMessagesPage(ctx, sessionID, min(limit, 100-len(messages)), "desc", cursor)
 		if err != nil {
 			return
 		}
 		messages = append(messages, page.Data...)
 		anchored := false
 		for _, item := range page.Data {
-			if item.ID == turn.userID {
+			if item.ID == anchor {
 				anchored = true
 				break
 			}
 		}
-		if anchored || page.Cursor.Next == nil || *page.Cursor.Next == "" || *page.Cursor.Next == cursor {
+		if anchored || len(page.Data) == 0 || page.Cursor.Next == nil || *page.Cursor.Next == "" {
 			break
 		}
 		cursor = *page.Cursor.Next
+		if seen[cursor] {
+			return
+		}
+		seen[cursor] = true
+		limit = min(limit, len(page.Data))
 	}
 	reverseMessages(messages)
 	if inFlight {

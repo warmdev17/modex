@@ -10,20 +10,27 @@ func projectModels(models []modelRef) []map[string]any {
 		if model.ProviderID == "" || model.ModelID == "" {
 			continue
 		}
-		id := model.ProviderID + "/" + model.ModelID
+		id := modelChoiceID(model.ProviderID, model.ModelID)
 		if seen[id] {
 			continue
 		}
 		seen[id] = true
 		data = append(data, map[string]any{
 			"id":                        id,
-			"model":                     model.ModelID,
+			"model":                     id,
 			"displayName":               model.ModelID,
 			"defaultReasoningEffort":    "",
 			"supportedReasoningEfforts": []any{},
 		})
 	}
 	return data
+}
+
+func modelChoiceID(provider, model string) string {
+	if provider == "" || model == "" {
+		return model
+	}
+	return provider + "/" + model
 }
 
 func projectModelList(models []modelRef) map[string]any {
