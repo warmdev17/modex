@@ -23,6 +23,7 @@ import (
 
 	"github.com/warmdev/modex/internal/acp"
 	"github.com/warmdev/modex/internal/bridge"
+	"github.com/warmdev/modex/internal/diagnostic"
 )
 
 const prefix = "agy:"
@@ -39,12 +40,14 @@ type record struct {
 	Name        string `json:"name,omitempty"`
 }
 type message struct {
-	ID          string          `json:"id"`
-	Role        string          `json:"role"`
-	Text        string          `json:"text"`
-	Turn        string          `json:"turn_id,omitempty"`
-	Activity    *invocationItem `json:"activity_item,omitempty"`
-	Attachments []attachment    `json:"attachments,omitempty"`
+	ID          string                 `json:"id"`
+	Role        string                 `json:"role"`
+	Text        string                 `json:"text"`
+	Turn        string                 `json:"turn_id,omitempty"`
+	Status      string                 `json:"status,omitempty"`
+	Notice      *diagnostic.TurnNotice `json:"turn_notice,omitempty"`
+	Activity    *invocationItem        `json:"activity_item,omitempty"`
+	Attachments []attachment           `json:"attachments,omitempty"`
 }
 type chat struct {
 	record
@@ -60,7 +63,7 @@ type chat struct {
 	admitting             bool
 	queued                []acp.Update
 	segment               int
-	finishPending         string
+	finishPending         *turnOutcome
 	queuedBytes           int
 	queueOverflow         bool
 }
@@ -352,10 +355,10 @@ func (r *Router) flushUpdates(c *chat) {
 	for _, u := range queued {
 		r.updateLocked(c, u)
 	}
-	if c.finishPending != "" {
-		status := c.finishPending
-		c.finishPending = ""
-		r.finishLocked(c, c.active, status)
+	if c.finishPending != nil {
+		outcome := *c.finishPending
+		c.finishPending = nil
+		r.finishLocked(c, c.active, outcome)
 	}
 }
 
@@ -804,18 +807,18 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 					r.flushUpdates(c)
 				}
 				r.mu.Unlock()
-				done <- e
+				select {
+				case <-sent:
+				default:
+					done <- e
+				}
 				if !errors.Is(e, acp.ErrRequestRejected) && !errors.Is(e, acp.ErrAuthenticationRequired) {
 					r.retire(c.Workspace, client)
 				}
-				r.finish(c, turn, "failed")
+				r.finish(c, turn, antigravityOutcome("", e))
 				return
 			}
-			status := "completed"
-			if stop == "cancelled" {
-				status = "interrupted"
-			}
-			r.finish(c, turn, status)
+			r.finish(c, turn, antigravityOutcome(stop, nil))
 		}()
 		select {
 		case <-sent:
@@ -870,8 +873,8 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 						r.flushUpdates(c)
 					}
 					r.mu.Unlock()
+					done <- e
 				}
-				done <- e
 			}
 		}()
 		select {
@@ -903,24 +906,59 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		return nil, true, errors.New("operation is not supported for Antigravity sessions")
 	}
 }
-func (r *Router) finish(c *chat, turn, status string) {
+
+type turnOutcome struct {
+	status string
+	notice *diagnostic.TurnNotice
+}
+
+func antigravityOutcome(stop string, err error) turnOutcome {
+	notice := diagnostic.TurnNotice{
+		Category: "turn_failed",
+		Message:  "Antigravity could not complete this turn. Review the conversation before trying again.",
+	}
+	if errors.Is(err, acp.ErrAuthenticationRequired) {
+		notice.Category = "unauthorized"
+		notice.Message = "Antigravity requires sign-in on the host. Sign in there and try again."
+	}
+	if err == nil {
+		switch stop {
+		case "end_turn":
+			return turnOutcome{status: "completed"}
+		case "cancelled":
+			return turnOutcome{status: "interrupted"}
+		case "max_tokens":
+			notice.Category = "response_token_limit"
+			notice.Message = "Antigravity reached the token limit before finishing. You can ask it to continue."
+		case "max_turn_requests":
+			notice.Category = "turn_request_limit"
+			notice.Message = "Antigravity reached the request limit for this turn. You can continue in a new message."
+		case "refusal":
+			notice.Category = "agent_refusal"
+			notice.Message = "Antigravity declined to continue this turn."
+		}
+	}
+	return turnOutcome{status: "failed", notice: &notice}
+}
+
+func (r *Router) finish(c *chat, turn string, outcome turnOutcome) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c.active != turn {
 		return
 	}
 	if c.admitting {
-		c.finishPending = status
+		c.finishPending = &outcome
 		return
 	}
-	r.finishLocked(c, turn, status)
+	r.finishLocked(c, turn, outcome)
 }
 
-func (r *Router) finishLocked(c *chat, turn, status string) {
+func (r *Router) finishLocked(c *chat, turn string, outcome turnOutcome) {
 	for _, target := range c.calls {
 		if target.Status == "running" || target.Status == "pendingInit" {
 			target.Status = "unknown"
-			if status == "interrupted" {
+			if outcome.status == "interrupted" {
 				target.Status = "interrupted"
 			}
 			c.emitInvocation(turn, "completed", target)
@@ -933,7 +971,17 @@ func (r *Router) finishLocked(c *chat, turn, status string) {
 			emitEvent(c.emit, "decision/resolved", map[string]any{"decision_id": id})
 		}
 	}
-	emitEvent(c.emit, "turn/completed", map[string]any{"threadId": c.ID, "turn": map[string]any{"id": turn, "status": status}})
+	for i := len(c.messages) - 1; i >= 0 && c.messages[i].Turn == turn; i-- {
+		if c.messages[i].Role == "user" {
+			c.messages[i].Status = outcome.status
+			c.messages[i].Notice = outcome.notice
+		}
+	}
+	params := map[string]any{"threadId": c.ID, "turn": map[string]any{"id": turn, "status": outcome.status}}
+	if outcome.notice != nil {
+		params["notice"] = outcome.notice
+	}
+	emitEvent(c.emit, "turn/completed", params)
 	c.active = ""
 }
 

@@ -543,7 +543,7 @@ func (c *Client) finishPrompt(session *sessionState, turn *promptTurn, stop stri
 	if err != nil {
 		turn.err = err
 	}
-	if stop == "cancelled" || turn.result == "" {
+	if stop == "cancelled" || turn.result == "" || (turn.result == "end_turn" && stop != "") {
 		turn.result = stop
 	}
 	turn.active--

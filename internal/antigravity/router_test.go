@@ -113,6 +113,20 @@ func TestRouterACPFixture(t *testing.T) {
 			reply(map[string]any{"configOptions": options()})
 		case "session/prompt":
 			_ = os.WriteFile(filepath.Join(cwd, "captured-prompt.json"), s.Bytes(), 0600)
+			if reason, ok := strings.CutPrefix(req.Params.Prompt[0].Text, "stop:"); ok {
+				reply(map[string]string{"stopReason": reason})
+				continue
+			}
+			if reason, ok := strings.CutPrefix(req.Params.Prompt[0].Text, "stop-original:"); ok {
+				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]string{"stopReason": reason}})
+				reply(map[string]string{"stopReason": "end_turn"})
+				continue
+			}
+			if reason, ok := strings.CutPrefix(req.Params.Prompt[0].Text, "stop-followup:"); ok {
+				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]string{"stopReason": "end_turn"}})
+				reply(map[string]string{"stopReason": reason})
+				continue
+			}
 			if req.Params.Prompt[0].Text == "wait" {
 				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "native", "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "before"}}}})
 				promptID = req.ID
@@ -619,6 +633,88 @@ func TestSteerResponseBeforeOriginalAndNativeError(t *testing.T) {
 				}
 			case <-time.After(3 * time.Second):
 				t.Fatal("missing completion")
+			}
+		})
+	}
+}
+
+func TestAntigravityTurnOutcomes(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	r := New(context.Background(), bin, root, state)
+	defer r.Close()
+	completed := make(chan json.RawMessage, 1)
+	call := func(method string, p map[string]any) any {
+		t.Helper()
+		raw, _ := json.Marshal(p)
+		value, _, err := r.Handle(context.Background(), bridge.Command{Method: method, Params: raw}, func(event string, params json.RawMessage) {
+			if event == "turn/completed" {
+				completed <- params
+			}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	start := call("threads/start", map[string]any{"agent": "antigravity"}).(map[string]any)
+	id := start["thread"].(map[string]any)["id"].(string)
+	for _, tc := range []struct {
+		text, followup, status, category string
+	}{
+		{"stop:end_turn", "", "completed", ""},
+		{"stop:cancelled", "", "interrupted", ""},
+		{"stop:max_tokens", "", "failed", "response_token_limit"},
+		{"stop:refusal", "", "failed", "agent_refusal"},
+		{"stop:private-upstream-value", "", "failed", "turn_failed"},
+		{"fail", "", "failed", "turn_failed"},
+		{"wait", "stop-original:max_turn_requests", "failed", "turn_request_limit"},
+		{"wait", "stop-followup:max_tokens", "failed", "response_token_limit"},
+	} {
+		t.Run(tc.text+"_"+tc.followup, func(t *testing.T) {
+			turn := call("turn/start", map[string]any{"thread_id": id, "text": tc.text}).(map[string]any)["turn"].(map[string]any)["id"].(string)
+			if tc.followup != "" {
+				call("turn/steer", map[string]any{"thread_id": id, "turn_id": turn, "text": tc.followup})
+			}
+			select {
+			case raw := <-completed:
+				var result struct {
+					Turn struct {
+						ID, Status string
+					}
+					Notice struct {
+						Category, Message string
+					}
+				}
+				if err := json.Unmarshal(raw, &result); err != nil || result.Turn.ID != turn || result.Turn.Status != tc.status ||
+					result.Notice.Category != tc.category || (tc.category != "" && result.Notice.Message == "") ||
+					strings.Contains(string(raw), "private") {
+					t.Fatalf("unexpected terminal event: %s", raw)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("missing terminal event")
+			}
+			raw, _ := json.Marshal(call("threads/read", map[string]any{"thread_id": id, "include_turns": true}))
+			var history struct {
+				Messages []struct {
+					Role, Status string
+					TurnID       string                    `json:"turn_id"`
+					Notice       struct{ Category string } `json:"turn_notice"`
+				}
+			}
+			if err := json.Unmarshal(raw, &history); err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, message := range history.Messages {
+				if message.Role == "user" && message.TurnID == turn {
+					found = true
+					if message.Status != tc.status || message.Notice.Category != tc.category {
+						t.Fatalf("history lost terminal outcome: %+v", message)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("submitted prompt missing from history")
 			}
 		})
 	}
