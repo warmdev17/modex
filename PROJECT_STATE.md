@@ -30,9 +30,9 @@ telemetry note linking the community issue, current policy and external report.
   inference were not tested. Competitor interoperability and actual telemetry
   behavior were not tested; compatibility is based on current project docs.
   `umask 022; go test ./...` passed again before publishing the branch. The
-  branch is pushed as `origin/docs/professional-readme`; no PR or merge has
-  been performed. Next: review the rendered branch on GitHub, then open the
-  required documentation PR when authorized.
+  branch is pushed as `origin/docs/professional-readme`. Delivery to `main` is
+  tracked by [PR #38](https://github.com/warmdev17/modex/pull/38); GitHub is the
+  source of truth for its current merge status.
 
 ## OpenCode backend
 
