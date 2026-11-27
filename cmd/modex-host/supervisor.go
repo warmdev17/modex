@@ -40,6 +40,9 @@ func serveArgs(cwd string, b backendSpec, nativeSocket string) []string {
 	if b.home != "" {
 		args = append(args, "--codex-home", b.home)
 	}
+	if b.opencode != "" && b.opencode != "opencode" {
+		args = append(args, "--opencode", b.opencode)
+	}
 	if b.agy != "" && b.agy != "agy" {
 		args = append(args, "--agy", b.agy)
 	}
@@ -55,6 +58,9 @@ func superviseArgs(cwd string, b backendSpec, dir string) []string {
 	args := []string{"--supervise", "--workspace", cwd, "--codex", b.codex, "--state-dir", dir}
 	if b.home != "" {
 		args = append(args, "--codex-home", b.home)
+	}
+	if b.opencode != "" && b.opencode != "opencode" {
+		args = append(args, "--opencode", b.opencode)
 	}
 	if b.agy != "" && b.agy != "agy" {
 		args = append(args, "--agy", b.agy)

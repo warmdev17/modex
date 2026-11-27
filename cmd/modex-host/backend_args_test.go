@@ -128,3 +128,18 @@ func TestModeCommandsUseArgHelpers(t *testing.T) {
 		t.Fatalf("commands=%q want %q and %q", calls, wantServe, wantSupervise)
 	}
 }
+
+func TestCodexSupervisorForwardsCustomOpenCodeBinary(t *testing.T) {
+	spec := backendSpec{kind: "codex", codex: "codex", opencode: "/opt/opencode"}
+	for _, args := range [][]string{serveArgs("/work", spec, "/tmp/socket"), superviseArgs("/work", spec, "/state")} {
+		found := false
+		for i := 0; i+1 < len(args); i++ {
+			if args[i] == "--opencode" && args[i+1] == "/opt/opencode" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("custom opencode missing: %q", args)
+		}
+	}
+}
