@@ -17,6 +17,20 @@ func ssePayload(id, typ, data string) string {
 	return string(raw)
 }
 
+func TestStreamFiltersEventsBeforeSynthesisAndDeduplication(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "prompt", "/work")
+	observed := 0
+	stream := NewStream(nil, synth, func(string, json.RawMessage, string) { observed++ })
+	stream.Filter = func(_ string, _ json.RawMessage, directory string) bool { return directory == "/work" }
+	stream.dispatch(`{"id":"same","type":"session.text.delta","location":{"directory":"/other"},"data":{"sessionID":"ses_1","assistantMessageID":"a","delta":"wrong"}}`)
+	stream.dispatch(`{"id":"same","type":"session.text.delta","location":{"directory":"/work"},"data":{"sessionID":"ses_1","assistantMessageID":"a","delta":"right"}}`)
+	if observed != 1 || len(collector.snapshot()) != 3 {
+		t.Fatalf("filtered event was processed or consumed the id: observed=%d events=%v", observed, eventMethods(collector.snapshot()))
+	}
+}
+
 func TestStreamDoesNotCloseTurnFromUncorrelatedTerminalEvent(t *testing.T) {
 	collector := &eventCollector{}
 	synth := NewSynthesizer("/work", collector.emit)
@@ -302,5 +316,137 @@ func TestPollFindsTurnAnchorAfterSeveralShrunkPages(t *testing.T) {
 	NewStream(NewClient(server.URL, server.Client(), "/work"), synth).reconcile(context.Background(), "s", false)
 	if _, active := synth.ActiveTurn("s"); active {
 		t.Fatal("missed completion past five shrunken pages")
+	}
+}
+
+func TestStreamPollDoesNotExposeFormsFromOtherWorkspace(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/ses_1":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"ses_1","location":{"directory":"/other"}}}`)
+		case "/api/session/ses_1/form":
+			jsonResponse(w, http.StatusOK, `{"data":[{"id":"frm_1","sessionID":"ses_1","fields":[{"key":"name","type":"string","title":"Name","required":true}]}]}`)
+		default:
+			jsonResponse(w, http.StatusOK, `{"data":[]}`)
+		}
+	}))
+	defer server.Close()
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "prompt", "/work")
+	decisions := NewDecisions("/work", collector.emit, synth.TurnID, nil)
+	decisions.ReplyForm = func(context.Context, string, string, map[string]string) error { return nil }
+	stream := NewStream(NewClient(server.URL, server.Client(), "/work"), synth)
+	stream.Forms = decisions
+	stream.ScopedPoll = true
+	stream.reconcile(context.Background(), "ses_1", true)
+	if collector.hasMethod("decision/required") {
+		t.Fatal("exposed a form from another workspace")
+	}
+}
+
+func TestManagedPollRequiresTurnAnchorBeforeExposingPendingForm(t *testing.T) {
+	for _, tc := range []struct {
+		name, messages string
+		want           bool
+	}{
+		{"other turn", `{"data":[{"id":"old","type":"user"}]}`, false},
+		{"current turn", `{"data":[{"id":"prompt","type":"user"}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/session/ses_1":
+					jsonResponse(w, http.StatusOK, `{"data":{"id":"ses_1","location":{"directory":"/work"}}}`)
+				case "/api/session/ses_1/message":
+					jsonResponse(w, http.StatusOK, tc.messages)
+				case "/api/session/ses_1/form":
+					jsonResponse(w, http.StatusOK, `{"data":[{"id":"frm_new","sessionID":"ses_1","fields":[{"key":"name","type":"string","title":"Name","required":true}]}]}`)
+				default:
+					jsonResponse(w, http.StatusOK, `{"data":[]}`)
+				}
+			}))
+			defer server.Close()
+			collector := &eventCollector{}
+			synth := NewSynthesizer("/work", collector.emit)
+			synth.StartTurn("ses_1", "prompt", "/work")
+			decisions := NewDecisions("/work", collector.emit, synth.TurnID, nil)
+			decisions.ReplyForm = func(context.Context, string, string, map[string]string) error { return nil }
+			stream := NewStream(NewClient(server.URL, server.Client(), "/work"), synth)
+			stream.Forms = decisions
+			stream.ScopedPoll = true
+			stream.reconcile(context.Background(), "ses_1", true)
+			if got := collector.hasMethod("decision/required"); got != tc.want {
+				t.Fatalf("decision exposed=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestManagedPollRejectsPermissionSnapshotAfterTurnReplacement(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "old", "/work")
+	decisions := NewDecisions("/work", collector.emit, synth.TurnID, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/ses_1":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"ses_1","location":{"directory":"/work"}}}`)
+		case "/api/session/ses_1/message":
+			jsonResponse(w, http.StatusOK, `{"data":[{"id":"old","type":"user"}]}`)
+		case "/api/session/ses_1/permission":
+			synth.StartTurn("ses_1", "new", "/work")
+			jsonResponse(w, http.StatusOK, `{"data":[{"id":"stale","sessionID":"ses_1","action":"write"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	stream := NewStream(NewClient(server.URL, server.Client(), "/work"), synth)
+	stream.ScopedPoll = true
+	stream.OnScopedPermissions = decisions.reconcileTurn
+	stream.reconcile(context.Background(), "ses_1", true)
+	if got := decisions.Pending(); len(got) != 0 {
+		t.Fatalf("old snapshot entered replacement turn: %+v", got)
+	}
+}
+
+func TestManagedPollFinishesTurnAtPermissionCap(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "prompt", "/work")
+	decisions := NewDecisions("/work", collector.emit, synth.TurnID, nil)
+	decisions.OnUnsupportedInput = synth.UnsupportedInput
+	for i := range 128 {
+		decisions.add(permissionRequest{ID: fmt.Sprint(i), SessionID: "other", Action: "write"}, "/work")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/session/ses_1":
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"ses_1","location":{"directory":"/work"}}}`)
+		case "/api/session/ses_1/message":
+			jsonResponse(w, http.StatusOK, `{"data":[{"id":"prompt","type":"user"}]}`)
+		case "/api/session/ses_1/permission":
+			jsonResponse(w, http.StatusOK, `{"data":[{"id":"new","sessionID":"ses_1","action":"write"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	stream := NewStream(NewClient(server.URL, server.Client(), "/work"), synth)
+	stream.ScopedPoll = true
+	stream.OnScopedPermissions = decisions.reconcileTurn
+	done := make(chan struct{})
+	go func() {
+		stream.reconcile(context.Background(), "ses_1", true)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("reconciliation deadlocked at the permission cap")
+	}
+	if _, active := synth.ActiveTurn("ses_1"); active || !collector.hasMethod("turn/completed") {
+		t.Fatal("the capped turn was not completed")
 	}
 }

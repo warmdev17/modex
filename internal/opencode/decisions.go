@@ -385,9 +385,22 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 			break
 		}
 	}
+	if d.reconcileTurn(sessionID, directory, raw, turnID) {
+		d.failPendingCap(sessionID)
+	}
+}
+
+func (d *Decisions) reconcileTurn(sessionID, directory string, raw json.RawMessage, turnID string) bool {
+	var response struct {
+		Data []permissionRequest `json:"data"`
+	}
+	if json.Unmarshal(raw, &response) != nil || response.Data == nil {
+		return false
+	}
 	d.mu.Lock()
+	defer d.mu.Unlock()
 	current := map[string]bool{}
-	cappedSession := ""
+	capped := false
 	for _, request := range response.Data {
 		if request.SessionID == "" {
 			request.SessionID = sessionID
@@ -396,8 +409,8 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 			continue
 		}
 		current[decisionKey(request.SessionID, request.ID)] = true
-		if d.addLocked(request, directory, turnID) && cappedSession == "" {
-			cappedSession = request.SessionID
+		if d.addLocked(request, directory, turnID) {
+			capped = true
 		}
 	}
 	ids := make([]string, 0, len(d.pending))
@@ -413,10 +426,7 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 		delete(d.pending, id)
 		d.emitEvent("decision/resolved", map[string]string{"decision_id": id})
 	}
-	d.mu.Unlock()
-	if cappedSession != "" {
-		d.failPendingCap(cappedSession)
-	}
+	return capped
 }
 
 // Pending returns a snapshot for tests and diagnostics.
@@ -663,6 +673,39 @@ func decodeStrictDecision(raw json.RawMessage, dst any) error {
 	}
 	if decoder.Decode(new(any)) != io.EOF {
 		return errors.New("invalid decision response")
+	}
+	return nil
+}
+
+// excludeExisting prevents requests left by an earlier execution from being
+// projected onto a newly submitted managed turn.
+func (d *Decisions) excludeExisting(sessionID string, raw json.RawMessage, forms []nativeForm) error {
+	var response struct {
+		Data []permissionRequest `json:"data"`
+	}
+	if json.Unmarshal(raw, &response) != nil || response.Data == nil || len(response.Data)+len(forms) > 128 {
+		return errors.New("cannot verify pending OpenCode requests")
+	}
+	keys := make(map[string]struct{}, len(response.Data)+len(forms))
+	for _, request := range response.Data {
+		if request.SessionID != "" && request.SessionID != sessionID || !validRegistryText(request.ID) || strings.Contains(request.ID, "/") || request.Action == "" {
+			return errors.New("cannot verify pending OpenCode requests")
+		}
+		keys[decisionKey(sessionID, request.ID)] = struct{}{}
+	}
+	for _, form := range forms {
+		if form.SessionID != sessionID || !validFormIdentity(form.SessionID, form.ID) {
+			return errors.New("cannot verify pending OpenCode requests")
+		}
+		keys[decisionKey(sessionID, form.ID)] = struct{}{}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.pending)+len(d.consumed)+len(keys) > 16384 {
+		return errors.New("cannot verify pending OpenCode requests")
+	}
+	for key := range keys {
+		d.consumed[key] = struct{}{}
 	}
 	return nil
 }

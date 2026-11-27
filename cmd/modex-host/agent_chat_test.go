@@ -189,3 +189,20 @@ func TestExplicitCodexModelsUsesSelectedWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAntigravityModelsReturnsEmptyCatalogueForValidWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	params, _ := json.Marshal(map[string]any{"agent": "antigravity", "workspace": workspace})
+	codex := func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error) {
+		t.Fatal("called Codex for Antigravity models")
+		return nil, nil
+	}
+	result, err := agentCommands(workspace, codex, &fixtureAgentRouter{})(context.Background(), bridge.Command{Method: "models/list", Params: params}, nil)
+	if err != nil || string(mustJSON(result)) != `{"data":[],"next_cursor":null}` {
+		t.Fatalf("result=%s err=%v", mustJSON(result), err)
+	}
+	params, _ = json.Marshal(map[string]any{"agent": "antigravity", "workspace": "relative"})
+	if _, err = agentCommands(workspace, codex, &fixtureAgentRouter{})(context.Background(), bridge.Command{Method: "models/list", Params: params}, nil); err == nil {
+		t.Fatal("accepted relative workspace")
+	}
+}

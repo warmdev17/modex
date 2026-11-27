@@ -12,6 +12,7 @@ import (
 
 	"github.com/warmdev/modex/internal/antigravity"
 	"github.com/warmdev/modex/internal/bridge"
+	"github.com/warmdev/modex/internal/opencode"
 )
 
 type agentChatRouter interface {
@@ -19,7 +20,7 @@ type agentChatRouter interface {
 	Threads() []map[string]any
 }
 
-func serveAgentChats(ctx context.Context, in io.Reader, out io.Writer, cwd, agy string, codex bridge.EventCaller) error {
+func serveAgentChats(ctx context.Context, in io.Reader, out io.Writer, cwd, agy, opencodeBinary string, codex bridge.EventCaller) error {
 	stateDir := os.Getenv("MODEX_AGENT_STATE_DIR")
 	if stateDir == "" {
 		return bridge.ServeEvents(ctx, in, out, cwd, codex)
@@ -32,11 +33,37 @@ func serveAgentChats(ctx context.Context, in io.Reader, out io.Writer, cwd, agy 
 	}
 	router := antigravity.New(ctx, agy, cwd, stateDir)
 	defer router.Close()
-	return bridge.ServeCommands(ctx, in, out, agentCommands(cwd, codex, router))
+	oc := opencode.NewRouter(ctx, opencodeBinary, cwd, stateDir)
+	defer oc.Close()
+	return bridge.ServeCommands(ctx, in, out, agentCommandsWithOpenCode(cwd, codex, router, oc))
 }
 
 func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter) bridge.CommandHandler {
+	return agentCommandsWithOpenCode(cwd, codex, router, nil)
+}
+
+func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agentChatRouter, oc *opencode.Router) bridge.CommandHandler {
 	return func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if oc != nil && cmd.Method == "agents/list" {
+			var p struct {
+				Workspace string `json:"workspace"`
+			}
+			if len(cmd.Params) > 0 && json.Unmarshal(cmd.Params, &p) != nil {
+				return nil, errors.New("invalid workspace")
+			}
+			value, _, err := router.Handle(ctx, cmd, emit)
+			if err != nil {
+				return nil, err
+			}
+			var result struct {
+				Data []any `json:"data"`
+			}
+			if json.Unmarshal(mustJSON(value), &result) != nil {
+				return nil, errors.New("invalid agents response")
+			}
+			result.Data = append(result.Data, oc.Readiness(ctx, p.Workspace))
+			return result, nil
+		}
 		explicitCodexStart := false
 		if cmd.Method == "threads/start" {
 			var p map[string]json.RawMessage
@@ -67,7 +94,14 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 			}
 			if raw, ok := p["agent"]; ok {
 				var agent string
-				if json.Unmarshal(raw, &agent) != nil || agent != "codex" {
+				if json.Unmarshal(raw, &agent) != nil {
+					return nil, errors.New("unknown agent")
+				}
+				if agent == "opencode" && oc != nil {
+					value, _, err := oc.Handle(ctx, cmd, emit)
+					return value, err
+				}
+				if agent != "codex" && agent != "antigravity" {
 					return nil, errors.New("unknown agent")
 				}
 				if raw, ok := p["workspace"]; ok {
@@ -83,6 +117,11 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 				}
 				delete(p, "agent")
 				cmd.Params, _ = json.Marshal(p)
+				if agent == "antigravity" {
+					return bridge.HandleEvents(ctx, cwd, cmd, func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error) {
+						return json.RawMessage(`{"data":[]}`), nil
+					}, emit)
+				}
 				return bridge.HandleEvents(ctx, cwd, cmd, codex, emit)
 			}
 		}
@@ -98,6 +137,9 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 				}
 				if agent == "antigravity" {
 					return agentChatPage(p, cwd, router)
+				}
+				if agent == "opencode" && oc != nil {
+					return agentChatPage(p, cwd, oc)
 				}
 				if agent != "codex" {
 					return nil, errors.New("unknown agent")
@@ -123,6 +165,11 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 		}
 		// Codex resets decisions on attach, so replay AGY decisions after that reset.
 		if cmd.Method != "client/attached" {
+			if oc != nil {
+				if value, handled, err := oc.Handle(ctx, cmd, emit); handled || err != nil {
+					return value, err
+				}
+			}
 			if value, handled, err := router.Handle(ctx, cmd, emit); handled || err != nil {
 				return value, err
 			}
@@ -146,6 +193,9 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 		switch cmd.Method {
 		case "client/attached":
 			_, _, err := router.Handle(ctx, cmd, emit)
+			if err == nil && oc != nil {
+				_, _, err = oc.Handle(ctx, cmd, emit)
+			}
 			return value, err
 		case "threads/list":
 			return appendAgentChats(value, cmd.Params, cwd, router)
