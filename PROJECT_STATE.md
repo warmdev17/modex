@@ -2,13 +2,15 @@
 
 ## Public documentation refresh
 
-Updated 2026-11-27T15:56:33+07:00 on `docs/professional-readme`, source
-`5802d34`. The repository front page is now a concise English product page with
+Updated 2026-11-27T16:09:44+07:00 on `docs/professional-readme`, source
+`5cec493`. The repository front page is now a concise English product page with
 an equivalent Vietnamese option. New bilingual architecture, agent connection,
 status and roadmap pages separate current preview capabilities from future
 Modex Cloud and Pro orchestration direction. The earlier OpenCode backend guide
 is explicitly labeled as an implementation snapshot rather than the current
-capability matrix.
+capability matrix. Both README languages also include a dated comparison of six
+similar projects, their self-reported agent compatibility and a neutral T3 Code
+telemetry note linking the community issue, current policy and external report.
 
 - A standard-library check resolved 86 relative links and anchors across all 12
   public pages, verified language switches and six bilingual page pairs, and
@@ -17,12 +19,19 @@ capability matrix.
   pattern scan was clean.
 - Independent documentation review found no remaining findings after correcting
   Android SSH onboarding, PATH/Go prerequisites, provider-readiness claims and
-  stale OpenCode links. The baseline `umask 022; go test ./...` passed before
-  the documentation-only changes.
+  stale OpenCode links. A follow-up factual review found no findings in the
+  comparison or T3 note. Official repository/docs content and the linked T3
+  issue were retrieved, the KuCoin report URL returned HTTP 200, 84 relative
+  links across the 12 public pages resolved, both comparison tables contain six
+  projects, and `git diff --check` passed. A later GitHub web retry returned a
+  transient HTTP 503 for T3's telemetry page. The baseline
+  `umask 022; go test ./...` passed before the documentation-only changes.
 - GitHub rendering, physical-device setup, macOS/WSL runtime and fresh provider
-  inference were not tested. The branch is local; no push, PR or merge has been
-  performed. Next: review the rendered branch on GitHub, then open the required
-  documentation PR when authorized.
+  inference were not tested. Competitor interoperability and actual telemetry
+  behavior were not tested; compatibility is based on current project docs.
+  The branch is local; no push, PR or merge has been performed. Next: review
+  the rendered branch on GitHub, then open the required documentation PR when
+  authorized.
 
 ## OpenCode backend
 
