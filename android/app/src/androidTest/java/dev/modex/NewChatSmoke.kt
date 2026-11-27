@@ -7,6 +7,8 @@ import android.os.SystemClock
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.compose.setContent
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.mutableStateOf
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun Instrumentation.antigravityPickerSmoke() {
@@ -14,13 +16,20 @@ internal fun Instrumentation.antigravityPickerSmoke() {
     try {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var chosen = ""
+        var answer = ""
+        val showQuestion = mutableStateOf(false)
+        val question = ChatEntry(id = "call_fixture", role = "Codex", text = "Choose a platform",
+            queuedQuestions = readQueuedQuestions("call_fixture", JSONArray("""[{"title":"Platform?","options":["Android","Linux"]}]""")))
         runOnMainSync {
             activity.setContent { ModexTheme { Surface {
                 ChatWorkspace(
-                    "fixture", true, false, "", emptyList(), emptyMap(), emptyList(),
+                    "fixture", true, false, if (showQuestion.value) "codex-fixture" else "", emptyList(), emptyMap(),
+                    if (showQuestion.value) listOf(question) else emptyList(),
                     false, false, false, "", "", "fixture-model", emptyList(), emptySet(),
-                    {}, {}, {}, { _, _, _ -> }, { _, _, _, _ -> false }, { _, _ -> }, {}, {},
+                    {}, {}, {}, { _, _, _ -> }, { _, _, _, _ -> false },
+                    { card, response -> answer = queuedQuestionReply(card, response).orEmpty() }, {}, {},
                     chatAgents = listOf(ChatAgent(CODEX_AGENT, "Codex", true), ChatAgent(ANTIGRAVITY_AGENT, "Antigravity", true)),
+                    backendCapabilities = BackendCapabilities.LegacyCodex.copy(agentDiscovery = true),
                     onCreateWithAgent = { agent, _, _, _, _, _ -> chosen = agent },
                 )
             } } }
@@ -44,8 +53,14 @@ internal fun Instrumentation.antigravityPickerSmoke() {
         click("New chat")
         click("Antigravity")
         click("Create chat")
-        runOnMainSync { check(chosen == ANTIGRAVITY_AGENT) }
-        result.putString("result", "PASS: New chat selects Antigravity")
+        runOnMainSync {
+            check(chosen == ANTIGRAVITY_AGENT)
+            showQuestion.value = true
+        }
+        click("Android")
+        click("Submit answer")
+        runOnMainSync { check(readQueuedReply(answer).single().answer == "Android") }
+        result.putString("result", "PASS: Antigravity picker and Codex queued question")
         finish(-1, result)
     } catch (failure: Throwable) {
         result.putString("result", "FAIL: ${failure.message}")

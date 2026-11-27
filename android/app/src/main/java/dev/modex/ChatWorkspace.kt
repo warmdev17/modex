@@ -247,6 +247,9 @@ internal fun ChatWorkspace(
     val showWorkStatus = !historyLoading && selected.isNotBlank()
     val completedWork = latestPrompt?.takeIf { showWorkStatus && !busy && it.status != "inProgress" }
     val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
+    val queuedQuestions = remember(messages, sessionAgent, backendCapabilities.backend) {
+        if (sessionAgent == CODEX_AGENT && backendCapabilities.backend == "codex") queuedQuestionCards(messages) else emptyList()
+    }
     LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
@@ -457,6 +460,10 @@ internal fun ChatWorkspace(
                 }
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
                     InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
+                }
+                items(queuedQuestions, key = { it.getString("decision_id") }) { question ->
+                    val canAnswer = connected && !historyLoading && !stopping && !steerSending && (!busy || activeTurnId.isNotBlank())
+                    InlineDecisionCard(question, question.getString("decision_id") in answeringDecisionIds, canAnswer) { onAnswer(question, it) }
                 }
                 if (backendCapabilities.planMode && !antigravity) pendingPlan(messages, busy, handledPlans)?.let { plan ->
                     item(key = "plan-review-${planKey(plan)}") { PlanReviewCard(connected && !historyLoading, planResponding) { onPlanAction(plan, it) } }

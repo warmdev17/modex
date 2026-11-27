@@ -26,6 +26,7 @@ internal fun InlineDecisionCard(decision: JSONObject, responding: Boolean, enabl
     val fileMode = decision.optString("method") == "item/fileChange/requestApproval"
     val questionMode = decision.optString("method") == "item/tool/requestUserInput"
     val questions = context.optJSONArray("questions") ?: JSONArray()
+    val queuedQuestion = decision.optString("decision_id").startsWith("queued:")
     val identity = decision.toString()
     var answers by rememberSaveable(identity) { mutableStateOf(hashMapOf<String, String>()) }
     var selections by rememberSaveable(identity) { mutableStateOf(hashMapOf<String, Int>()) }
@@ -44,8 +45,8 @@ internal fun InlineDecisionCard(decision: JSONObject, responding: Boolean, enabl
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 DecisionGlyph(questionMode)
                 Column(Modifier.weight(1f)) {
-                    Text(if (questionMode) "Agent needs your input" else if (fileMode) "Review file access" else "Permission required", style = MaterialTheme.typography.titleSmall)
-                    Text(if (enabled) "Agent is waiting" else "Reconnect to respond", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
+                    Text(if (queuedQuestion) "Queued question" else if (questionMode) "Agent needs your input" else if (fileMode) "Review file access" else "Permission required", style = MaterialTheme.typography.titleSmall)
+                    if (!queuedQuestion || !enabled) Text(if (enabled) "Agent is waiting" else "Reconnect to respond", color = Mocha.Subtext, style = MaterialTheme.typography.labelSmall)
                 }
                 if (responding) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             }

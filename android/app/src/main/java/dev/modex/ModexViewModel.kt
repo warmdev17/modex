@@ -104,6 +104,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     val planResponding: Boolean get() = planSending
     private var planSending by mutableStateOf(false)
     var answeringDecisionIds by mutableStateOf(setOf<String>()); private set
+    private val queuedAnswerRequests = mutableMapOf<Long, String>()
     val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
     val activeTurnId: String get() = sessions.activeTurnId
@@ -324,6 +325,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         leaveSession()
         journal = replacement
         pending.clear()
+        queuedAnswerRequests.clear()
         sentAttachmentPaths.clear(); steeringDrafts.clear()
         threadListLoading = false
         titles = emptyMap()
@@ -594,6 +596,22 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     fun answer(decision: JSONObject, result: JSONObject) {
         if (!connected) return
         val id = decision.getString("decision_id")
+        if (id.startsWith("queued:")) {
+            if (sessionAgent != CODEX_AGENT || backendCapabilities.backend != "codex" ||
+                selected.isBlank() || ownedThread != selected || historyLoading || switching() ||
+                id in answeringDecisionIds || stopping || steerSending || busy && activeTurnId.isBlank()
+            ) return
+            val current = queuedQuestionCards(messages).firstOrNull { it.optString("decision_id") == id } ?: return
+            val text = queuedQuestionReply(current, result) ?: return
+            val params = JSONObject().put("thread_id", selected).put("text", text)
+            val method = if (activeTurnId.isBlank()) "turn/start" else "turn/steer"
+            if (method == "turn/steer") params.put("turn_id", activeTurnId)
+            request(method, withWorkspace(params, selectedWorkspace), selected)?.let { requestId ->
+                queuedAnswerRequests[requestId] = id
+                answeringDecisionIds += id
+            }
+            return
+        }
         if (pending.values.any { it.first == "decision/respond" && it.second == id }) return
         answeringDecisionIds += id
         request("decision/respond", JSONObject().put("decision_id", id).put("result", result), id)
@@ -623,6 +641,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private fun apply(frame: JSONObject) {
         if (frame.has("id")) {
             val id = frame.getLong("id")
+            queuedAnswerRequests.remove(id)?.let { answeringDecisionIds -= it }
             val sentAttachments = sentAttachmentPaths.remove(id)
             val steeringDraft = steeringDrafts.remove(id)
             val operation = pending.remove(id) ?: return

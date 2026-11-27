@@ -583,16 +583,20 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						Items []struct {
 							toolActivity
 							nativeAgentActivity
-							ID       string          `json:"id"`
-							Command  string          `json:"command"`
-							Cwd      string          `json:"cwd"`
-							Status   string          `json:"status"`
-							Output   string          `json:"aggregatedOutput"`
-							ExitCode *int            `json:"exitCode"`
-							Type     string          `json:"type"`
-							Text     string          `json:"text"`
-							Summary  []string        `json:"summary"`
-							Content  json.RawMessage `json:"content"`
+							ID        string          `json:"id"`
+							Command   string          `json:"command"`
+							Cwd       string          `json:"cwd"`
+							Status    string          `json:"status"`
+							Output    string          `json:"aggregatedOutput"`
+							ExitCode  *int            `json:"exitCode"`
+							Type      string          `json:"type"`
+							Text      string          `json:"text"`
+							Summary   []string        `json:"summary"`
+							Content   json.RawMessage `json:"content"`
+							Questions []struct {
+								Title   string   `json:"title"`
+								Options []string `json:"options,omitempty"`
+							} `json:"questions"`
 						} `json:"items"`
 					} `json:"turns"`
 				} `json:"thread"`
@@ -696,8 +700,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 						text = item.Text
 						displayText = item.Text
 					}
-					if role != "" && text != "" {
+					if role != "" && (text != "" || role == "assistant" && len(item.Questions) > 0) {
 						message := map[string]any{"id": item.ID, "role": role, "text": text, "display_text": displayText, "attachments": attachments}
+						if role == "assistant" && len(item.Questions) > 0 {
+							message["questions"] = item.Questions
+						}
 						if role == "plan" {
 							state, stateErr := fetch("modex/plan/state", map[string]any{"threadId": id, "turnId": turn.ID, "itemId": item.ID})
 							if stateErr == nil {
