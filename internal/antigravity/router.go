@@ -36,11 +36,12 @@ type record struct {
 	Thinking    string `json:"thinking,omitempty"`
 }
 type message struct {
-	ID       string          `json:"id"`
-	Role     string          `json:"role"`
-	Text     string          `json:"text"`
-	Turn     string          `json:"turn_id,omitempty"`
-	Activity *invocationItem `json:"activity_item,omitempty"`
+	ID          string          `json:"id"`
+	Role        string          `json:"role"`
+	Text        string          `json:"text"`
+	Turn        string          `json:"turn_id,omitempty"`
+	Activity    *invocationItem `json:"activity_item,omitempty"`
+	Attachments []attachment    `json:"attachments,omitempty"`
 }
 type chat struct {
 	record
@@ -239,6 +240,16 @@ func (r *Router) update(workspace string, u acp.Update) {
 			role = "user"
 		case "agent_message_chunk":
 			role = "assistant"
+		}
+		if role == "user" && u.URI != "" {
+			a := replayAttachment(u.URI, u.MIME)
+			if a != nil {
+				if len(c.messages) == 0 || c.messages[len(c.messages)-1].Role != "user" {
+					c.messages = append(c.messages, message{ID: fmt.Sprintf("history-%d", len(c.messages)), Role: "user"})
+				}
+				c.messages[len(c.messages)-1].Attachments = append(c.messages[len(c.messages)-1].Attachments, *a)
+			}
+			return
 		}
 		if role != "" {
 			if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == role {
@@ -634,18 +645,28 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		}
 		return result, true, nil
 	case "turn/start":
-		for _, key := range []string{"attachments", "references", "model", "effort"} {
+		for _, key := range []string{"references", "model", "effort"} {
 			if _, ok := p[key]; ok {
 				return nil, true, errors.New("unsupported Antigravity turn option")
 			}
 		}
 		text := str("text")
-		if strings.TrimSpace(text) == "" || len(text) > 1024*1024 {
+		if len(text) > 1024*1024 {
 			return nil, true, errors.New("invalid text prompt")
 		}
 		client, err := r.load(ctx, c)
 		if err != nil {
 			return nil, true, err
+		}
+		blocks, attachments, err := prepareAttachments(p["attachments"], client.Info())
+		if err != nil {
+			return nil, true, err
+		}
+		if strings.TrimSpace(text) != "" {
+			blocks = append([]acp.PromptBlock{{Type: "text", Text: text}}, blocks...)
+		}
+		if len(blocks) == 0 {
+			return nil, true, errors.New("text or attachments are required")
 		}
 		turn, err := uid()
 		if err != nil {
@@ -666,7 +687,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			defer cancelPrompt()
 			timer := time.AfterFunc(20*time.Second, cancelPrompt)
 			defer timer.Stop()
-			stop, e := client.PromptWithSent(promptCtx, c.Native, turn, text, func() { timer.Stop(); close(sent) })
+			stop, e := client.PromptBlocksWithSent(promptCtx, c.Native, turn, blocks, func() { timer.Stop(); close(sent) })
 			if e != nil {
 				select {
 				case done <- e:
@@ -683,9 +704,13 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			r.finish(c, turn, status)
 		}()
 		announce := func() {
-			c.messages = append(c.messages, message{ID: "user-" + turn, Role: "user", Text: text, Turn: turn})
+			c.messages = append(c.messages, message{ID: "user-" + turn, Role: "user", Text: text, Turn: turn, Attachments: attachments})
 			emitEvent(emit, "turn/started", map[string]any{"threadId": id, "turn": map[string]any{"id": turn, "status": "inProgress"}})
-			emitEvent(emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": map[string]any{"id": "user-" + turn, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}})
+			item := map[string]any{"id": "user-" + turn, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}
+			if len(attachments) > 0 {
+				item["attachments"] = attachments
+			}
+			emitEvent(emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": item})
 		}
 		select {
 		case <-sent:

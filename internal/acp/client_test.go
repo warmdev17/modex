@@ -49,7 +49,7 @@ func TestACPChild(t *testing.T) {
 		}
 		switch request.Method {
 		case "initialize":
-			reply(request.ID, json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.17"},"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"list":{}}}}`))
+			reply(request.ID, json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.17"},"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"embeddedContext":true},"sessionCapabilities":{"list":{}}}}`))
 		case "session/list":
 			reply(request.ID, map[string]any{"sessions": []map[string]string{
 				{"sessionId": "saved", "cwd": cwd, "title": "Saved"},
@@ -215,7 +215,7 @@ func TestAntigravitySessionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if client.Info().Version != "1.5.17" || !client.Info().ListSessions || !client.Info().LoadSession {
+	if client.Info().Version != "1.5.17" || !client.Info().ListSessions || !client.Info().LoadSession || !client.Info().Image || !client.Info().EmbeddedContext {
 		t.Fatalf("handshake: %+v", client.Info())
 	}
 	page, err := client.List(ctx, "")

@@ -25,6 +25,8 @@ type Info struct {
 	ProtocolVersion int    `json:"protocolVersion"`
 	ListSessions    bool   `json:"listSessions"`
 	LoadSession     bool   `json:"loadSession"`
+	Image           bool   `json:"image"`
+	EmbeddedContext bool   `json:"embeddedContext"`
 }
 
 type Session struct {
@@ -68,6 +70,8 @@ type Update struct {
 	Status     string
 	Subagent   bool
 	Role       string
+	URI        string
+	MIME       string
 }
 
 type PermissionRequest struct {
@@ -155,7 +159,11 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 		} `json:"agentInfo"`
 		Capabilities struct {
 			LoadSession bool `json:"loadSession"`
-			Sessions    struct {
+			Prompt      struct {
+				Image           bool `json:"image"`
+				EmbeddedContext bool `json:"embeddedContext"`
+			} `json:"promptCapabilities"`
+			Sessions struct {
 				List *struct{} `json:"list"`
 			} `json:"sessionCapabilities"`
 		} `json:"agentCapabilities"`
@@ -172,6 +180,7 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 		Name: initialized.Agent.Name, Version: initialized.Agent.Version, ProtocolVersion: initialized.Version,
 		ListSessions: initialized.Capabilities.Sessions.List != nil,
 		LoadSession:  initialized.Capabilities.LoadSession,
+		Image:        initialized.Capabilities.Prompt.Image, EmbeddedContext: initialized.Capabilities.Prompt.EmbeddedContext,
 	}
 	return c, nil
 }
@@ -368,12 +377,48 @@ func (c *Client) Prompt(ctx context.Context, sessionID, turnID, text string) (st
 	return c.PromptWithSent(ctx, sessionID, turnID, text, nil)
 }
 
+type PromptBlock struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	Data     string          `json:"data,omitempty"`
+	MimeType string          `json:"mimeType,omitempty"`
+	URI      string          `json:"uri,omitempty"`
+	Resource *PromptResource `json:"resource,omitempty"`
+}
+type PromptResource struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType"`
+	Text     string `json:"text"`
+}
+
 func (c *Client) PromptWithSent(ctx context.Context, sessionID, turnID, text string, sent func()) (string, error) {
+	return c.PromptBlocksWithSent(ctx, sessionID, turnID, []PromptBlock{{Type: "text", Text: text}}, sent)
+}
+
+func (c *Client) PromptBlocksWithSent(ctx context.Context, sessionID, turnID string, blocks []PromptBlock, sent func()) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if !validID(turnID) || strings.TrimSpace(text) == "" || len(text) > 1024*1024 {
+	if !validID(turnID) || len(blocks) == 0 {
 		return "", errors.New("invalid Antigravity turn or text prompt")
+	}
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if strings.TrimSpace(b.Text) == "" || len(b.Text) > 1024*1024 {
+				return "", errors.New("invalid Antigravity turn or text prompt")
+			}
+		case "image":
+			if !c.info.Image {
+				return "", errors.New("Antigravity does not support image attachments")
+			}
+		case "resource":
+			if !c.info.EmbeddedContext {
+				return "", errors.New("Antigravity does not support text attachments")
+			}
+		default:
+			return "", errors.New("invalid Antigravity prompt block")
+		}
 	}
 	c.mu.Lock()
 	session := c.sessions[sessionID]
@@ -393,7 +438,7 @@ func (c *Client) PromptWithSent(ctx context.Context, sessionID, turnID, text str
 		close(turn.done)
 		c.mu.Unlock()
 	}()
-	params := map[string]any{"sessionId": sessionID, "prompt": []map[string]string{{"type": "text", "text": text}}}
+	params := map[string]any{"sessionId": sessionID, "prompt": blocks}
 	raw, err := c.request(ctx, "session/prompt", params, func() {
 		close(turn.sent)
 		if sent != nil {
@@ -467,12 +512,15 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	var event struct {
 		ID     string `json:"sessionId"`
 		Update struct {
-			Kind          string                      `json:"sessionUpdate"`
-			Content       struct{ Type, Text string } `json:"content"`
-			ConfigOptions []nativeOption              `json:"configOptions"`
-			Name          string                      `json:"name"`
-			ToolCallID    string                      `json:"toolCallId"`
-			Status        string                      `json:"status"`
+			Kind    string `json:"sessionUpdate"`
+			Content struct {
+				Type, Text, URI, MimeType string
+				Resource                  struct{ URI, MimeType string }
+			} `json:"content"`
+			ConfigOptions []nativeOption `json:"configOptions"`
+			Name          string         `json:"name"`
+			ToolCallID    string         `json:"toolCallId"`
+			Status        string         `json:"status"`
 			RawInput      struct {
 				Role string `json:"Role"`
 			} `json:"rawInput"`
@@ -494,10 +542,27 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	update := Update{SessionID: event.ID, Kind: event.Update.Kind}
 	switch event.Update.Kind {
 	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
-		if event.Update.Content.Type != "text" {
+		switch event.Update.Content.Type {
+		case "text":
+			update.Text = event.Update.Content.Text
+		case "image", "resource_link":
+			if event.Update.Kind != "user_message_chunk" {
+				return
+			}
+			update.URI = event.Update.Content.URI
+			update.MIME = event.Update.Content.MimeType
+		case "resource":
+			if event.Update.Kind != "user_message_chunk" {
+				return
+			}
+			update.URI = event.Update.Content.Resource.URI
+			update.MIME = event.Update.Content.Resource.MimeType
+		default:
 			return
 		}
-		update.Text = event.Update.Content.Text
+		if event.Update.Content.Type != "text" && update.URI == "" {
+			return
+		}
 	case "tool_call", "tool_call_update":
 		if !safeScalar(event.Update.ToolCallID, 256) {
 			return

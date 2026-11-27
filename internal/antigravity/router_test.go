@@ -83,7 +83,7 @@ func TestRouterACPFixture(t *testing.T) {
 		reply := func(v any) { _ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": v}) }
 		switch req.Method {
 		case "initialize":
-			reply(json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1"},"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"list":{}}}}`))
+			reply(json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1"},"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"embeddedContext":true},"sessionCapabilities":{"list":{}}}}`))
 		case "":
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]string{"stopReason": "end_turn"}})
 		case "session/cancel":
@@ -93,6 +93,7 @@ func TestRouterACPFixture(t *testing.T) {
 		case "session/list":
 			reply(map[string]any{"sessions": []any{map[string]string{"sessionId": "native", "cwd": cwd}}})
 		case "session/load":
+			_ = out.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"native","update":{"sessionUpdate":"user_message_chunk","content":{"type":"resource_link","uri":"file:///tmp/note%20%231.txt","mimeType":"text/plain"}}}}`))
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "native", "update": map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]string{"type": "text", "text": "restored"}}}})
 			reply(map[string]any{"configOptions": options()})
 		case "session/set_config_option":
@@ -106,6 +107,7 @@ func TestRouterACPFixture(t *testing.T) {
 			}
 			reply(map[string]any{"configOptions": options()})
 		case "session/prompt":
+			_ = os.WriteFile(filepath.Join(cwd, "captured-prompt.json"), s.Bytes(), 0600)
 			if req.Params.Prompt[0].Text == "wait" {
 				promptID = req.ID
 				continue
@@ -335,7 +337,7 @@ func TestSessionStreamAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	history := result.(map[string]any)["messages"].([]message)
-	if len(history) != 1 || history[0].Text != "restored" {
+	if len(history) != 1 || history[0].Text != "restored" || len(history[0].Attachments) != 1 || history[0].Attachments[0].Path != "/tmp/note #1.txt" {
 		t.Fatalf("recovered history: %#v", history)
 	}
 }
@@ -472,5 +474,98 @@ func TestReadinessRejectsSuccessfulExitWithErrorStatus(t *testing.T) {
 	defer r.Close()
 	if ready := r.readiness()["ready"]; ready != false {
 		t.Fatalf("error probe marked ready: %v", ready)
+	}
+}
+
+func TestAttachmentTurnSendsNativeBlocksAndConfirmsMetadata(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	path := filepath.Join(root, "note #1.txt")
+	if err := os.WriteFile(path, []byte("hello attached"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := New(context.Background(), bin, root, state)
+	defer r.Close()
+	start, _, err := r.Handle(context.Background(), bridge.Command{Method: "threads/start", Params: json.RawMessage(`{"agent":"antigravity"}`)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := start.(map[string]any)["thread"].(map[string]any)["id"].(string)
+	raw, _ := json.Marshal(map[string]any{"thread_id": id, "text": "look", "attachments": []map[string]string{{"path": path, "kind": "file"}}})
+	events := make(chan json.RawMessage, 1)
+	done := make(chan struct{})
+	_, _, err = r.Handle(context.Background(), bridge.Command{Method: "turn/start", Params: raw}, func(method string, b json.RawMessage) {
+		if method == "item/completed" {
+			events <- b
+		} else if method == "turn/completed" {
+			close(done)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := <-events
+	<-done
+	if !strings.Contains(string(event), `"attachments"`) || strings.Contains(string(event), "hello attached") {
+		t.Fatalf("confirmation: %s", event)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "captured-prompt.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"type":"resource"`) || !strings.Contains(string(b), `"text":"hello attached"`) || !strings.Contains(string(b), `note%20%231.txt`) {
+		t.Fatalf("native prompt: %s", b)
+	}
+}
+
+func TestAttachmentOnlyAndRefusalBeforeDispatch(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	path := filepath.Join(root, "file.txt")
+	if err := os.WriteFile(path, []byte("private note"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := New(context.Background(), bin, root, state)
+	defer r.Close()
+	start, _, err := r.Handle(context.Background(), bridge.Command{Method: "threads/start", Params: json.RawMessage(`{"agent":"antigravity"}`)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := start.(map[string]any)["thread"].(map[string]any)["id"].(string)
+	call := func(p string, emit func(string, json.RawMessage)) error {
+		raw, _ := json.Marshal(map[string]any{"thread_id": id, "text": "", "attachments": []map[string]string{{"path": p, "kind": "file"}}})
+		_, _, err := r.Handle(context.Background(), bridge.Command{Method: "turn/start", Params: raw}, emit)
+		return err
+	}
+	if err := call(filepath.Join(root, "missing-secret"), nil); err == nil || strings.Contains(err.Error(), "missing-secret") {
+		t.Fatalf("invalid file: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "captured-prompt.json")); !os.IsNotExist(err) {
+		t.Fatal("invalid attachment dispatched")
+	}
+	done := make(chan struct{})
+	if err := call(path, func(method string, raw json.RawMessage) {
+		if method == "turn/completed" {
+			close(done)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("missing completion")
+	}
+	b, err := os.ReadFile(filepath.Join(root, "captured-prompt.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var request struct {
+		Params struct {
+			Prompt []struct {
+				Type string `json:"type"`
+			} `json:"prompt"`
+		} `json:"params"`
+	}
+	if json.Unmarshal(b, &request) != nil || len(request.Params.Prompt) != 1 || request.Params.Prompt[0].Type != "resource" {
+		t.Fatalf("attachment only prompt: %s", b)
 	}
 }
