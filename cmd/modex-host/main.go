@@ -25,6 +25,7 @@ type backendSpec struct {
 	kind     string // "codex" | "opencode"
 	codex    string
 	opencode string
+	agy      string
 	home     string // codex-home; codex only
 }
 
@@ -81,7 +82,7 @@ func run() error {
 	backend := flag.String("backend", "codex", "Agent backend: codex or opencode")
 	opencodeBinary := flag.String("opencode", "opencode", "OpenCode executable (only with --backend opencode)")
 	probeAntigravity := flag.Bool("probe-antigravity", false, "Probe Antigravity ACP compatibility without running a turn")
-	agy := flag.String("agy", "agy", "Antigravity CLI executable for --probe-antigravity")
+	agy := flag.String("agy", "agy", "Antigravity CLI executable")
 	home := flag.String("codex-home", "", "Override CODEX_HOME; defaults to inherited environment")
 	profile := flag.String("profile", "", "Named profile (not yet supported; fails explicitly)")
 	cli := flag.Bool("cli", false, "Open a native Codex TUI on the shared supervisor backend (Linux/macOS)")
@@ -209,7 +210,7 @@ func run() error {
 		}
 		return err
 	}
-	spec := backendSpec{kind: *backend, codex: *binary, opencode: *opencodeBinary, home: *home}
+	spec := backendSpec{kind: *backend, codex: *binary, opencode: *opencodeBinary, agy: *agy, home: *home}
 	if *background {
 		return startBackground(cwd, spec, *stateDir)
 	}

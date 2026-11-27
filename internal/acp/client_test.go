@@ -20,6 +20,7 @@ func TestACPChild(t *testing.T) {
 	scanner := bufio.NewScanner(os.Stdin)
 	send := json.NewEncoder(os.Stdout)
 	var pending json.RawMessage
+	var permissionMode string
 	for scanner.Scan() {
 		var request struct {
 			Version string          `json:"jsonrpc"`
@@ -30,7 +31,7 @@ func TestACPChild(t *testing.T) {
 				Prompt    []struct{ Text string } `json:"prompt"`
 			} `json:"params"`
 			Result struct {
-				Outcome struct{ Outcome string } `json:"outcome"`
+				Outcome struct{ Outcome, OptionID string } `json:"outcome"`
 			} `json:"result"`
 		}
 		if json.Unmarshal(scanner.Bytes(), &request) != nil || request.Version != "2.0" {
@@ -68,13 +69,19 @@ func TestACPChild(t *testing.T) {
 			switch request.Params.Prompt[0].Text {
 			case "auth":
 				_ = send.Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "error": map[string]any{"code": -32000, "message": "private extra provider detail"}})
-			case "cancel":
+			case "cancel", "cancel-late":
+				permissionMode = request.Params.Prompt[0].Text
 				pending = request.ID
 				update("outside", "agent_message_chunk", "must not escape")
 				update("fresh", "agent_message_chunk", "partial")
-			case "permission":
+			case "permission", "permission-select", "permission-deny", "permission-cancel", "permission-ambiguous":
 				pending = request.ID
-				_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"sessionId":"fresh","options":[{"optionId":"allow","kind":"allow_once"}]}}`))
+				permissionMode = request.Params.Prompt[0].Text
+				if permissionMode == "permission-ambiguous" {
+					_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"sessionId":"fresh","options":[{"optionId":"allow","kind":"allow_once"},{"optionId":"other","kind":"allow_once"},{"optionId":"same","kind":"reject_once"},{"optionId":"same","kind":"allow_always"}]}}`))
+				} else {
+					_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"sessionId":"fresh","toolCall":{"title":"Run command"},"options":[{"optionId":"allow","kind":"allow_once"},{"optionId":"deny","kind":"reject_once"},{"optionId":"always","kind":"allow_always"}]}}`))
+				}
 			case "uncertain":
 				_, _ = os.Stdout.WriteString(strings.Repeat("x", 16*1024*1024+1) + "\n")
 			default:
@@ -85,13 +92,20 @@ func TestACPChild(t *testing.T) {
 			if request.Params.SessionID != "fresh" || pending == nil {
 				os.Exit(4)
 			}
-			reply(pending, map[string]string{"stopReason": "cancelled"})
-			pending = nil
+			if permissionMode == "cancel-late" {
+				_ = send.Encode(json.RawMessage(`{"jsonrpc":"2.0","id":"permission-1","method":"session/request_permission","params":{"sessionId":"fresh","options":[{"optionId":"allow","kind":"allow_once"}]}}`))
+				reply(pending, map[string]string{"stopReason": "cancelled"})
+			} else {
+				reply(pending, map[string]string{"stopReason": "cancelled"})
+				pending = nil
+			}
 		case "":
-			if request.Result.Outcome.Outcome != "cancelled" || string(request.ID) != `"permission-1"` || pending == nil {
+			if ((permissionMode == "permission" || permissionMode == "cancel-late") && request.Result.Outcome.Outcome != "cancelled") || (permissionMode == "permission-select" && (request.Result.Outcome.Outcome != "selected" || request.Result.Outcome.OptionID != "allow")) || (permissionMode == "permission-deny" && (request.Result.Outcome.Outcome != "selected" || request.Result.Outcome.OptionID != "deny")) || ((permissionMode == "permission-cancel" || permissionMode == "permission-ambiguous") && request.Result.Outcome.Outcome != "cancelled") || string(request.ID) != `"permission-1"` || pending == nil {
 				os.Exit(5)
 			}
-			reply(pending, map[string]string{"stopReason": "end_turn"})
+			if permissionMode != "cancel-late" {
+				reply(pending, map[string]string{"stopReason": "end_turn"})
+			}
 			pending = nil
 		default:
 			os.Exit(6)
@@ -248,5 +262,214 @@ func TestAntigravitySessionLifecycle(t *testing.T) {
 	}
 	if _, err := client.Prompt(ctx, id, "five", "ping"); err == nil {
 		t.Fatal("a new prompt used the ACP process with an uncertain active turn")
+	}
+}
+
+func TestPermissionReplyIsOneShotAndUsesOfferedOption(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	requests := make(chan PermissionRequest, 1)
+	env := append(os.Environ(), "MODEX_ACP_FIXTURE=1")
+	client, err := startWithPermissions(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), env, nil, func(p PermissionRequest) bool { requests <- p; return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	id, err := client.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	sent := make(chan struct{}, 1)
+	go func() {
+		_, err := client.PromptWithSent(ctx, id, "turn", "permission-select", func() { sent <- struct{}{} })
+		finished <- err
+	}()
+	select {
+	case <-sent:
+	case <-ctx.Done():
+		t.Fatal("prompt not sent")
+	}
+	var p PermissionRequest
+	select {
+	case p = <-requests:
+	case <-ctx.Done():
+		t.Fatal("permission missing")
+	}
+	if p.ID == "" || p.SessionID != id || p.TurnID != "turn" || p.Title != "Run command" || p.AllowOption != "allow" || p.DenyOption != "deny" {
+		t.Fatalf("permission: %+v", p)
+	}
+	if err := client.ReplyPermission(ctx, p.ID, "always"); err == nil {
+		t.Fatal("accepted unsafe option")
+	}
+	if err := client.ReplyPermission(ctx, p.ID, "allow"); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.ReplyPermission(ctx, p.ID, "allow"); err == nil {
+		t.Fatal("accepted duplicate response")
+	}
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPermissionDenyCancelAndExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		prompt, option string
+		cancelTurn     bool
+	}{{"permission-deny", "deny", false}, {"permission-cancel", "", false}, {"permission-select", "allow", true}} {
+		t.Run(tc.prompt+tc.option, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			requests := make(chan PermissionRequest, 1)
+			env := append(os.Environ(), "MODEX_ACP_FIXTURE=1")
+			client, err := startWithPermissions(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), env, nil, func(p PermissionRequest) bool { requests <- p; return true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			id, err := client.NewSession(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { _, err := client.Prompt(ctx, id, "turn", tc.prompt); done <- err }()
+			var p PermissionRequest
+			select {
+			case p = <-requests:
+			case <-ctx.Done():
+				t.Fatal("permission missing")
+			}
+			if tc.cancelTurn {
+				if err := client.Cancel(ctx, id, "turn"); err != nil {
+					t.Fatal(err)
+				}
+				if err := client.ReplyPermission(ctx, p.ID, tc.option); err == nil {
+					t.Fatal("accepted expired decision")
+				}
+			} else if err := client.ReplyPermission(ctx, p.ID, tc.option); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if err := client.ReplyPermission(ctx, p.ID, tc.option); err == nil {
+				t.Fatal("accepted stale decision")
+			}
+		})
+	}
+}
+
+func TestPermissionAmbiguousOptionsAreUnavailable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	requests := make(chan PermissionRequest, 1)
+	env := append(os.Environ(), "MODEX_ACP_FIXTURE=1")
+	client, err := startWithPermissions(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), env, nil, func(p PermissionRequest) bool { requests <- p; return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	id, err := client.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := client.Prompt(ctx, id, "turn", "permission-ambiguous"); done <- err }()
+	var p PermissionRequest
+	select {
+	case p = <-requests:
+	case <-ctx.Done():
+		t.Fatal("permission missing")
+	}
+	if p.AllowOption != "" || p.DenyOption != "" {
+		t.Fatalf("ambiguous options exposed: %+v", p)
+	}
+	if err := client.ReplyPermission(ctx, p.ID, "allow"); err == nil {
+		t.Fatal("ambiguous option accepted")
+	}
+	if err := client.ReplyPermission(ctx, p.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPermissionCallbackDoesNotHoldClientLock(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	requests := make(chan PermissionRequest, 1)
+	release := make(chan struct{})
+	env := append(os.Environ(), "MODEX_ACP_FIXTURE=1")
+	client, err := startWithPermissions(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), env, nil, func(p PermissionRequest) bool { requests <- p; <-release; return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	id, err := client.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := client.Prompt(ctx, id, "turn", "permission-select"); done <- err }()
+	var p PermissionRequest
+	select {
+	case p = <-requests:
+	case <-ctx.Done():
+		t.Fatal("permission missing")
+	}
+	cancelled := make(chan error, 1)
+	go func() { cancelled <- client.Cancel(ctx, id, "turn") }()
+	select {
+	case err := <-cancelled:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("cancel blocked by permission callback")
+	}
+	if err := client.ReplyPermission(ctx, p.ID, p.AllowOption); err == nil {
+		t.Fatal("cancelled permission accepted")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPermissionAfterStopIsCancelled(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	requests := make(chan PermissionRequest, 1)
+	updates := make(chan Update, 2)
+	env := append(os.Environ(), "MODEX_ACP_FIXTURE=1")
+	client, err := startWithPermissions(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), env, func(u Update) { updates <- u }, func(p PermissionRequest) bool { requests <- p; return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	id, err := client.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := client.Prompt(ctx, id, "turn", "cancel-late"); done <- err }()
+	select {
+	case <-updates:
+	case <-ctx.Done():
+		t.Fatal("update missing")
+	}
+	if err := client.Cancel(ctx, id, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case p := <-requests:
+		t.Fatalf("permission after stop exposed: %+v", p)
+	default:
 	}
 }

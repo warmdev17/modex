@@ -40,6 +40,9 @@ func serveArgs(cwd string, b backendSpec, nativeSocket string) []string {
 	if b.home != "" {
 		args = append(args, "--codex-home", b.home)
 	}
+	if b.agy != "" && b.agy != "agy" {
+		args = append(args, "--agy", b.agy)
+	}
 	return args
 }
 
@@ -52,6 +55,9 @@ func superviseArgs(cwd string, b backendSpec, dir string) []string {
 	args := []string{"--supervise", "--workspace", cwd, "--codex", b.codex, "--state-dir", dir}
 	if b.home != "" {
 		args = append(args, "--codex-home", b.home)
+	}
+	if b.agy != "" && b.agy != "agy" {
+		args = append(args, "--agy", b.agy)
 	}
 	return args
 }
@@ -93,7 +99,10 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 		return err
 	}
 	child := serveChildCommand(self, cwd, b, nativeSocket)
-	child.Env = append(os.Environ(), "MODEX_PLAN_STATE_DIR="+filepath.Join(dir, "plan-receipts"))
+	child.Env = append(os.Environ(),
+		"MODEX_PLAN_STATE_DIR="+filepath.Join(dir, "plan-receipts"),
+		"MODEX_AGENT_STATE_DIR="+filepath.Join(dir, "agent-chats"),
+	)
 	child.Dir = cwd
 	child.Stderr = io.Discard
 	input, err := child.StdinPipe()

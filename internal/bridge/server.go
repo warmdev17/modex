@@ -16,6 +16,7 @@ import (
 
 type Caller func(context.Context, string, any) (json.RawMessage, error)
 type EventCaller func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error)
+type CommandHandler func(context.Context, Command, func(string, json.RawMessage)) (any, error)
 
 type Thread struct {
 	ID        string        `json:"id"`
@@ -782,6 +783,12 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, cwd string, call Ca
 }
 
 func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, call EventCaller) error {
+	return ServeCommands(ctx, in, out, func(ctx context.Context, cmd Command, emit func(string, json.RawMessage)) (any, error) {
+		return HandleEvents(ctx, cwd, cmd, call, emit)
+	})
+}
+
+func ServeCommands(ctx context.Context, in io.Reader, out io.Writer, handler CommandHandler) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 4096), 4*1024*1024)
 	var outputMu sync.Mutex
@@ -809,7 +816,7 @@ func ServeEvents(ctx context.Context, in io.Reader, out io.Writer, cwd string, c
 		write(response)
 	}
 	handle := func(cmd Command) {
-		result, err := HandleEvents(ctx, cwd, cmd, call, emit)
+		result, err := handler(ctx, cmd, emit)
 		respond(cmd, result, err)
 	}
 	// Stop and decision replies must reach Codex even while an ordinary RPC is pending.
