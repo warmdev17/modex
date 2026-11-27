@@ -17,6 +17,7 @@ internal fun Instrumentation.antigravityAttachmentSmoke() {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         val file = Attachment("/fixture/note.txt", "note.txt", "file", 4)
         val files = mutableStateOf(listOf(file))
+        val busy = mutableStateOf(false)
         var submitted: List<Any>? = null
         val host = BackendCapabilities.fromReady(org.json.JSONObject("""{
             "backend":"codex","capabilities":["agent_discovery","antigravity_session_options","antigravity_attachments","antigravity_steer"]
@@ -25,7 +26,8 @@ internal fun Instrumentation.antigravityAttachmentSmoke() {
         runOnMainSync { activity.setContent {
             ModexTheme { Surface { ChatWorkspace(
                 host = "fixture", connected = true, connecting = false, selected = "agy:fixture",
-                threads = listOf("agy:fixture"), titles = emptyMap(), messages = emptyList(), busy = false,
+                threads = listOf("agy:fixture"), titles = emptyMap(), messages = emptyList(), busy = busy.value,
+                activeTurnId = if (busy.value) "fixture-turn" else "",
                 historyLoading = false, hasMore = false, error = "", sessionSettings = "", sessionModel = "",
                 decisions = emptyList(), answeringDecisionIds = emptySet(), onSelect = {}, onRefresh = {}, onMore = {},
                 onCreate = { _, _, _ -> }, onSend = { text, model, effort, references ->
@@ -99,7 +101,27 @@ internal fun Instrumentation.antigravityAttachmentSmoke() {
         while ((node("note.txt") != null || node(sizeWarning) != null) && System.currentTimeMillis() < removedDeadline) Thread.sleep(100)
         check(node("note.txt") == null) { "Removed file chip is still visible" }
         check(node(sizeWarning) == null) { "Removing the oversized file left a stale warning" }
-        output.putString("result", "PASS: Antigravity file-only send, legacy gate, active attachment block, and exact-turn draft acknowledgement")
+        runOnMainSync {
+            files.value = listOf(file)
+            busy.value = true
+        }
+        val followUp = waitForNode("Send follow-up") ?: error("Follow-up control missing")
+        check(node("note.txt") != null) { "Active turn hid the selected attachment" }
+        check(node("Remove selected files to send this follow-up, or wait until Antigravity is idle. Your files are still here.") == null) {
+            "A normal active turn showed a warning next to a valid attachment"
+        }
+        val followUpBounds = android.graphics.Rect().also(followUp::getBoundsInScreen)
+        val followUpTap = uiAutomation.executeShellCommand("input tap ${followUpBounds.centerX()} ${followUpBounds.centerY()}")
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(followUpTap).use { it.readBytes() }
+        waitForIdleSync()
+        check(submitted == null) { "Active turn sent a follow-up with attachments" }
+        runOnMainSync { busy.value = false }
+        send = waitForNode("Send message")
+        while (send != null && !send.isClickable) send = send.parent
+        check(send?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) { "Send did not recover after the turn ended" }
+        waitForIdleSync()
+        check(submitted == listOf("", "", "", emptyList<PromptReference>()))
+        output.putString("result", "PASS: Antigravity attachment limits, quiet active-turn block, idle send, and draft acknowledgements")
         finish(-1, output)
     } catch (failure: Throwable) {
         output.putString("result", "FAIL: Antigravity attachment composer: ${failure.message}")
