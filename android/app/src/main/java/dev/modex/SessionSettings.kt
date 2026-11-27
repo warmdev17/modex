@@ -3,23 +3,72 @@ package dev.modex
 import org.json.JSONObject
 
 internal const val CODEX_AGENT = "codex"
+internal const val OPENCODE_AGENT = "opencode"
 internal const val ANTIGRAVITY_AGENT = "antigravity"
+internal const val ALL_AGENTS = "all"
+internal val CHAT_AGENT_IDS = listOf(CODEX_AGENT, OPENCODE_AGENT, ANTIGRAVITY_AGENT)
 
-internal data class ChatAgent(val id: String, val label: String, val ready: Boolean, val reason: String = "")
+internal data class ChatAgent(
+    val id: String,
+    val label: String,
+    val ready: Boolean,
+    val reason: String = "",
+    val capabilities: Set<String>? = null,
+)
 
 internal fun readChatAgents(result: JSONObject): List<ChatAgent> {
     val data = result.optJSONArray("data") ?: return emptyList()
     return (0 until data.length()).mapNotNull { index ->
         val item = data.optJSONObject(index) ?: return@mapNotNull null
         val id = item.optString("id")
-        if (id !in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT)) return@mapNotNull null
-        ChatAgent(id, item.optString("label").ifBlank { id }, item.optBoolean("ready"), item.optString("reason"))
+        if (id !in CHAT_AGENT_IDS) return@mapNotNull null
+        val raw = item.optJSONArray("capabilities")
+        val capabilities = raw?.takeIf { array -> (0 until array.length()).all { array.opt(it) is String } }
+            ?.let { array -> (0 until array.length()).map(array::getString).toSet() }
+        ChatAgent(id, item.optString("label").ifBlank { id }, item.optBoolean("ready"), item.optString("reason"), capabilities)
     }.distinctBy { it.id }
 }
 
 internal fun threadAgent(thread: JSONObject): String =
-    thread.optString("agent").takeIf { it in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT) }
-        ?: if (thread.optString("id").startsWith("agy:")) ANTIGRAVITY_AGENT else CODEX_AGENT
+    thread.optString("agent").takeIf { it in CHAT_AGENT_IDS }
+        ?: when {
+            thread.optString("id").startsWith("oc:") -> OPENCODE_AGENT
+            thread.optString("id").startsWith("agy:") -> ANTIGRAVITY_AGENT
+            else -> CODEX_AGENT
+        }
+
+internal fun connectionThreadAgent(capabilities: BackendCapabilities, thread: JSONObject): String =
+    thread.optString("agent").takeIf { it in CHAT_AGENT_IDS }
+        ?: if (capabilities.backend == OPENCODE_AGENT && !capabilities.runtimeRouting) OPENCODE_AGENT else threadAgent(thread)
+
+internal fun defaultChatAgent(capabilities: BackendCapabilities): String =
+    if (capabilities.backend == OPENCODE_AGENT) OPENCODE_AGENT else CODEX_AGENT
+
+internal fun safeChatAgent(preferred: String, fallback: String, agents: List<ChatAgent>): String =
+    agents.firstOrNull { it.id == preferred }?.id
+        ?: agents.firstOrNull { it.id == fallback && it.ready }?.id
+        ?: fallback
+
+internal fun checkingChatAgents(agents: List<ChatAgent>, default: String): List<ChatAgent> =
+    agents.map { if (it.id == default) it else it.copy(ready = false, reason = "Checking availability for this workspace…") }
+
+internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAgent>, agent: String): BackendCapabilities {
+    if (!host.runtimeRouting || agent == CODEX_AGENT) return host
+    val keys = agents.firstOrNull { it.id == agent }?.capabilities.orEmpty()
+    return BackendCapabilities(
+        backend = agent,
+        sessionStatus = "session_status" in keys,
+        planMode = "plan_mode" in keys,
+        permissionProfiles = "permission_profiles" in keys,
+        sessionLifecycle = "session_lifecycle" in keys,
+        projects = host.projects,
+        projectCreation = host.projectCreation,
+        references = "references" in keys,
+        takeover = "takeover" in keys,
+        agentDiscovery = host.agentDiscovery,
+        runtimeRouting = true,
+    )
+}
 
 internal data class SessionPermissionProfile(val id: String, val description: String, val allowed: Boolean) {
     val label get() = when (id) {
@@ -37,23 +86,31 @@ internal val permissionModes = linkedMapOf(
     "full-access" to "Full access"
 )
 
-internal fun newThreadParams(model: String, mode: String, workspace: String = "", projectId: String = "", standalone: Boolean = false, agent: String = CODEX_AGENT): JSONObject {
+internal fun newThreadParams(
+    model: String,
+    mode: String,
+    workspace: String = "",
+    projectId: String = "",
+    standalone: Boolean = false,
+    agent: String = CODEX_AGENT,
+    explicitAgent: Boolean = false,
+): JSONObject {
     require(mode in permissionModes)
-    require(agent in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT))
+    require(agent in CHAT_AGENT_IDS)
     require(!standalone || (workspace.isBlank() && projectId.isBlank()))
     return JSONObject().apply {
-        if (agent == ANTIGRAVITY_AGENT) put("agent", agent)
+        if (explicitAgent || agent == ANTIGRAVITY_AGENT) put("agent", agent)
         if (standalone) put("standalone", true)
         if (workspace.isNotBlank()) put("workspace", workspace)
         if (projectId.isNotBlank()) put("project_id", projectId)
-        if (agent == CODEX_AGENT && model.isNotBlank()) put("model", model)
+        if (agent != ANTIGRAVITY_AGENT && model.isNotBlank()) put("model", model)
         if (agent == CODEX_AGENT && mode != "host-default") put("permission_mode", mode)
     }
 }
 
 internal fun turnStartParams(thread: String, text: String, model: String, effort: String = "", attachments: List<Attachment> = emptyList(), references: List<PromptReference> = emptyList(), agent: String = CODEX_AGENT): JSONObject =
     JSONObject().put("thread_id", thread).put("text", text).apply {
-        require(agent in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT))
+        require(agent in CHAT_AGENT_IDS)
         if (agent == ANTIGRAVITY_AGENT) return@apply
         if (references.isNotEmpty()) put("references", org.json.JSONArray().apply { references.forEach { put(it.selectionJson()) } })
         require(validModelId(model) && validEffort(effort))
@@ -119,6 +176,111 @@ internal fun readModels(result: JSONObject): List<ModelOption> {
 
 internal fun withWorkspace(params: JSONObject, workspace: String): JSONObject = params.apply {
     if (workspace.isNotEmpty()) put("workspace", workspace)
+}
+
+internal fun agentsListParams(workspace: String): JSONObject = JSONObject().apply {
+    if (workspace.isNotBlank()) put("workspace", workspace)
+}
+
+internal fun modelsListParams(agent: String, workspace: String, cursor: String = "", routed: Boolean): JSONObject =
+    JSONObject().put("limit", 100).apply {
+        require(agent in CHAT_AGENT_IDS)
+        if (routed) put("agent", agent)
+        if (workspace.isNotBlank()) put("workspace", workspace)
+        if (cursor.isNotBlank()) put("cursor", cursor)
+    }
+
+internal fun threadsListParams(agent: String, archived: Boolean, cursor: String = "", routed: Boolean): JSONObject =
+    JSONObject().put("limit", 100).put("all_workspaces", true).put("archived", archived).apply {
+        require(agent in CHAT_AGENT_IDS)
+        if (routed) put("agent", agent)
+        if (cursor.isNotBlank()) put("cursor", cursor)
+    }
+
+internal data class RuntimeScope(val agent: String, val workspace: String) {
+    init { require(agent in CHAT_AGENT_IDS) }
+}
+
+internal class ScopedRuntimeRequests {
+    internal data class Request(val key: String, val scope: RuntimeScope, val cursor: String, val generation: Long)
+    private val scopes = mutableMapOf<String, RuntimeScope>()
+    private val generations = mutableMapOf<String, Long>()
+    private val pending = mutableMapOf<Long, Request>()
+
+    fun select(key: String, scope: RuntimeScope): Boolean {
+        if (scopes[key] == scope) return false
+        scopes[key] = scope
+        generations[key] = generations.getOrDefault(key, 0) + 1
+        pending.entries.removeAll { it.value.key == key }
+        return true
+    }
+
+    fun scope(key: String): RuntimeScope? = scopes[key]
+
+    fun begin(id: Long, key: String, cursor: String = "") {
+        val scope = scopes.getValue(key)
+        pending[id] = Request(key, scope, cursor, generations.getOrDefault(key, 0))
+    }
+
+    fun take(id: Long): Request? = pending.remove(id)?.takeIf {
+        scopes[it.key] == it.scope && generations[it.key] == it.generation
+    }
+
+    fun invalidate() {
+        scopes.keys.forEach { generations[it] = generations.getOrDefault(it, 0) + 1 }
+        pending.clear()
+    }
+}
+
+internal class RuntimeThreadPages(private val agents: List<String>) {
+    private data class Request(val agent: String, val cursor: String, val generation: Long)
+    private var generation = 0L
+    private val pages = mutableMapOf<String, List<String>>()
+    private val cursors = mutableMapOf<String, String>()
+    private val seen = mutableMapOf<String, MutableSet<String>>()
+    private val pending = mutableMapOf<Long, Request>()
+
+    init { require(agents.isNotEmpty() && agents.distinct().size == agents.size && agents.all { it in CHAT_AGENT_IDS }) }
+
+    val ids: List<String> get() = agents.flatMap { pages[it].orEmpty() }.distinct()
+    val loading: Boolean get() = pending.values.any { it.generation == generation }
+    val hasMore: Boolean get() = cursors.values.any(String::isNotBlank)
+
+    fun reset() {
+        generation++
+        pages.clear(); cursors.clear(); seen.clear(); pending.clear()
+    }
+
+    fun begin(id: Long, agent: String, cursor: String = "") {
+        require(agent in agents)
+        pending[id] = Request(agent, cursor, generation)
+    }
+
+    fun accept(id: Long, ids: List<String>, nextCursor: String): Boolean {
+        val request = pending.remove(id)?.takeIf { it.generation == generation } ?: return false
+        pages[request.agent] = if (request.cursor.isBlank()) ids.distinct() else (pages[request.agent].orEmpty() + ids).distinct()
+        val repeated = nextCursor.isNotBlank() && (nextCursor == request.cursor || !seen.getOrPut(request.agent, ::mutableSetOf).add(nextCursor))
+        cursors[request.agent] = nextCursor.takeUnless { repeated }.orEmpty()
+        return true
+    }
+
+    fun fail(id: Long): Boolean = pending.remove(id)?.generation == generation
+
+    fun initialTargets(archived: Boolean = false): List<Pair<String, String>> =
+        agents.filter { !archived || it == CODEX_AGENT }.map { it to "" }
+    fun moreTargets(): List<Pair<String, String>> = agents.mapNotNull { agent -> cursors[agent]?.takeIf(String::isNotBlank)?.let { agent to it } }
+}
+
+internal fun visibleThreads(
+    threads: List<String>,
+    agent: String,
+    search: String,
+    agents: Map<String, String>,
+    titles: Map<String, String>,
+    workspaces: Map<String, String>,
+): List<String> = threads.distinct().filter { id ->
+    (agent == ALL_AGENTS || agents[id] == agent) &&
+        (search.isBlank() || (titles[id] ?: id).contains(search, true) || id.contains(search, true) || workspaces[id].orEmpty().contains(search, true))
 }
 
 internal fun projectName(path: String): String = path.trimEnd('/', '\\').substringAfterLast('/').substringAfterLast('\\').ifBlank { path.ifBlank { "Other sessions" } }

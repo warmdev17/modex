@@ -15,8 +15,9 @@ internal data class BackendCapabilities(
     val references: Boolean,
     val takeover: Boolean,
     val agentDiscovery: Boolean = false,
+    val runtimeRouting: Boolean = false,
 ) {
-    val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; else -> "Agent" }
+    val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; "antigravity" -> "Antigravity"; else -> "Agent" }
     fun supports(method: String): Boolean = when (method) {
         "agents/list" -> agentDiscovery
         "threads/status" -> sessionStatus
@@ -50,7 +51,8 @@ internal data class BackendCapabilities(
                 "projects" in keys,
                 "references" in keys,
                 "takeover" in keys,
-                backend == "codex" && "agent_discovery" in keys,
+                backend == "codex" && ("agent_discovery" in keys || "runtime_routing" in keys),
+                backend == "codex" && "runtime_routing" in keys,
             )
         }
     }

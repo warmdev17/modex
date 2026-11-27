@@ -58,6 +58,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private var listGeneration = 0L
     private var selectionGeneration = 0L
     private val listRequests = mutableMapOf<Long, Long>()
+    private val sharedThreadPages = RuntimeThreadPages(CHAT_AGENT_IDS)
     private val lifecycleRequests = mutableMapOf<Long, LifecycleRequest>()
     private val sessionRequests = mutableMapOf<Long, SessionRequest>()
     private var settingsRevision = 0L
@@ -87,6 +88,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var selectedWorkspace by mutableStateOf(""); private set
     private val threadCursors = mutableSetOf<String>()
     var threadListLoading by mutableStateOf(false); private set
+    var threadListStatus by mutableStateOf(""); private set
     var titles by mutableStateOf(mapOf<String, String>()); private set
     var historyLoading by mutableStateOf(false); private set
     var takeoverThread by mutableStateOf(""); private set
@@ -125,12 +127,17 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     internal var chatAgents by mutableStateOf(listOf(ChatAgent(CODEX_AGENT, "Codex", true))); private set
     internal var agentsLoading by mutableStateOf(false); private set
     internal var threadAgents by mutableStateOf(emptyMap<String,String>()); private set
-    val sessionAgent: String get() = threadAgents[selected] ?: if (selected.startsWith("agy:")) ANTIGRAVITY_AGENT else CODEX_AGENT
+    val sessionAgent: String get() = threadAgents[selected] ?: when {
+        selected.startsWith("oc:") -> OPENCODE_AGENT
+        selected.startsWith("agy:") -> ANTIGRAVITY_AGENT
+        else -> defaultChatAgent(backendCapabilities)
+    }
+    internal val sessionCapabilities: BackendCapabilities get() = runtimeCapabilities(backendCapabilities, chatAgents, sessionAgent)
     private fun choiceFor(id: String = selected) = resolveModelChoice(modelChoices[id], null, hostChoice, models)
     val sessionModel: String get() = choiceFor().model
     val sessionEffort: String get() = choiceFor().effort
     fun chooseModel(model: String, effort: String) {
-        if (sessionAgent != CODEX_AGENT || selected.isBlank() || model.isBlank() || !validModelId(model) || !validEffort(effort)) return
+        if (sessionAgent == ANTIGRAVITY_AGENT || selected.isBlank() || model.isBlank() || !validModelId(model) || !validEffort(effort)) return
         modelChoices = modelChoices + (selected to resolveModelChoice(ModelChoice(model.trim(), effort), null, hostChoice, models))
         persist()
     }
@@ -140,14 +147,17 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     internal val references = ReferenceCatalogState()
     fun refreshReferences(force: Boolean = true) {
-        if (sessionAgent == ANTIGRAVITY_AGENT || !backendCapabilities.references || !connected || selected.isBlank() || selectedWorkspace.isBlank()) return
+        if (!sessionCapabilities.references || !connected || selected.isBlank() || selectedWorkspace.isBlank()) return
         if (references.loading && !force) return
         val workspace = selectedWorkspace
         request("references/list", JSONObject().put("workspace", workspace).put("force_reload", force), workspace)?.let { references.begin(it, workspace) }
     }
     internal var models by mutableStateOf(emptyList<ModelOption>()); private set
     var modelCatalogStatus by mutableStateOf(""); private set
-    private val modelCursors = mutableSetOf<String>()
+    internal var newChatModels by mutableStateOf(emptyList<ModelOption>()); private set
+    var newChatModelCatalogStatus by mutableStateOf(""); private set
+    private val catalogueRequests = ScopedRuntimeRequests()
+    private val catalogueCursors = mutableMapOf<String, MutableSet<String>>()
     var keyLoaded by mutableStateOf(false); private set
     private var key: ByteArray? = null
     private var config: Connection? = null
@@ -158,6 +168,48 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private var sequence = java.security.SecureRandom().nextLong().ushr(12) + 1
     private val pending = mutableMapOf<Long, Pair<String, String>>()
     private val sentAttachmentPaths = mutableMapOf<Long, Pair<String, Set<String>>>()
+
+    private fun updateCatalogue(key: String, value: List<ModelOption>, status: String) {
+        if (key == "session-models") { models = value; modelCatalogStatus = status }
+        else { newChatModels = value; newChatModelCatalogStatus = status }
+    }
+
+    private fun catalogue(key: String): List<ModelOption> = if (key == "session-models") models else newChatModels
+
+    private fun loadCatalogue(key: String, agent: String, workspace: String) {
+        val scope = RuntimeScope(agent, workspace)
+        val changed = catalogueRequests.select(key, scope)
+        if (changed) {
+            catalogueCursors.remove(key)
+            updateCatalogue(key, emptyList(), if (agent == ANTIGRAVITY_AGENT) "" else "Loading models…")
+        } else if (agent != ANTIGRAVITY_AGENT && catalogue(key).isEmpty()) {
+            updateCatalogue(key, emptyList(), "Loading models…")
+        }
+        if (agent == ANTIGRAVITY_AGENT) return
+        request("models/list", modelsListParams(agent, workspace, routed = backendCapabilities.runtimeRouting), key)?.let {
+            catalogueRequests.begin(it, key)
+        }
+    }
+
+    internal fun scopeNewChat(agent: String, workspace: String) {
+        if (!connected) return
+        val fallback = defaultChatAgent(backendCapabilities)
+        val runtime = if (backendCapabilities.agentDiscovery) agent.takeIf { it in CHAT_AGENT_IDS } ?: fallback else fallback
+        if (backendCapabilities.agentDiscovery) {
+            val key = "new-agents"
+            if (catalogueRequests.select(key, RuntimeScope(runtime, workspace))) {
+                chatAgents = checkingChatAgents(chatAgents, fallback)
+            }
+            agentsLoading = true
+            request("agents/list", agentsListParams(workspace), key)?.let { catalogueRequests.begin(it, key) }
+                ?: run { agentsLoading = false }
+        }
+        loadCatalogue("new-models", runtime, workspace)
+    }
+
+    private fun loadSessionCatalogue(agent: String, workspace: String) {
+        loadCatalogue("session-models", agent, workspace)
+    }
 
     init {
         (application as ModexApplication).apply { sessions[storageName] = this@ModexViewModel; if (storageName == "host") session = this@ModexViewModel }
@@ -328,6 +380,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         queuedAnswerRequests.clear()
         sentAttachmentPaths.clear(); steeringDrafts.clear()
         threadListLoading = false
+        threadListStatus = ""
+        sharedThreadPages.reset()
+        catalogueRequests.invalidate()
         titles = emptyMap()
         threads = emptyList()
         sessions.reset()
@@ -387,12 +442,14 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                             persist()
                         }
                         connecting = false; connected = true; threadListLoading = false
-                        models = emptyList(); modelCursors.clear(); modelCatalogStatus = "Loading models…"
-                        chatAgents = listOf(ChatAgent(CODEX_AGENT, capabilities.label, true))
-                        agentsLoading = capabilities.agentDiscovery
+                        models = emptyList(); modelCatalogStatus = ""
+                        newChatModels = emptyList(); newChatModelCatalogStatus = ""
+                        catalogueRequests.invalidate(); catalogueCursors.clear()
+                        val defaultAgent = defaultChatAgent(capabilities)
+                        chatAgents = listOf(ChatAgent(defaultAgent, capabilities.label, true))
+                        agentsLoading = false
                         request("status", JSONObject())
-                        if (agentsLoading) request("agents/list", JSONObject())
-                        request("models/list", JSONObject().put("limit", 100))
+                        scopeNewChat(defaultAgent, "")
                         refreshThreads()
                         runningThreads.take(32).forEach(::observe)
                     } }
@@ -434,23 +491,23 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         invalidateSessionRequests(); leaveSession(); current?.close(); persist()
         getApplication<ModexApplication>().stopConnectionServiceIfIdle()
     }
-    fun create(model: String, mode: String, effort: String = "", workspace: String = "", projectId: String = "", agent: String = CODEX_AGENT) {
+    fun create(model: String, mode: String, effort: String = "", workspace: String = "", projectId: String = "", agent: String = "") {
         if (!connected || historyLoading || switching()) return
-        if (agent !in listOf(CODEX_AGENT, ANTIGRAVITY_AGENT)) return
-        val runtime = agent
+        val runtime = agent.ifBlank { defaultChatAgent(backendCapabilities) }
+        if (runtime !in CHAT_AGENT_IDS) return
         val advertised = chatAgents.firstOrNull { it.id == runtime }
-        if (runtime == ANTIGRAVITY_AGENT && (!backendCapabilities.agentDiscovery || advertised?.ready != true)) {
-            error = advertised?.reason.orEmpty().ifBlank { "Antigravity is unavailable on this host." }
+        if ((backendCapabilities.runtimeRouting || runtime == ANTIGRAVITY_AGENT) && advertised?.ready != true) {
+            error = advertised?.reason.orEmpty().ifBlank { "${advertised?.label ?: runtime} is unavailable on this host." }
             return
         }
-        if (runtime != ANTIGRAVITY_AGENT && backendCapabilities.backend == "opencode" && ambiguousOpenCodeModel(model, models)) {
+        if (runtime == OPENCODE_AGENT && ambiguousOpenCodeModel(model, newChatModels)) {
             error = CHOOSE_OPENCODE_PROVIDER
             return
         }
         clearSelection()
-        val choice = if (runtime == CODEX_AGENT) resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, models).toJson().toString() else ""
-        val params = if (runtime == ANTIGRAVITY_AGENT) {
-            newThreadParams(model, mode, workspace, projectId, standalone = workspace.isBlank() && projectId.isBlank(), agent = runtime)
+        val choice = if (runtime != ANTIGRAVITY_AGENT) resolveModelChoice(ModelChoice(model.ifBlank { hostChoice.model }, effort), null, hostChoice, newChatModels).toJson().toString() else ""
+        val params = if (backendCapabilities.runtimeRouting || runtime == ANTIGRAVITY_AGENT) {
+            newThreadParams(model, mode, workspace, projectId, standalone = workspace.isBlank() && projectId.isBlank(), agent = runtime, explicitAgent = backendCapabilities.runtimeRouting)
         } else backendCapabilities.supportedNewThreadParams(model, mode, workspace, projectId)
         request("threads/start", params, choice)?.let { selectionRequests += it }
     }
@@ -484,6 +541,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     }
     private fun invalidateSessionRequests() {
         listGeneration++; listRequests.clear(); lifecycleRequests.clear(); actionThreads = emptySet()
+        sharedThreadPages.reset(); catalogueRequests.invalidate()
         observationRequests.clear(); observationAgain.clear(); threadListLoading = false
     }
     fun showArchived(value: Boolean) {
@@ -494,7 +552,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         refreshThreads()
     }
     internal fun lifecycle(action: String, target: String, confirmed: Boolean = false) {
-        if (!backendCapabilities.sessionLifecycle || threadAgents[target] == ANTIGRAVITY_AGENT || target.startsWith("agy:") || !connected || target !in threads || target in actionThreads || action !in listOf("archive", "unarchive", "delete", "fork")) return
+        if (!runtimeCapabilities(backendCapabilities, chatAgents, threadAgents[target] ?: connectionThreadAgent(backendCapabilities, JSONObject().put("id", target))).sessionLifecycle || !connected || target !in threads || target in actionThreads || action !in listOf("archive", "unarchive", "delete", "fork")) return
         if ((action == "unarchive") != archived && action != "delete") return
         if (action == "delete" && !confirmed) return
         if (action == "fork" && (target in runningThreads || decisions.any { it.optString("thread_id") == target } || historyLoading || switching())) return
@@ -519,28 +577,43 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             projectStatus = "Loading projects…"
             request("projects/list", JSONObject().put("limit", 100))
         }
-        threadCursors.clear(); threadListLoading = true
-        request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("archived", archived))?.let { listRequests[it] = listGeneration }
+        threadCursors.clear(); threadListStatus = ""; threadListLoading = true
+        if (backendCapabilities.runtimeRouting) {
+            sharedThreadPages.reset()
+            threads = emptyList(); nextCursor = null
+            sharedThreadPages.initialTargets(archived).forEach { (agent, cursor) ->
+                request("threads/list", threadsListParams(agent, archived, cursor, routed = true), agent)?.let { sharedThreadPages.begin(it, agent, cursor) }
+            }
+            threadListLoading = sharedThreadPages.loading
+        } else {
+            request("threads/list", threadsListParams(defaultChatAgent(backendCapabilities), archived, routed = false))?.let { listRequests[it] = listGeneration }
+        }
     }
     fun more() {
         if (!connected || threadListLoading) return
-        nextCursor?.let { threadListLoading = true; request("threads/list", JSONObject().put("limit", 100).put("all_workspaces", true).put("archived", archived).put("cursor", it), "more")?.let { request -> listRequests[request] = listGeneration } }
+        if (backendCapabilities.runtimeRouting) {
+            sharedThreadPages.moreTargets().forEach { (agent, cursor) ->
+                request("threads/list", threadsListParams(agent, archived, cursor, routed = true), agent)?.let { sharedThreadPages.begin(it, agent, cursor) }
+            }
+            threadListLoading = sharedThreadPages.loading
+        } else nextCursor?.let { threadListLoading = true; request("threads/list", threadsListParams(defaultChatAgent(backendCapabilities), archived, it, routed = false), "more")?.let { request -> listRequests[request] = listGeneration } }
     }
     internal fun send(text: String, model: String, effort: String = "", references: List<PromptReference> = emptyList()): Boolean {
         val agent = sessionAgent
-        val selectedReferences = if (agent != ANTIGRAVITY_AGENT && backendCapabilities.references) referencesInText(text, references) else emptyList()
+        val capabilities = sessionCapabilities
+        val selectedReferences = if (capabilities.references) referencesInText(text, references) else emptyList()
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, hostChoice, models)
         if (!connected || steerSending || (busy && (agent == ANTIGRAVITY_AGENT || activeTurnId.isBlank() || stopping)) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && (text.isBlank() || files.isNotEmpty())) || !validModelId(model) || !validEffort(effort)) return false
         val target = activeTurnId
-        if (target.isEmpty() && backendCapabilities.backend == "opencode" && ambiguousOpenCodeModel(choice.model, models)) {
+        if (target.isEmpty() && agent == OPENCODE_AGENT && ambiguousOpenCodeModel(choice.model, models)) {
             error = CHOOSE_OPENCODE_PROVIDER
             return false
         }
         val params = withWorkspace(if (agent == ANTIGRAVITY_AGENT) {
             turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences, agent)
-        } else backendCapabilities.supportedTurnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace)
+        } else capabilities.supportedTurnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace)
         if (target.isNotEmpty()) {
             val id = request("turn/steer", params.put("turn_id", target), selected) ?: return false
             steeringDrafts[id] = selected to promptDrafts[selected]
@@ -558,14 +631,14 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         request("turn/interrupt", withWorkspace(target, selectedWorkspace), target.toString())
     }
     fun refreshSessionStatus() {
-        if (sessionAgent == ANTIGRAVITY_AGENT || !backendCapabilities.sessionStatus || !connected || selected.isBlank() || ownedThread != selected || sessionStatusLoading || modeChanging) return
+        if (!sessionCapabilities.sessionStatus || !connected || selected.isBlank() || ownedThread != selected || sessionStatusLoading || modeChanging) return
         sessionStatusLoading = true; sessionStatusError = ""
         request("threads/status", withWorkspace(JSONObject().put("thread_id", selected), selectedWorkspace), selected)?.let {
             sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision, quotaRevision)
         } ?: run { sessionStatusLoading = false }
     }
     fun sessionPermissions(profile: String = "") {
-        if (sessionAgent == ANTIGRAVITY_AGENT || !backendCapabilities.permissionProfiles || !connected || selected.isBlank() || ownedThread != selected || permissionsWorking || historyLoading || switching()) return
+        if (!sessionCapabilities.permissionProfiles || !connected || selected.isBlank() || ownedThread != selected || permissionsWorking || historyLoading || switching()) return
         if (profile.isNotEmpty() && (busy || modeChanging || planResponding ||
                 decisions.any { it.optString("thread_id") == selected } ||
                 permissionProfiles.none { it.id == profile && it.allowed })) return
@@ -577,7 +650,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             ?: run { permissionsWorking = false }
     }
     fun changeSessionMode(mode: String) {
-        if (sessionAgent == ANTIGRAVITY_AGENT || !backendCapabilities.planMode || !connected || selected.isBlank() || ownedThread != selected || busy || modeChanging || modeUncertain || sessionStatusLoading || historyLoading || switching() ||
+        if (!sessionCapabilities.planMode || !connected || selected.isBlank() || ownedThread != selected || busy || modeChanging || modeUncertain || sessionStatusLoading || historyLoading || switching() ||
             decisions.any { it.optString("thread_id") == selected } || mode !in listOf("default", "plan")) return
         val params = runCatching { threadModeParams(selected, selectedWorkspace, mode, sessionModel, sessionEffort) }.getOrNull() ?: return
         modeChanging = true; sessionStatusError = ""
@@ -585,7 +658,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             ?: run { modeChanging = false }
     }
     internal fun respondPlan(plan: ChatEntry, action: String) {
-        if (sessionAgent == ANTIGRAVITY_AGENT || !backendCapabilities.planMode || !connected || busy || historyLoading || switching() || ownedThread != selected || planResponding ||
+        if (!sessionCapabilities.planMode || !connected || busy || historyLoading || switching() || ownedThread != selected || planResponding ||
             action !in listOf("implement", "fresh", "stay") || pendingPlan(messages, busy, handledPlans) != plan) return
         val params = JSONObject().put("thread_id", selected).put("turn_id", plan.turnId).put("item_id", plan.id).put("action", action)
         if (sessionModel.isNotBlank()) params.put("model", sessionModel)
@@ -645,11 +718,13 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             val sentAttachments = sentAttachmentPaths.remove(id)
             val steeringDraft = steeringDrafts.remove(id)
             val operation = pending.remove(id) ?: return
+            val catalogueRequest = if (operation.first in listOf("agents/list", "models/list")) catalogueRequests.take(id) else null
+            if (operation.first in listOf("agents/list", "models/list") && catalogueRequest == null) return
             if (operation.first == "threads/read" && operation.second == "agent-history") {
                 agentConversation.result(id, frame.optJSONObject("result"))
                 return
             }
-            if (operation.first == "threads/list" && (listRequests.remove(id) != listGeneration || !connected)) return
+            if (operation.first == "threads/list" && !backendCapabilities.runtimeRouting && (listRequests.remove(id) != listGeneration || !connected)) return
             val lifecycle = lifecycleRequests.remove(id)
             if (operation.first in listOf("threads/archive", "threads/unarchive", "threads/delete", "threads/fork")) {
                 if (lifecycle == null) return
@@ -713,6 +788,15 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             if (operation.first == "threads/read" && (historyRequest == null || !connected || historyRequest.thread != selected || ownedThread != selected)) return
             if (operation.first == "plans/respond") planSending = pending.values.any { it.first == "plans/respond" && it.second !in handledPlans }
             if (frame.has("error")) {
+                if (operation.first == "threads/list" && backendCapabilities.runtimeRouting) {
+                    if (!sharedThreadPages.fail(id)) return
+                    threadListLoading = sharedThreadPages.loading
+                    threads = sharedThreadPages.ids
+                    nextCursor = "shared".takeIf { sharedThreadPages.hasMore }
+                    val label = chatAgents.firstOrNull { it.id == operation.second }?.label ?: operation.second
+                    threadListStatus = listOf(threadListStatus, "$label conversations unavailable.").filter(String::isNotBlank).joinToString(" ")
+                    return
+                }
                 if (operation.first == "threads/mode") {
                     modeChanging = false
                     modeUncertain = true
@@ -731,7 +815,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     return
                 }
                 if (operation.first == "projects/list") { projectStatus = "Project list unavailable. Update the host/Codex; chats remain in Recents."; return }
-                if (operation.first == "models/list") { modelCatalogStatus = "Model list unavailable. You can enter a custom model ID."; return }
+                if (operation.first == "models/list") {
+                    updateCatalogue(catalogueRequest!!.key, catalogue(catalogueRequest.key), "Model list unavailable. You can enter a custom model ID.")
+                    return
+                }
                 if (operation.first == "agents/list") { agentsLoading = false; return }
                 if (operation.first == "turn/interrupt") {
                     val target = JSONObject(operation.second)
@@ -781,7 +868,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 "agents/list" -> {
                     agentsLoading = false
                     val reported = readChatAgents(result)
-                    chatAgents = (listOf(ChatAgent(CODEX_AGENT, "Codex", true)) + reported).distinctBy { it.id }
+                    val default = defaultChatAgent(backendCapabilities)
+                    chatAgents = (listOf(ChatAgent(default, backendCapabilities.label, true)) + reported).distinctBy { it.id }
                 }
                 "threads/status" -> {
                     sessionStatusLoading = false; sessionStatusError = ""; modeUncertain = false
@@ -814,28 +902,41 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     else projectStatus = if (cursor.isNotEmpty()) "Project listing stopped: repeated cursor." else ""
                 }
                 "models/list" -> {
-                    models = (models + readModels(result)).distinctBy { it.model }
+                    val scoped = catalogueRequest ?: return
+                    val entries = (catalogue(scoped.key) + readModels(result)).distinctBy { it.model }
                     val cursor = if (result.isNull("next_cursor")) "" else result.optString("next_cursor")
-                    if (cursor.isNotEmpty() && modelCursors.add(cursor) && modelCursors.size <= 100) {
-                        request("models/list", JSONObject().put("limit", 100).put("cursor", cursor))
-                    } else modelCatalogStatus = if (cursor.isNotEmpty()) "Model list truncated. Custom IDs remain available." else if (models.isEmpty()) "No models advertised. Enter a custom model ID." else ""
+                    val seen = catalogueCursors.getOrPut(scoped.key, ::mutableSetOf)
+                    if (cursor.isNotEmpty() && seen.add(cursor) && seen.size <= 100) {
+                        updateCatalogue(scoped.key, entries, "Loading models…")
+                        request("models/list", modelsListParams(scoped.scope.agent, scoped.scope.workspace, cursor, backendCapabilities.runtimeRouting), scoped.key)?.let {
+                            catalogueRequests.begin(it, scoped.key, cursor)
+                        }
+                    } else updateCatalogue(scoped.key, entries, if (cursor.isNotEmpty()) "Model list truncated. Custom IDs remain available." else if (entries.isEmpty()) "No models advertised. Enter a custom model ID." else "")
                 }
                 "threads/list" -> {
                     if (error.startsWith("Host rejected threads/list")) error = ""
                     val list = result.optJSONArray("data") ?: JSONArray()
                     titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
                     val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
-                    val runtimes = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to threadAgent(t) }
+                    val runtimes = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to connectionThreadAgent(backendCapabilities, t) }
                     val membership = readProjectMembership(list)
                     projectMembership = projectMembership + membership
                     threadWorkspaces = threadWorkspaces + paths
                     threadAgents = threadAgents + runtimes
                     val ids = (0 until list.length()).map { list.getJSONObject(it).getString("id") }
-                    threads = if (operation.second == "more") (threads + ids).distinct() else ids
-                    nextCursor = if (result.isNull("next_cursor")) null else result.optString("next_cursor").ifEmpty { null }
-                    threadListLoading = false
-                    nextCursor?.let { cursor ->
-                        if (!threadCursors.add(cursor)) { nextCursor = null; error = "Session listing stopped because the host repeated a page cursor. Refresh to retry." }
+                    val cursor = if (result.isNull("next_cursor")) "" else result.optString("next_cursor")
+                    if (backendCapabilities.runtimeRouting) {
+                        if (!sharedThreadPages.accept(id, ids, cursor)) return
+                        threads = sharedThreadPages.ids
+                        threadListLoading = sharedThreadPages.loading
+                        nextCursor = "shared".takeIf { sharedThreadPages.hasMore }
+                    } else {
+                        threads = if (operation.second == "more") (threads + ids).distinct() else ids
+                        nextCursor = cursor.ifEmpty { null }
+                        threadListLoading = false
+                        nextCursor?.let { next ->
+                            if (!threadCursors.add(next)) { nextCursor = null; error = "Session listing stopped because the host repeated a page cursor. Refresh to retry." }
+                        }
                     }
                 }
                 "threads/start", "threads/resume", "threads/takeover", "threads/fork" -> {
@@ -855,7 +956,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     val openedThread = result.getJSONObject("thread")
                     sessions.open(openedThread.getString("id"))
                     ownedThread = selected; lastThread = selected
-                    threadAgents = threadAgents + (selected to threadAgent(openedThread))
+                    threadAgents = threadAgents + (selected to connectionThreadAgent(backendCapabilities, openedThread))
                     visibleHistory = historyCache.get(selected)
                     visibleHistory?.let { sessions.loadHistory(selected, it.entries, selected in runningThreads); hasOlderHistory = it.cursor.isNotBlank() }
                     val reported = ModelChoice(result.optString("model"), result.optString("effort"))
@@ -865,6 +966,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     }
                     rememberChoice(selected, reported)
                     selectedWorkspace = openedThread.optString("cwd")
+                    loadSessionCatalogue(sessionAgent, selectedWorkspace)
                     refreshReferences(false)
                     projectMembership = projectMembership + readProjectMembership(JSONArray().put(openedThread))
                     threadWorkspaces = threadWorkspaces + (selected to selectedWorkspace)
