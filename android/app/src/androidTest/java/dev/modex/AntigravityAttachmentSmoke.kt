@@ -72,6 +72,33 @@ internal fun Instrumentation.antigravityAttachmentSmoke() {
         waitForIdleSync()
         check(node("From this phone") == null && node("From connected computer") == null) { "Older host still allows adding Antigravity files" }
         antigravityAttachmentAcknowledgements(host)
+        val tooLarge = file.copy(size = 256 * 1024L + 1)
+        runOnMainSync {
+            connectedHost.value = host
+            files.value = listOf(tooLarge)
+        }
+        fun waitForNode(label: String): AccessibilityNodeInfo? {
+            val end = System.currentTimeMillis() + 5_000
+            while (System.currentTimeMillis() < end) {
+                node(label)?.let { return it }
+                Thread.sleep(100)
+            }
+            return null
+        }
+        val sizeWarning = "Text files for Antigravity must be at most 256 KiB."
+        check(waitForNode(sizeWarning) != null) { "Oversized text file has no composer warning" }
+        val sendIcon = node("Send message") ?: error("Send icon missing")
+        val sendBounds = android.graphics.Rect().also(sendIcon::getBoundsInScreen)
+        runOnMainSync { submitted = null }
+        val blockedTap = uiAutomation.executeShellCommand("input tap ${sendBounds.centerX()} ${sendBounds.centerY()}")
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(blockedTap).use { it.readBytes() }
+        waitForIdleSync()
+        check(submitted == null) { "Oversized text file still submits" }
+        runOnMainSync { files.value = emptyList() }
+        val removedDeadline = System.currentTimeMillis() + 5_000
+        while ((node("note.txt") != null || node(sizeWarning) != null) && System.currentTimeMillis() < removedDeadline) Thread.sleep(100)
+        check(node("note.txt") == null) { "Removed file chip is still visible" }
+        check(node(sizeWarning) == null) { "Removing the oversized file left a stale warning" }
         output.putString("result", "PASS: Antigravity file-only send, legacy gate, active attachment block, and exact-turn draft acknowledgement")
         finish(-1, output)
     } catch (failure: Throwable) {
@@ -103,9 +130,14 @@ private fun Instrumentation.antigravityAttachmentAcknowledgements(host: BackendC
             capabilities.value = host
             val note = RemoteFile("note.txt", "/fixture/note.txt", false, 4)
             val later = RemoteFile("later.txt", "/fixture/later.txt", false, 5)
-            vm.attachments.addRemote(thread, note)
             val draft = PromptDraft("Explain the attachment")
             vm.promptDrafts.update(thread, draft)
+            vm.attachments.addRemote(thread, later.copy(size = 256 * 1024L + 1))
+            check(!vm.send(draft.text, "") && pending.isEmpty())
+            check(vm.error.isEmpty()) { "Oversized file set the shared sidebar error" }
+            check(vm.promptDrafts[thread] == draft && vm.attachments.drafts[thread]?.single()?.path == later.path)
+            vm.attachments.remove(thread, later.path)
+            vm.attachments.addRemote(thread, note)
             fun submit(): Long {
                 check(!vm.send(draft.text, "")) { "AGY cleared the draft before acknowledgement" }
                 return pending.entries.single { it.value == ("turn/start" to thread) }.key
@@ -132,7 +164,7 @@ private fun Instrumentation.antigravityAttachmentAcknowledgements(host: BackendC
             vm.promptDrafts.update(thread, PromptDraft("Follow up"))
             check(!vm.send("Follow up", ""))
             check(pending.values.none { it == ("turn/steer" to thread) })
-            check(vm.error.contains("Remove selected files") && vm.attachments.drafts[thread]?.map { it.path } == listOf(later.path))
+            check(vm.attachments.drafts[thread]?.map { it.path } == listOf(later.path))
             vm.attachments.remove(thread, later.path)
             check(!vm.send("Follow up", ""))
             val steer = pending.entries.single { it.value == ("turn/steer" to thread) }.key

@@ -1,5 +1,25 @@
 # Modex project state
 
+## Antigravity attachment feedback
+
+Updated 2026-11-28T00:35:52+07:00 on `fix/antigravity-attachment-feedback`
+from `0680705`. Android derives the warning from the selected files, shows
+it beside the composer, and keeps the prompt and files when Send is blocked.
+Local attachment validation no longer writes the shared chat/sidebar error.
+
+- The `antigravity-attachments` emulator smoke reproduced the shared error
+  on preview 51 and passed on preview 52. It checks the warning, blocked
+  submission, draft retention, and warning removal. `chat-ui` also passed.
+- Offline Gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+  :app:assembleDebugAndroidTest` passed on the fix, with 190 unit tests and
+  zero lint errors. Signed in-place upgrade from code 51 to 52 preserved
+  encrypted fixture state. Physical Android was not tested.
+- Signed preview in the main checkout at
+  `.modex/previews/modex-0.1.0-preview.52-attachment-feedback.apk`.
+  SHA-256 `f1299ced819ac11376af23835626e9dded8a5586e3eb433258a76a052334e803`.
+  The running host was verified on `c7ba6f7` and was not restarted for this
+  Android-only fix. Branch and preview are local.
+
 ## Antigravity follow-ups
 
 Updated 2026-11-28T00:10:08+07:00 on `feat/antigravity-steering`. Host

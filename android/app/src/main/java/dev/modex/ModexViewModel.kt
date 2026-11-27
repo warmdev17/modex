@@ -630,8 +630,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, runtimeDefaultModel(agent), models)
         val target = activeTurnId
         if (!connected || steerSending || (busy && (activeTurnId.isBlank() || stopping || (agent == ANTIGRAVITY_AGENT && !capabilities.agySteer))) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && agyOptionsUncertain) || !validModelId(model) || !validEffort(effort)) return false
-        if (agent == ANTIGRAVITY_AGENT && busy && files.isNotEmpty()) { error = ANTIGRAVITY_STEER_ATTACHMENTS; return false }
-        if (agent == ANTIGRAVITY_AGENT) antigravityAttachmentError(files, capabilities.agyAttachments).takeIf { it.isNotEmpty() }?.let { error = it; return false }
+        if (agent == ANTIGRAVITY_AGENT &&
+            ((busy && files.isNotEmpty()) || antigravityAttachmentError(files, capabilities.agyAttachments).isNotEmpty())) return false
         if (target.isEmpty() && agent == OPENCODE_AGENT && ambiguousOpenCodeModel(choice.model, models)) {
             error = CHOOSE_OPENCODE_PROVIDER
             return false
