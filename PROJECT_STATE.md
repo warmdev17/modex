@@ -1,5 +1,34 @@
 # Modex project state
 
+## Antigravity command activity
+
+Updated 2026-11-28T05:33:47+07:00 on `feat/antigravity-command-activity`.
+Host source `1cda380`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-command-activity.md).
+AGY shell calls now use the shared Android command card. Native events
+drive the lifecycle, and the final output and exit code are shown when
+reported. Native replay restores commands that the CLI includes.
+Use existing Android preview 55.
+
+- At `1cda380`, `GOMAXPROCS=4 go test -race -p 1 ./... -count=1
+  -timeout=120s` with umask 022, `go vet ./...`, focused ACP tests
+  and independent review passed.
+- The command case failed on `aca969a` and passed with the stamped
+  host and real AGY 1.5.17, including one-time permission, card
+  transitions, output, exit code and cold history. Real attachments,
+  titles/context recovery and the shared-agent routing fixture passed.
+  The real follow-up case reached an upstream quota response. Local ACP
+  fixtures verified steering, prompt reply order and permissions.
+- The existing signed preview 55 passed the command timeline emulator
+  smoke. Android `ChatEntryTest` and `SessionStateTest` passed 19 checks.
+  No Android source or APK change in this milestone.
+- Host SHA-256
+  `92d26362c18ab9cc9528ae1120e61a6c80b5e4abd329a7abb95b0cbcb2d1bb84`.
+  Previous host backed up at
+  `/tmp/modex-agy-commands.SCBuIi/modex-host.previous`.
+  Physical Android and delayed activation remain unverified at handoff.
+  Branch is local. Reset the Android session cursor after restart.
+
 ## Antigravity context usage
 
 Updated 2026-11-28T02:00:49+07:00 on `feat/antigravity-context-usage`.
@@ -25,7 +54,8 @@ sample. Provider quota is outside this milestone.
   `48d1c2e7e828373207e68a00c23521b52f38595951143cfd5eaf584d3e1d956b`.
   Previous host binary is backed up at
   `/tmp/modex-agy-context.chaHjZ/modex-host.previous`.
-  Physical Android and service activation remain unverified at handoff.
+  Running host `aca969a` was confirmed on 2026-11-28 by version and
+  executable checksum. Physical Android remains unverified.
   The branch and preview are local. After activation, reset the Android
   session cursor and reconnect to the new supervisor.
 
