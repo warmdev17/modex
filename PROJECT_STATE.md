@@ -1,5 +1,39 @@
 # Modex project state
 
+## Public documentation refresh
+
+Updated 2026-11-27T16:09:44+07:00 on `docs/professional-readme`, source
+`5cec493`. The repository front page is now a concise English product page with
+an equivalent Vietnamese option. New bilingual architecture, agent connection,
+status and roadmap pages separate current preview capabilities from future
+Modex Cloud and Pro orchestration direction. The earlier OpenCode backend guide
+is explicitly labeled as an implementation snapshot rather than the current
+capability matrix. Both README languages also include a dated comparison of six
+similar projects, their self-reported agent compatibility and a neutral T3 Code
+telemetry note linking the community issue, current policy and external report.
+
+- A standard-library check resolved 86 relative links and anchors across all 12
+  public pages, verified language switches and six bilingual page pairs, and
+  found no forbidden platform, license or encryption claims. `git diff --check`
+  passed, dev.38 was confirmed as a public APK pre-release, and the credential
+  pattern scan was clean.
+- Independent documentation review found no remaining findings after correcting
+  Android SSH onboarding, PATH/Go prerequisites, provider-readiness claims and
+  stale OpenCode links. A follow-up factual review found no findings in the
+  comparison or T3 note. Official repository/docs content and the linked T3
+  issue were retrieved, the KuCoin report URL returned HTTP 200, 84 relative
+  links across the 12 public pages resolved, both comparison tables contain six
+  projects, and `git diff --check` passed. A later GitHub web retry returned a
+  transient HTTP 503 for T3's telemetry page. The baseline
+  `umask 022; go test ./...` passed before the documentation-only changes.
+- GitHub rendering, physical-device setup, macOS/WSL runtime and fresh provider
+  inference were not tested. Competitor interoperability and actual telemetry
+  behavior were not tested; compatibility is based on current project docs.
+  `umask 022; go test ./...` passed again before publishing the branch. The
+  branch is pushed as `origin/docs/professional-readme`. Delivery to `main` is
+  tracked by [PR #38](https://github.com/warmdev17/modex/pull/38); GitHub is the
+  source of truth for its current merge status.
+
 ## OpenCode backend
 
 Updated 2026-11-26 on `feat/opencode-backend`; Stage 1 implementation source is
