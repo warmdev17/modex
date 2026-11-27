@@ -2,7 +2,7 @@
 
 ## Combined agent routing and Antigravity controls
 
-Updated 2026-11-27T19:18:00+07:00 on `feat/antigravity-session-controls`.
+Updated 2026-11-27T20:33:08+07:00 on `feat/antigravity-session-controls`.
 Integrated shared agent routing through `a95ab4b` with Antigravity controls
 through `f5334e6`. Both plans and the bilingual agent guide describe the
 scoped capabilities and the managed OpenCode profile.
@@ -24,8 +24,13 @@ scoped capabilities and the managed OpenCode profile.
   Physical-device verification and OpenCode provider inference remain
   unverified. AGY reports invocation status; child transcripts remain
   unavailable in the tested ACP runtime.
-- Next: activate the verified host with the scheduled restart workflow.
-  A user-facing APK requires a separately published development release.
+- Built the private installable preview `0.1.0-dev.39` with versionCode 48 and
+  the established development certificate. Unit tests, lint, package/signature
+  verification, the code-47-to-48 encrypted-state upgrade, shared-agent chats,
+  Antigravity options and agent-activity emulator smokes passed. The exact APK
+  is `/home/warmdev/Downloads/modex-0.1.0-dev.39-agent-routing.apk`, SHA-256
+  `d21f03972add22ac3be4dee53cf9566e1673f5b54e8bccdf09f5ccb7e6c48c5b`.
+  It has not been published, installed on a physical phone or tagged.
 
 ## Shared agent chats
 
