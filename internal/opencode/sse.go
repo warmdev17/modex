@@ -31,6 +31,7 @@ type Stream struct {
 	// OnPermissions receives a session's pending-permission snapshot from the
 	// polling reconciler (nil disables the M4 reconciliation).
 	OnPermissions func(sessionID, directory string, raw json.RawMessage)
+	Forms         *Decisions
 
 	seenMu    sync.Mutex
 	seen      map[string]bool
@@ -201,6 +202,21 @@ func (s *Stream) reconcile(ctx context.Context, sessionID string, inFlight bool)
 	}
 	anchor := turn.historyAnchor
 	s.synth.mu.Unlock()
+	if inFlight && s.Forms != nil {
+		epoch := s.Forms.formEpoch()
+		formCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		forms, err := s.client.listForms(formCtx, sessionID)
+		cancel()
+		if err == nil {
+			s.synth.mu.Lock()
+			if s.synth.turns[sessionID] == turn && !turn.completed {
+				if notice := s.Forms.reconcileForms(sessionID, turn.userID, epoch, forms); notice != "" {
+					s.synth.completeWithNotice(turn, "failed", "unsupported_input", notice)
+				}
+			}
+			s.synth.mu.Unlock()
+		}
+	}
 	session, err := s.client.ReadSession(ctx, sessionID)
 	if err != nil {
 		return

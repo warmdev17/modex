@@ -27,7 +27,7 @@ type Decision struct {
 
 	sessionID string
 	requestID string
-	formKey   string
+	formKeys  []string
 }
 
 type permissionRequest struct {
@@ -47,13 +47,14 @@ type permissionRequest struct {
 // Decisions stores pending OpenCode permissions and answers them through the
 // verified v2 reply endpoint.
 type Decisions struct {
-	mu         sync.Mutex
-	emit       func(string, json.RawMessage)
-	reply      func(context.Context, string, string, string) error
-	turnID     func(string) string
-	defaultDir string
-	pending    map[string]*Decision
-	consumed   map[string]struct{}
+	mu           sync.Mutex
+	emit         func(string, json.RawMessage)
+	reply        func(context.Context, string, string, string) error
+	turnID       func(string) string
+	defaultDir   string
+	pending      map[string]*Decision
+	consumed     map[string]struct{}
+	formRevision uint64
 
 	ReplyForm func(context.Context, string, string, map[string]string) error
 
@@ -106,8 +107,8 @@ func (d *Decisions) Handle(typ string, properties json.RawMessage, directory str
 			SessionID string `json:"sessionID"`
 			ID        string `json:"id"`
 		}
-		if json.Unmarshal(properties, &event) == nil && event.SessionID != "" && strings.HasPrefix(event.ID, "frm_") {
-			d.resolve(event.SessionID, event.ID)
+		if json.Unmarshal(properties, &event) == nil && validFormIdentity(event.SessionID, event.ID) {
+			d.settleForm(event.SessionID, event.ID)
 		}
 	case "question.created", "question.asked", "input.asked":
 		d.unsupportedInput(properties)
@@ -143,7 +144,7 @@ func (d *Decisions) unsupportedInput(properties json.RawMessage) {
 	if sessionID == "" {
 		return
 	}
-	d.failVisible(sessionID, "OpenCode is waiting for an input form that this Modex build cannot display. Resolve it on the computer and retry.")
+	d.failVisible(sessionID, unsupportedFormNotice)
 }
 
 // failVisible escalates an input/approval state the phone cannot handle so the
@@ -172,9 +173,9 @@ func (d *Decisions) failVisible(sessionID, message string) {
 	d.mu.Unlock()
 }
 
-func (d *Decisions) failPendingCap(sessionID string) {
-	d.failVisible(sessionID, "OpenCode requested too many pending approvals or reached the answered approval limit. Review them on the computer and reconnect.")
-}
+const pendingCapNotice = "OpenCode requested too many pending approvals or reached the answered approval limit. Review them on the computer and reconnect."
+
+func (d *Decisions) failPendingCap(sessionID string) { d.failVisible(sessionID, pendingCapNotice) }
 
 func (d *Decisions) add(request permissionRequest, directory string) {
 	if request.ID == "" || request.SessionID == "" || request.Action == "" {
@@ -273,6 +274,10 @@ func (d *Decisions) Resolve(sessionID, turnID string) {
 			continue
 		}
 		delete(d.pending, key)
+		if len(decision.formKeys) != 0 {
+			d.formRevision++
+			d.consumed[key] = struct{}{}
+		}
 		d.emitEvent("decision/resolved", map[string]string{"decision_id": decision.ID})
 	}
 }
@@ -282,14 +287,15 @@ func (d *Decisions) Resolve(sessionID, turnID string) {
 func (d *Decisions) Answer(ctx context.Context, id string, result json.RawMessage) error {
 	d.mu.Lock()
 	decision, ok := d.pending[id]
-	if ok && decision.formKey != "" {
-		answer, err := textFormAnswer(decision.formKey, result)
+	if ok && len(decision.formKeys) != 0 {
+		answer, err := textFormAnswer(decision.formKeys, result)
 		if err != nil {
 			d.mu.Unlock()
 			return err
 		}
 		delete(d.pending, id)
 		d.consumed[id] = struct{}{}
+		d.formRevision++
 		d.mu.Unlock()
 		return d.deliver(ctx, id, func() error {
 			return d.ReplyForm(ctx, decision.sessionID, decision.requestID, answer)
@@ -401,7 +407,7 @@ func (d *Decisions) Reconcile(sessionID, directory string, raw json.RawMessage) 
 	sort.Strings(ids)
 	for _, id := range ids {
 		request := d.pending[id]
-		if request.sessionID != sessionID || request.formKey != "" || current[id] {
+		if request.sessionID != sessionID || len(request.formKeys) != 0 || current[id] {
 			continue
 		}
 		delete(d.pending, id)

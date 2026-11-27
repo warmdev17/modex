@@ -71,6 +71,7 @@ class TransportSmoke : Instrumentation() {
             return
         }
         if (args.getString("preview") == "approval") { approvalPreview(); return }
+        if (args.getString("preview") == "opencode-text-form") { openCodeTextFormPreview(); return }
         val result = Bundle()
         try {
             val config = Connection("10.0.2.2", args.getString("port")!!.toInt(), args.getString("user")!!,

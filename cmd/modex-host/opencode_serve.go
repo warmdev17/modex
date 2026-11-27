@@ -41,6 +41,7 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 	defer cancelStream()
 	stream := opencode.NewStream(client, synth, decisions.Handle)
 	stream.OnPermissions = decisions.Reconcile
+	stream.Forms = decisions
 	go func() { _ = stream.Run(streamCtx) }()
 
 	call := func(requestCtx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {
