@@ -1,5 +1,29 @@
 # Modex project state
 
+## Antigravity turn outcomes
+
+Updated 2026-11-28T01:42:22+07:00 on `fix/antigravity-turn-outcomes`.
+Host source `28aac6b`, based on `c00f0da`. The host distinguishes
+completion, cancellation, token and request limits, refusal and failures.
+Live events and history on the same running supervisor use the Android
+turn notice already supported by preview 54. Native replay after a host
+restart does not restore the notice. RPC failures after a prompt is written
+now take the terminal event path with a consistent delivery acknowledgement.
+
+- The targeted ACP fixture failed on the previous host and passes with
+  the fix. It exercises both prompt results, cancellation, history and
+  safe handling of unknown outcomes and late RPC errors.
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with
+  umask 022, `go vet ./...` and the three isolated AGY 1.5.17 supervisor tests
+  passed. The stamped binary also passed the shared-agent supervisor
+  fixture. Android `SessionStateTest` and `ProtocolTest` passed all 35 checks.
+- Host SHA-256
+  `da3462d7e35fe9078526dd022d33a297042f6a1cf8dd2c59eb59e2214dbde2bf`.
+  Previous binary backed up at
+  `/tmp/modex-agy-outcomes.lgV5Bq/modex-host.previous`.
+  Activation uses the delayed restart. Physical Android and real provider
+  limit/refusal cases were not exercised. The branch remains local.
+
 ## Antigravity session titles
 
 Updated 2026-11-28T01:34:12+07:00 on `feat/antigravity-session-titles`,
