@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestACPChild(t *testing.T) {
@@ -790,5 +791,35 @@ func TestUsageUpdatesValidateAndScopeNativeSamples(t *testing.T) {
 	}
 	if len(updates) != 2 || updates[0].Used != 0 || updates[1].Used != 15709 || updates[1].Size != 1048576 || updates[0].Model != "initial" {
 		t.Fatalf("updates: %#v", updates)
+	}
+}
+
+func TestCommandToolFramesDecodeArrayWithoutPrivateMetadata(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	var updates []Update
+	for _, raw := range []string{
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c","name":"run_command","kind":"execute","status":"in_progress","rawInput":{"CommandLine":"printf hello","secret":"PRIVATE"}}}`,
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"c","status":"completed","rawOutput":{"output":"hello","exit_code":0,"secret":"PRIVATE"},"content":[{"type":"content","content":{"type":"text","text":"hello"}}]}}`,
+	} {
+		c.handleUpdate(json.RawMessage(raw), func(u Update) { updates = append(updates, u) })
+	}
+	if len(updates) != 2 {
+		t.Fatalf("got %d updates, want both frames", len(updates))
+	}
+	b, _ := json.Marshal(updates)
+	if strings.Contains(string(b), "PRIVATE") || !strings.Contains(string(b), "printf hello") || !strings.Contains(string(b), "hello") {
+		t.Fatalf("decoded updates: %s", b)
+	}
+}
+
+func TestCommandOutputBoundsAndForeignPayload(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	var got []Update
+	emit := func(u Update) { got = append(got, u) }
+	c.handleUpdate(json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"x","name":"other","kind":"read","rawOutput":{"output":"PRIVATE"}}}`), emit)
+	raw, _ := json.Marshal(map[string]any{"sessionId": "s", "update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "c", "name": "run_command", "kind": "execute", "rawInput": map[string]any{"CommandLine": strings.Repeat("界", 2000)}, "rawOutput": map[string]any{"output": strings.Repeat("界", 30000)}}})
+	c.handleUpdate(raw, emit)
+	if len(got) != 2 || got[0].Output != "" || len(got[1].Command) > 4096 || len(got[1].Output) > 65536 || !utf8.ValidString(got[1].Command) || !utf8.ValidString(got[1].Output) || !strings.Contains(got[1].Output, "truncated") {
+		t.Fatalf("updates: %#v", got)
 	}
 }

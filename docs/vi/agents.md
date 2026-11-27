@@ -61,6 +61,10 @@ Trên bản tương thích, đầu chat và Session status hiển thị dung lư
 context do Antigravity báo về. Số token cập nhật theo dữ liệu từ CLI và
 có thể cần đợi mẫu mới sau khi mở lại phiên native.
 
+Khi host đã cập nhật, lệnh shell do Antigravity báo về xuất hiện trong
+cuộc trò chuyện. Mở thẻ lệnh để xem output và mã thoát nếu có. Khi mở lại
+chat, Modex hiển thị các lệnh được Antigravity trả về trong lịch sử.
+
 Khi cả host lẫn Android đã cập nhật, tên do Antigravity tạo sẽ hiện ở
 đầu chat và trong sidebar, kể cả sau khi kết nối lại. Chat cũ lấy lại
 tên khi mở nếu Antigravity cung cấp tên đó.

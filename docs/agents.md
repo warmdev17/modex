@@ -61,6 +61,10 @@ On compatible builds, the header and Session status show the context window
 reported by Antigravity. The count updates as the CLI reports usage and can
 be unavailable until the next sample after reopening a native session.
 
+With an updated host, shell commands reported by Antigravity appear in
+the chat timeline. Expand a command to see the available output and exit
+code. Reopening a chat restores the commands included in native history.
+
 With matching Modex builds, the title Antigravity generates appears in the
 chat header and sidebar and is retained when reconnecting. Older chats recover
 their native title when reopened if Antigravity supplies one.

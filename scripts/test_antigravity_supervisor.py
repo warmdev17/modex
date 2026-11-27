@@ -30,6 +30,90 @@ def red_png():
 
 @unittest.skipUnless(HOST and AGY, "requires a built host and authenticated Antigravity CLI")
 class AntigravitySupervisorTests(unittest.TestCase):
+    def test_antigravity_command_activity_live_and_after_restart(self):
+        with tempfile.TemporaryDirectory(prefix="modex-agy-command-") as directory:
+            root = Path(directory)
+            workspace = root / "workspace"
+            workspace.mkdir()
+            state = root / "state"
+            host = str(Path(HOST).resolve())
+            control = [host, "--state-dir", str(state)]
+            launch = control + ["--background", "--workspace", str(workspace), "--agy", AGY]
+            marker = "modex_agy_" + secrets.token_hex(4)
+            commands = {f"printf {marker}", f"printf '{marker}'", f'printf "{marker}"'}
+
+            def start():
+                self.assertEqual(subprocess.run(launch, capture_output=True, timeout=40).returncode, 0)
+                return AttachedRPC(host, state, workspace)
+
+            def stop():
+                self.assertEqual(subprocess.run(control + ["--stop"], capture_output=True, timeout=10).returncode, 0)
+                deadline = time.monotonic() + 8
+                while (state / "endpoint.json").exists() and time.monotonic() < deadline:
+                    time.sleep(.05)
+                self.assertFalse((state / "endpoint.json").exists())
+
+            client = None
+            try:
+                client = start()
+                thread = client.call("threads/start", {"agent": "antigravity", "workspace": str(workspace)})["thread"]
+                target = {"thread_id": thread["id"], "workspace": str(workspace)}
+                ack = client.call("turn/start", dict(target, text=(
+                    f"For a local test use the shell tool to run exactly `printf {marker}` once. "
+                    "Then briefly report what the tool printed.")))
+                turn = ack["turn"]["id"]
+                running = set()
+                finished = {}
+                accepted = 0
+                deadline = time.monotonic() + 100
+                while True:
+                    frame = client.events.popleft() if client.events else client.receive(deadline)
+                    event = frame.get("event")
+                    params = frame.get("params", {})
+                    if event == "decision/required" and params.get("turn_id") == turn:
+                        context = params["context"]
+                        decision = "accept" if context.get("reason") in commands else "decline"
+                        self.assertIn(decision, context["availableDecisions"])
+                        client.call("decision/respond", {"decision_id": params["decision_id"], "result": {"decision": decision}})
+                        accepted += decision == "accept"
+                    if params.get("threadId") != thread["id"]:
+                        continue
+                    item = params.get("item", {})
+                    if params.get("turnId") == turn and item.get("type") == "commandExecution":
+                        self.assertIn(item.get("command"), commands)
+                        if event == "item/started" and item.get("status") == "inProgress":
+                            running.add(item["id"])
+                        if event == "item/completed":
+                            finished[item["id"]] = item
+                    if event == "turn/completed" and params["turn"]["id"] == turn:
+                        self.assertEqual(params["turn"]["status"], "completed")
+                        break
+                self.assertEqual(accepted, 1, "expected the isolated command to require one approval")
+                self.assertEqual(len(running), 1, "shell command was not shown while running")
+                self.assertEqual(running, set(finished), "command completion did not update the same card")
+                item = next(iter(finished.values()))
+                self.assertEqual(item["status"], "completed")
+                self.assertEqual(item["exitCode"], 0)
+                self.assertIn(marker, item["aggregatedOutput"])
+                client.close()
+                client = None
+                stop()
+
+                client = start()
+                client.call("threads/resume", target)
+                history = client.call("threads/read", dict(target, include_turns=True, limit=20))
+                cards = [row for row in history["messages"] if row["role"] == "command"]
+                self.assertEqual(len(cards), 1)
+                self.assertIn(cards[0]["command"], commands)
+                self.assertIn(marker, cards[0]["text"])
+                self.assertEqual(cards[0]["status"], "completed")
+                self.assertEqual(cards[0]["exit_code"], 0)
+            finally:
+                if client is not None:
+                    client.close()
+                if (state / "endpoint.json").exists():
+                    stop()
+
     def test_antigravity_followup_while_streaming(self):
         with tempfile.TemporaryDirectory(prefix="modex-agy-steer-") as directory:
             workspace = Path(directory) / "workspace"

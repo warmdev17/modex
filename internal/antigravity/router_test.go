@@ -1013,3 +1013,72 @@ func TestRetiredClientUpdatesCannotRestoreUsage(t *testing.T) {
 		t.Fatalf("stale callback changed usage: %+v", c.usage)
 	}
 }
+
+func TestCommandCardLiveAndReplay(t *testing.T) {
+	var events []string
+	c := &chat{record: record{ID: "thread"}, active: "turn", emit: func(method string, raw json.RawMessage) { events = append(events, method+":"+string(raw)) }}
+	r := &Router{}
+	for _, raw := range []string{
+		`{"Kind":"tool_call","TurnID":"turn","ToolCallID":"c","Status":"in_progress","CommandTool":true,"Command":"printf hi"}`,
+		`{"Kind":"tool_call_update","TurnID":"turn","ToolCallID":"c","Status":"pending"}`,
+		`{"Kind":"tool_call_update","TurnID":"turn","ToolCallID":"c","Status":"completed","Output":"hi","ExitCode":0}`,
+		`{"Kind":"tool_call_update","TurnID":"turn","ToolCallID":"c","Status":"in_progress"}`,
+	} {
+		var u acp.Update
+		if err := json.Unmarshal([]byte(raw), &u); err != nil {
+			t.Fatal(err)
+		}
+		r.updateLocked(c, u)
+	}
+	b, _ := json.Marshal(c.messages)
+	if len(c.messages) != 1 || !strings.Contains(string(b), `"role":"command"`) || !strings.Contains(string(b), `"text":"hi"`) || !strings.Contains(string(b), `"exit_code":0`) {
+		t.Fatalf("history: %s", b)
+	}
+	if len(events) != 2 || !strings.Contains(events[0], "item/started") || !strings.Contains(events[1], "item/completed") {
+		t.Fatalf("events: %v", events)
+	}
+	replay := &chat{loading: true}
+	var u acp.Update
+	_ = json.Unmarshal([]byte(`{"Kind":"tool_call","ToolCallID":"c","Status":"completed","CommandTool":true,"Command":"printf hi","Output":"hi","ExitCode":0}`), &u)
+	r.updateLocked(replay, u)
+	b, _ = json.Marshal(replay.messages)
+	if len(replay.messages) != 1 || !strings.Contains(string(b), `"status":"completed"`) {
+		t.Fatalf("replay: %s", b)
+	}
+}
+
+func TestCommandSeparatesAssistantSegmentsAndClosesUnknown(t *testing.T) {
+	r := &Router{pending: map[string]pending{}}
+	c := &chat{record: record{ID: "t"}, active: "turn"}
+	r.updateLocked(c, acp.Update{Kind: "agent_message_chunk", TurnID: "turn", Text: "before"})
+	var u acp.Update
+	_ = json.Unmarshal([]byte(`{"Kind":"tool_call","TurnID":"turn","ToolCallID":"c","Status":"in_progress","CommandTool":true,"Command":"echo"}`), &u)
+	r.updateLocked(c, u)
+	r.updateLocked(c, acp.Update{Kind: "agent_message_chunk", TurnID: "turn", Text: "after"})
+	r.finishLocked(c, "turn", turnOutcome{status: "failed"})
+	if len(c.messages) != 3 || c.messages[0].ID == c.messages[2].ID || c.messages[1].Status != "unknown" {
+		t.Fatalf("messages: %+v", c.messages)
+	}
+}
+
+func TestCommandSparseCompletionAndTurnIsolation(t *testing.T) {
+	r := &Router{pending: map[string]pending{}}
+	var events []string
+	c := &chat{record: record{ID: "thread"}, active: "one", emit: func(method string, raw json.RawMessage) { events = append(events, method+string(raw)) }}
+	apply := func(s string) {
+		var u acp.Update
+		if err := json.Unmarshal([]byte(s), &u); err != nil {
+			t.Fatal(err)
+		}
+		r.updateLocked(c, u)
+	}
+	apply(`{"Kind":"tool_call","TurnID":"wrong","ToolCallID":"c","CommandTool":true,"Command":"bad"}`)
+	apply(`{"Kind":"tool_call","TurnID":"one","ToolCallID":"c","CommandTool":true,"Command":"echo ok","Status":"in_progress"}`)
+	apply(`{"Kind":"tool_call_update","TurnID":"one","ToolCallID":"c","ForeignTool":true,"Status":"completed","Output":"bad"}`)
+	apply(`{"Kind":"tool_call_update","TurnID":"one","ToolCallID":"c","Output":"ok","ExitCode":0}`)
+	apply(`{"Kind":"tool_call_update","TurnID":"one","ToolCallID":"c","Status":"completed"}`)
+	apply(`{"Kind":"tool_call_update","TurnID":"one","ToolCallID":"c","Status":"failed","Output":"late"}`)
+	if len(c.messages) != 1 || c.messages[0].Text != "ok" || c.messages[0].Status != "completed" || c.messages[0].ExitCode == nil || *c.messages[0].ExitCode != 0 || len(events) != 2 {
+		t.Fatalf("messages %+v events %v", c.messages, events)
+	}
+}

@@ -116,3 +116,71 @@ func (c *chat) emitInvocation(turn, action string, target invocationTarget) {
 		emitEvent(c.emit, event, map[string]any{"threadId": c.ID, "turnId": turn, "item": item})
 	}
 }
+
+type commandState struct {
+	index    int
+	terminal bool
+}
+
+func (c *chat) updateCommand(u acp.Update) {
+	if !c.loading && (c.active == "" || c.active != u.TurnID) {
+		return
+	}
+	if u.ForeignTool {
+		return
+	}
+	state, found := c.commandCalls[u.ToolCallID]
+	if !found {
+		if u.Kind != "tool_call" || !u.CommandTool || u.Command == "" || len(c.commandCalls) >= 128 {
+			return
+		}
+		if c.commandCalls == nil {
+			c.commandCalls = make(map[string]commandState)
+		}
+		id := newInvocationTarget("", u.TurnID, u.ToolCallID, len(c.messages)).ID
+		if !c.loading {
+			c.segment++
+		}
+		state.index = len(c.messages)
+		c.messages = append(c.messages, message{ID: id, Role: "command", Turn: u.TurnID, Command: u.Command, Status: "inProgress"})
+	}
+	if state.terminal {
+		return
+	}
+	m := &c.messages[state.index]
+	if u.Output != "" {
+		m.Text = u.Output
+	}
+	if u.ExitCode != nil {
+		m.ExitCode = u.ExitCode
+	}
+	switch u.Status {
+	case "completed":
+		m.Status = "completed"
+		state.terminal = true
+	case "failed":
+		m.Status = "failed"
+		state.terminal = true
+	case "cancelled":
+		m.Status = "interrupted"
+		state.terminal = true
+	}
+	c.commandCalls[u.ToolCallID] = state
+	if c.loading {
+		if !state.terminal {
+			m.Status = "unknown"
+		}
+		return
+	}
+	if !found && !state.terminal {
+		c.emitCommand(*m, "item/started")
+	}
+	if state.terminal {
+		c.emitCommand(*m, "item/completed")
+	}
+}
+
+func (c *chat) emitCommand(m message, event string) {
+	item := map[string]any{"id": m.ID, "type": "commandExecution", "command": m.Command, "aggregatedOutput": m.Text, "status": m.Status, "exitCode": m.ExitCode}
+	emitEvent(c.emit, event, map[string]any{"threadId": c.ID, "turnId": m.Turn, "item": item})
+}

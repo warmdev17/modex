@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/warmdev/modex/internal/bridge"
 	"github.com/warmdev/modex/internal/diagnostic"
@@ -64,18 +65,23 @@ type configResult struct {
 }
 
 type Update struct {
-	Used, Size int64
-	Model      string
-	SessionID  string
-	TurnID     string
-	Kind       string
-	Text       string
-	ToolCallID string
-	Status     string
-	Subagent   bool
-	Role       string
-	URI        string
-	MIME       string
+	Used, Size  int64
+	Model       string
+	SessionID   string
+	TurnID      string
+	Kind        string
+	Text        string
+	ToolCallID  string
+	Status      string
+	Subagent    bool
+	Role        string
+	CommandTool bool
+	ForeignTool bool
+	Command     string
+	Output      string
+	ExitCode    *int
+	URI         string
+	MIME        string
 }
 
 type PermissionRequest struct {
@@ -621,11 +627,8 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	var event struct {
 		ID     string `json:"sessionId"`
 		Update struct {
-			Kind    string `json:"sessionUpdate"`
-			Content struct {
-				Type, Text, URI, MimeType string
-				Resource                  struct{ URI, MimeType string }
-			} `json:"content"`
+			Kind          string          `json:"sessionUpdate"`
+			Content       json.RawMessage `json:"content"`
 			ConfigOptions []nativeOption  `json:"configOptions"`
 			Used          json.RawMessage `json:"used"`
 			Size          json.RawMessage `json:"size"`
@@ -633,9 +636,9 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 			Title         string          `json:"title"`
 			ToolCallID    string          `json:"toolCallId"`
 			Status        string          `json:"status"`
-			RawInput      struct {
-				Role string `json:"Role"`
-			} `json:"rawInput"`
+			ToolKind      string          `json:"kind"`
+			RawInput      json.RawMessage `json:"rawInput"`
+			RawOutput     json.RawMessage `json:"rawOutput"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(raw, &event) != nil {
@@ -671,25 +674,32 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	case "session_info_update":
 		update.Text = event.Update.Title
 	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
-		switch event.Update.Content.Type {
+		var content struct {
+			Type, Text, URI, MimeType string
+			Resource                  struct{ URI, MimeType string }
+		}
+		if json.Unmarshal(event.Update.Content, &content) != nil {
+			return
+		}
+		switch content.Type {
 		case "text":
-			update.Text = event.Update.Content.Text
+			update.Text = content.Text
 		case "image", "resource_link":
 			if event.Update.Kind != "user_message_chunk" {
 				return
 			}
-			update.URI = event.Update.Content.URI
-			update.MIME = event.Update.Content.MimeType
+			update.URI = content.URI
+			update.MIME = content.MimeType
 		case "resource":
 			if event.Update.Kind != "user_message_chunk" {
 				return
 			}
-			update.URI = event.Update.Content.Resource.URI
-			update.MIME = event.Update.Content.Resource.MimeType
+			update.URI = content.Resource.URI
+			update.MIME = content.Resource.MimeType
 		default:
 			return
 		}
-		if event.Update.Content.Type != "text" && update.URI == "" {
+		if content.Type != "text" && update.URI == "" {
 			return
 		}
 	case "tool_call", "tool_call_update":
@@ -698,12 +708,29 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 		}
 		update.ToolCallID = event.Update.ToolCallID
 		switch event.Update.Status {
-		case "pending", "in_progress", "completed", "failed":
+		case "pending", "in_progress", "completed", "failed", "cancelled":
 			update.Status = event.Update.Status
 		}
 		update.Subagent = event.Update.Name == "invoke_subagent"
-		if update.Subagent && safeScalar(event.Update.RawInput.Role, 64) {
-			update.Role = event.Update.RawInput.Role
+		var input struct{ Role, CommandLine string }
+		_ = json.Unmarshal(event.Update.RawInput, &input)
+		if update.Subagent && safeScalar(input.Role, 64) {
+			update.Role = input.Role
+		}
+		update.CommandTool = event.Update.Name == "run_command" && event.Update.ToolKind == "execute"
+		update.ForeignTool = (event.Update.Name != "" && event.Update.Name != "run_command") || (event.Update.ToolKind != "" && event.Update.ToolKind != "execute")
+		if update.CommandTool {
+			update.Command = boundedUTF8(input.CommandLine, 4<<10)
+		}
+		if !update.ForeignTool {
+			var output struct {
+				Output   string `json:"output"`
+				ExitCode *int   `json:"exit_code"`
+			}
+			if json.Unmarshal(event.Update.RawOutput, &output) == nil {
+				update.Output = boundedOutput(output.Output)
+				update.ExitCode = output.ExitCode
+			}
 		}
 	default:
 		return
@@ -728,6 +755,28 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	if emit != nil {
 		emit(update)
 	}
+}
+
+func boundedUTF8(s string, max int) string {
+	s = strings.ToValidUTF8(s, "�")
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max]
+	for !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func boundedOutput(s string) string {
+	const limit = 64 << 10
+	const marker = "\n[Output truncated at 64 KiB]"
+	s = strings.ToValidUTF8(s, "�")
+	if len(s) <= limit {
+		return s
+	}
+	return boundedUTF8(s, limit-len(marker)) + marker
 }
 
 func safeScalar(value string, max int) bool {

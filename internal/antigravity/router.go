@@ -43,6 +43,8 @@ type message struct {
 	ID          string                 `json:"id"`
 	Role        string                 `json:"role"`
 	Text        string                 `json:"text"`
+	Command     string                 `json:"command,omitempty"`
+	ExitCode    *int                   `json:"exit_code,omitempty"`
 	Turn        string                 `json:"turn_id,omitempty"`
 	Status      string                 `json:"status,omitempty"`
 	Notice      *diagnostic.TurnNotice `json:"turn_notice,omitempty"`
@@ -65,6 +67,7 @@ type chat struct {
 	messages              []message
 	calls                 map[string]invocationTarget
 	replayCalls           map[string]int
+	commandCalls          map[string]commandState
 	setting, optionsDirty bool
 	titleDirty            bool
 	emit                  func(string, json.RawMessage)
@@ -276,7 +279,7 @@ func (r *Router) update(workspace string, source **acp.Client, u acp.Update) {
 		return
 	}
 	if c.admitting {
-		c.queuedBytes += len(u.Text) + len(u.URI) + len(u.ToolCallID) + 256
+		c.queuedBytes += len(u.Text) + len(u.URI) + len(u.ToolCallID) + len(u.Command) + len(u.Output) + 256
 		if c.queuedBytes > 4<<20 || len(c.queued) >= 1024 {
 			if !c.queueOverflow {
 				c.queueOverflow = true
@@ -345,6 +348,7 @@ func (r *Router) updateLocked(c *chat, u acp.Update) {
 		return
 	}
 	if u.ToolCallID != "" {
+		c.updateCommand(u)
 		c.updateInvocation(u)
 		return
 	}
@@ -372,6 +376,7 @@ func (r *Router) updateLocked(c *chat, u acp.Update) {
 			} else {
 				if role == "user" {
 					clear(c.replayCalls)
+					clear(c.commandCalls)
 				}
 				c.messages = append(c.messages, message{ID: fmt.Sprintf("history-%d", len(c.messages)), Role: role, Text: u.Text})
 			}
@@ -476,6 +481,7 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 	c.loading = true
 	c.messages = nil
 	c.calls = nil
+	c.commandCalls = nil
 	saved := c.record
 	r.mu.Unlock()
 	defer func() {
@@ -833,6 +839,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		c.active = turn
 		c.emit = emit
 		c.calls = nil
+		c.commandCalls = nil
 		c.admitting = true
 		c.segment = 0
 		r.mu.Unlock()
@@ -1011,6 +1018,17 @@ func (r *Router) finish(c *chat, turn string, outcome turnOutcome) {
 }
 
 func (r *Router) finishLocked(c *chat, turn string, outcome turnOutcome) {
+	for _, state := range c.commandCalls {
+		if !state.terminal {
+			m := &c.messages[state.index]
+			m.Status = "unknown"
+			if outcome.status == "interrupted" {
+				m.Status = "interrupted"
+			}
+			c.emitCommand(*m, "item/completed")
+		}
+	}
+	c.commandCalls = nil
 	for _, target := range c.calls {
 		if target.Status == "running" || target.Status == "pendingInit" {
 			target.Status = "unknown"
