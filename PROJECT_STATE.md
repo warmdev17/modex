@@ -1,5 +1,29 @@
 # Modex project state
 
+## Android model picker
+
+Updated 2026-11-27T21:30:30+07:00 on `feat/android-model-picker`, APK source
+`bcf0929` based on `884538a`. Codex, OpenCode and Antigravity share the model
+dropdown and level slider. Brand matching uses the model ID before its label.
+Antigravity retains per-option acknowledgement, commits slider gestures once,
+and offers a dropdown when the host reports an unlisted current level.
+
+- `go test ./... -timeout=120s` passed with umask 022. Android Gradle unit,
+  lint and both debug APK builds passed offline with 183 JVM tests and zero
+  lint errors. Independent review identified and the smoke covers pending
+  acknowledgement and recovery from unlisted levels.
+- API 33 emulator passed shared OpenCode chat creation and Codex native
+  controls. Antigravity passed twice at 320 dp and font scale 1.3 after
+  stabilizing the test gesture. Screenshots confirmed the final Claude and
+  Gemini vector rendering. The older OpenCode capability smoke could not
+  find its expected chat header on either dev.39 or the preview.
+- Established signer and `dev.modex` package verified for private preview
+  code 49. Upgrade from public code 48 preserved synthetic encrypted state.
+  APK staged in `/home/warmdev/Downloads/modex-preview-49-model-picker.apk`
+  for the in-app SFTP picker. SHA-256
+  `c37ab44329d6e152e7e28dc48ee6f922b6f6aca35999a2f9ecff4b5c8769ceb7`.
+  Physical-phone download and install remain unverified. Branch is local.
+
 ## Combined agent routing and Antigravity controls
 
 Updated 2026-11-27T20:43:10+07:00 on `main` after merge commit `79a64a6`.
