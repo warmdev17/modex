@@ -1,5 +1,41 @@
 # Modex project state
 
+## Antigravity attachments
+
+Updated 2026-11-27T22:54:14+07:00 on `feat/antigravity-attachments`. Host
+source `90a83d1`, boundary tests `8fb0591`, paired Android source `df617c9`.
+See the [implementation plan](docs/superpowers/plans/2026-11-27-antigravity-attachments.md).
+PNG/JPEG and UTF-8 files can be sent with or without text. The host checks
+ACP capabilities and enforces up to eight files, 8 MiB total, and 256 KiB
+per text file. Android retains drafts on rejected or malformed replies
+and clears submitted files on a valid acknowledgement.
+
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with
+  umask 022 and `go vet ./...` passed through `8fb0591`. Two fixture
+  deadlines from an earlier parallel run passed in targeted and serialized
+  reruns. Windows amd64 and macOS arm64 cross-builds passed.
+- The isolated supervisor using the stamped `90a83d1` binary passed
+  `test_antigravity_supervisor.py` (real AGY 1.5.17 mixed image/text delivery
+  and text recovery after restart) and `test_shared_agent_supervisor.py`.
+  A direct native ACP replay returned one resource reference and omitted
+  the image, so recovery can lack previews for previously sent files.
+- Offline Android Gradle unit/lint/debug app and test builds passed
+  (187 tests, zero lint errors). Emulator checks passed for attachment-only,
+  older-host gating, ViewModel acknowledgements, AGY options, shared chats,
+  SFTP attachment regression and in-place upgrade from code 49 to code 50
+  using synthetic encrypted state. Physical Android and non-Linux
+  runtime behavior remain unverified.
+- Private signed preview in the main checkout at
+  `.modex/previews/modex-0.1.0-preview.50-antigravity-attachments.apk`.
+  APK SHA-256
+  `1f6c1754fd2f3de2d33490cb2a07c3ddd9d37ca7e6ccaf48309718bffc10f2e7`.
+  Verified host SHA-256
+  `21b392d38d1205a3c91af5cd588974ed6314eb839beb53fafbd82247d0ee188e`.
+  Previous host binary backed up at
+  `/tmp/modex-agy-attachments.QInbKP/modex-host.previous`.
+  Final activation uses the delayed service restart. Its execution is
+  unverified at handoff. Branch and preview are local.
+
 ## Android model picker
 
 Updated 2026-11-27T22:05:36+07:00 on `feat/android-model-picker`, APK source
