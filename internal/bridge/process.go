@@ -23,6 +23,7 @@ type Process struct {
 	cmd            *exec.Cmd
 	stdin          io.WriteCloser
 	reader         *bufio.Reader
+	jsonRPC        bool
 	mu             sync.Mutex
 	writeMu        sync.Mutex
 	once           sync.Once
@@ -54,27 +55,29 @@ func (p *Process) Respond(ctx context.Context, id, result json.RawMessage) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	return json.NewEncoder(p.stdin).Encode(map[string]any{"id": id, "result": result})
+	return p.writeMessage(map[string]any{"id": id, "result": result})
 }
 
 func (p *Process) RespondError(ctx context.Context, id, rpcError json.RawMessage) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	return json.NewEncoder(p.stdin).Encode(map[string]any{"id": id, "error": rpcError})
+	return p.writeMessage(map[string]any{"id": id, "error": rpcError})
 }
 
 func (p *Process) Reject(id json.RawMessage) error {
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	return json.NewEncoder(p.stdin).Encode(map[string]any{"id": id, "error": map[string]any{"code": -32601, "message": "unsupported or invalid Modex decision request"}})
+	return p.writeMessage(map[string]any{"id": id, "error": map[string]any{"code": -32601, "message": "unsupported or invalid Modex decision request"}})
 }
 
 func StartProcess(ctx context.Context, binary string, args []string, cwd string, env []string) (*Process, error) {
+	return startProcess(ctx, binary, args, cwd, env, false)
+}
+
+func StartJSONRPCProcess(ctx context.Context, binary string, args []string, cwd string, env []string) (*Process, error) {
+	return startProcess(ctx, binary, args, cwd, env, true)
+}
+
+func startProcess(ctx context.Context, binary string, args []string, cwd string, env []string, jsonRPC bool) (*Process, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir = cwd
 	cmd.Env = env
@@ -93,14 +96,14 @@ func StartProcess(ctx context.Context, binary string, args []string, cwd string,
 		_ = stdout.Close()
 		return nil, errors.New("cannot start Codex executable")
 	}
-	p := &Process{cmd: cmd, stdin: stdin, reader: bufio.NewReader(stdout), pending: map[int]chan processResponse{}}
+	p := &Process{cmd: cmd, stdin: stdin, reader: bufio.NewReader(stdout), jsonRPC: jsonRPC, pending: map[int]chan processResponse{}}
 	go p.readLoop()
 	return p, nil
 }
 
 // Fork starts an independent app-server with the exact same executable, workspace and environment.
 func (p *Process) Fork(ctx context.Context) (*Process, error) {
-	return StartProcess(ctx, p.cmd.Path, p.cmd.Args[1:], p.cmd.Dir, p.cmd.Environ())
+	return startProcess(ctx, p.cmd.Path, p.cmd.Args[1:], p.cmd.Dir, p.cmd.Environ(), p.jsonRPC)
 }
 
 func (p *Process) Close() { p.close(false) }
@@ -139,16 +142,21 @@ func (p *Process) Call(ctx context.Context, method string, params any) (json.Raw
 }
 
 func (p *Process) CallEvents(ctx context.Context, method string, params any, onNotification func(string, json.RawMessage)) (json.RawMessage, error) {
-	return p.callEvents(ctx, method, params, onNotification, false)
+	return p.callEvents(ctx, method, params, onNotification, false, nil)
+}
+
+// CallWithSent signals when a caller can send a follow-up notification.
+func (p *Process) CallWithSent(ctx context.Context, method string, params any, sent func()) (json.RawMessage, error) {
+	return p.callEvents(ctx, method, params, nil, false, sent)
 }
 
 // CallPersistent leaves the supervisor-owned backend alive after an uncertain reply.
 // Callers must refresh state, never automatically replay the request.
 func (p *Process) CallPersistent(ctx context.Context, method string, params any) (json.RawMessage, error) {
-	return p.callEvents(ctx, method, params, nil, true)
+	return p.callEvents(ctx, method, params, nil, true, nil)
 }
 
-func (p *Process) callEvents(ctx context.Context, method string, params any, onNotification func(string, json.RawMessage), persistent bool) (json.RawMessage, error) {
+func (p *Process) callEvents(ctx context.Context, method string, params any, onNotification func(string, json.RawMessage), persistent bool, sent func()) (json.RawMessage, error) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -162,13 +170,14 @@ func (p *Process) callEvents(ctx context.Context, method string, params any, onN
 		p.onNotification = onNotification
 	}
 	p.mu.Unlock()
-	p.writeMu.Lock()
-	err := json.NewEncoder(p.stdin).Encode(map[string]any{"id": id, "method": method, "params": params})
-	p.writeMu.Unlock()
+	err := p.writeMessage(map[string]any{"id": id, "method": method, "params": params})
 	if err != nil {
 		p.removePending(id)
 		p.Close()
 		return nil, errors.New("cannot write Codex request")
+	}
+	if sent != nil {
+		sent()
 	}
 	select {
 	case result := <-done:
@@ -188,11 +197,18 @@ func (p *Process) callEvents(ctx context.Context, method string, params any, onN
 }
 
 func (p *Process) Notify(method string, params any) error {
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
 	message := map[string]any{"method": method}
 	if params != nil {
 		message["params"] = params
+	}
+	return p.writeMessage(message)
+}
+
+func (p *Process) writeMessage(message map[string]any) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	if p.jsonRPC {
+		message["jsonrpc"] = "2.0"
 	}
 	return json.NewEncoder(p.stdin).Encode(message)
 }
@@ -230,13 +246,14 @@ func (p *Process) readLoop() {
 			return
 		}
 		var message struct {
-			ID     json.RawMessage `json:"id"`
-			Method string          `json:"method"`
-			Params json.RawMessage `json:"params"`
-			Result json.RawMessage `json:"result"`
-			Error  json.RawMessage `json:"error"`
+			Version string          `json:"jsonrpc"`
+			ID      json.RawMessage `json:"id"`
+			Method  string          `json:"method"`
+			Params  json.RawMessage `json:"params"`
+			Result  json.RawMessage `json:"result"`
+			Error   json.RawMessage `json:"error"`
 		}
-		if json.Unmarshal(line, &message) != nil {
+		if json.Unmarshal(line, &message) != nil || (p.jsonRPC && message.Version != "2.0") {
 			p.failPending(errors.New("invalid app-server JSON"))
 			return
 		}
