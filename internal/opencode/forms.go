@@ -13,6 +13,7 @@ import (
 
 const (
 	maxTextFormFields     = 8
+	maxFormChoices        = 16
 	maxTextAnswerBytes    = 4096
 	unsupportedFormNotice = "OpenCode is waiting for an input form that this Modex build cannot display. Resolve it on the computer and retry."
 )
@@ -27,12 +28,14 @@ type nativeForm struct {
 }
 
 type textFormField struct {
-	Key         string `json:"key"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Required    bool   `json:"required"`
-	Hidden      bool   `json:"hidden"`
+	Key         string          `json:"key"`
+	Type        string          `json:"type"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Required    bool            `json:"required"`
+	Hidden      bool            `json:"hidden"`
+	Options     json.RawMessage `json:"options"`
+	Custom      bool            `json:"custom"`
 }
 
 func validFormIdentity(sessionID, formID string) bool {
@@ -62,8 +65,8 @@ func (d *Decisions) handleTextForm(properties json.RawMessage) bool {
 	return true
 }
 
-// shortcut: support required free text with the existing card, extend both
-// ends of the contract before accepting constraints, choices or other types.
+// shortcut: the existing card sends one string per field and always offers
+// Other for choices. Extend the Android contract for fixed or multiple choices.
 func (d *Decisions) addTextFormLocked(form nativeForm, turnID string) string {
 	id := decisionKey(form.SessionID, form.ID)
 	if _, consumed := d.consumed[id]; consumed || d.pending[id] != nil {
@@ -73,12 +76,12 @@ func (d *Decisions) addTextFormLocked(form nativeForm, turnID string) string {
 		return unsupportedFormNotice
 	}
 	var keys []string
-	questions := make([]map[string]string, 0, len(form.Fields))
+	questions := make([]map[string]any, 0, len(form.Fields))
 	seen := make(map[string]bool, len(form.Fields))
 	for _, raw := range form.Fields {
 		var field textFormField
 		if decodeStrictDecision(raw, &field) != nil || field.Type != "string" ||
-			!field.Required || field.Hidden || !formFieldKey.MatchString(field.Key) ||
+			field.Hidden || !formFieldKey.MatchString(field.Key) ||
 			field.Key == "constructor" || field.Key == "prototype" || seen[field.Key] {
 			return unsupportedFormNotice
 		}
@@ -89,8 +92,18 @@ func (d *Decisions) addTextFormLocked(form nativeForm, turnID string) string {
 		if question == "" {
 			return unsupportedFormNotice
 		}
+		card := map[string]any{"id": field.Key, "question": question}
+		if field.Options != nil {
+			options := formChoiceOptions(field.Options)
+			if !field.Custom || len(options) == 0 {
+				return unsupportedFormNotice
+			}
+			card["options"] = options
+		} else if !field.Required {
+			return unsupportedFormNotice
+		}
 		keys = append(keys, field.Key)
-		questions = append(questions, map[string]string{"id": field.Key, "question": question})
+		questions = append(questions, card)
 		seen[field.Key] = true
 	}
 	if len(d.pending) >= 128 || len(d.pending)+len(d.consumed) >= 16384 {
@@ -106,6 +119,32 @@ func (d *Decisions) addTextFormLocked(form nativeForm, turnID string) string {
 	d.pending[id] = decision
 	d.emitRequiredLocked(decision)
 	return ""
+}
+
+func formChoiceOptions(raw json.RawMessage) []map[string]string {
+	var options []struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+	}
+	if decodeStrictDecision(raw, &options) != nil || len(options) == 0 || len(options) > maxFormChoices {
+		return nil
+	}
+	choices := make([]map[string]string, 0, len(options))
+	seen := make(map[string]bool, len(options))
+	for _, option := range options {
+		label := option.Label
+		if label == "" || label != option.Value || label != decisionText(label, 256) || seen[label] {
+			return nil
+		}
+		choice := map[string]string{"label": label}
+		if description := decisionText(option.Description, 512); description != "" {
+			choice["description"] = description
+		}
+		choices = append(choices, choice)
+		seen[label] = true
+	}
+	return choices
 }
 
 func textFormAnswer(keys []string, raw json.RawMessage) (map[string]string, error) {
