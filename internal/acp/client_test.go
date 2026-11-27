@@ -595,7 +595,11 @@ func TestOptionUpdatesAndBusySession(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { _, err := c.Prompt(ctx, id, "busy", "cancel"); done <- err }()
-	<-events
+	for event := range events {
+		if event.TurnID == "busy" {
+			break
+		}
+	}
 	if err := c.SetOption(ctx, id, "model", "b"); err == nil {
 		t.Fatal("accepted change during prompt")
 	}
@@ -765,6 +769,26 @@ func TestSessionTitleUpdateForKnownIdleSession(t *testing.T) {
 	c.handleUpdate(json.RawMessage(`{"sessionId":"unknown","update":{"sessionUpdate":"session_info_update","title":"Other"}}`), emit)
 	c.handleUpdate(json.RawMessage(`{"sessionId":"known","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"idle"}}}`), emit)
 	if len(updates) != 1 || updates[0].Text != "  Native title  " {
+		t.Fatalf("updates: %#v", updates)
+	}
+}
+
+func TestUsageUpdatesValidateAndScopeNativeSamples(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"known": {loaded: true, options: []Option{{ID: "model", CurrentValue: "initial"}}}}}
+	var updates []Update
+	emit := func(u Update) { updates = append(updates, u) }
+	for _, raw := range []string{
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":0,"size":1048576}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":15709,"size":1048576}}`,
+		`{"sessionId":"other","update":{"sessionUpdate":"usage_update","used":1,"size":10}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":-1,"size":10}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":1,"size":0}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":1.5,"size":10}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","size":10}}`,
+	} {
+		c.handleUpdate(json.RawMessage(raw), emit)
+	}
+	if len(updates) != 2 || updates[0].Used != 0 || updates[1].Used != 15709 || updates[1].Size != 1048576 || updates[0].Model != "initial" {
 		t.Fatalf("updates: %#v", updates)
 	}
 }

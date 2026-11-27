@@ -865,14 +865,15 @@ func TestNativeTitleUpdatesAndRecovery(t *testing.T) {
 	}
 	var events []string
 	r.mu.Lock()
+	client := r.clients[root]
 	r.chats["agy:123"].emit = func(method string, params json.RawMessage) { events = append(events, method+":"+string(params)) }
 	r.mu.Unlock()
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "  Live title  "})
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Live title"})
-	r.update("/other", acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Wrong"})
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "bad\x01title"})
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: strings.Repeat("é", 257)})
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "   "})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "  Live title  "})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Live title"})
+	r.update("/other", nil, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Wrong"})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "bad\x01title"})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: strings.Repeat("é", 257)})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "   "})
 	if len(events) != 1 || !strings.Contains(events[0], `"threadName":"Live title"`) {
 		t.Fatalf("events: %v", events)
 	}
@@ -896,6 +897,7 @@ func TestTitleSaveRetriesWithoutDuplicateEventsOrInterruptingStream(t *testing.T
 	id := result.(map[string]any)["thread"].(map[string]any)["id"].(string)
 	r.mu.Lock()
 	c := r.chats[id]
+	client := r.clients[root]
 	c.emit = emit
 	c.active = "turn"
 	r.mu.Unlock()
@@ -903,15 +905,15 @@ func TestTitleSaveRetriesWithoutDuplicateEventsOrInterruptingStream(t *testing.T
 	if err := os.Rename(state, broken); err != nil {
 		t.Fatal(err)
 	}
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "New title"})
-	r.update(root, acp.Update{SessionID: "native", Kind: "agent_message_chunk", TurnID: "turn", Text: "still streaming"})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "New title"})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "agent_message_chunk", TurnID: "turn", Text: "still streaming"})
 	if got := r.Threads()[0]["name"]; got != "New title" {
 		t.Fatalf("visible title: %v", got)
 	}
 	if err := os.Rename(broken, state); err != nil {
 		t.Fatal(err)
 	}
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "New title"})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "New title"})
 	saved := New(context.Background(), bin, root, state)
 	if got := saved.Threads()[0]["name"]; got != "New title" {
 		t.Fatalf("duplicate retry did not persist title: %v", got)
@@ -923,7 +925,7 @@ func TestTitleSaveRetriesWithoutDuplicateEventsOrInterruptingStream(t *testing.T
 	if err := os.Rename(state, broken); err != nil {
 		t.Fatal(err)
 	}
-	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Next title"})
+	r.update(root, &client, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Next title"})
 	if err := os.Rename(broken, state); err != nil {
 		t.Fatal(err)
 	}
@@ -938,5 +940,76 @@ func TestTitleSaveRetriesWithoutDuplicateEventsOrInterruptingStream(t *testing.T
 	saved.Close()
 	if len(events) != 3 {
 		t.Fatalf("duplicate event on resume: %v", events)
+	}
+}
+
+func TestUsageSnapshotDeduplicatesAndAcceptsCompaction(t *testing.T) {
+	root := t.TempDir()
+	r := New(context.Background(), "", root, t.TempDir())
+	defer r.Close()
+	var events []string
+	c := &chat{record: record{ID: "agy:test", Native: "native", Workspace: root}, emit: func(method string, raw json.RawMessage) {
+		if method == "thread/tokenUsage/updated" {
+			events = append(events, string(raw))
+		}
+	}}
+	r.chats[c.ID] = c
+	r.update(root, nil, acp.Update{SessionID: "native", Kind: "usage_update", Used: 15709, Size: 1048576})
+	r.update(root, nil, acp.Update{SessionID: "native", Kind: "usage_update", Used: 15709, Size: 1048576})
+	r.update(root, nil, acp.Update{SessionID: "native", Kind: "usage_update", Used: 100, Size: 1048576})
+	r.update(root, nil, acp.Update{SessionID: "foreign", Kind: "usage_update", Used: 200, Size: 1048576})
+	r.update(t.TempDir(), nil, acp.Update{SessionID: "native", Kind: "usage_update", Used: 300, Size: 1048576})
+	v, _, err := r.Handle(context.Background(), bridge.Command{Method: "threads/status", Params: json.RawMessage(`{"thread_id":"agy:test"}`)}, nil)
+	raw, _ := json.Marshal(v)
+	if err != nil || len(events) != 2 || !strings.Contains(events[0], `"totalTokens":15709`) || !strings.Contains(string(raw), `"totalTokens":100`) {
+		t.Fatalf("events=%v status=%s err=%v", events, raw, err)
+	}
+}
+
+func TestUsageModelChangesResetOnlyPreviousSample(t *testing.T) {
+	root := t.TempDir()
+	r := New(context.Background(), "", root, t.TempDir())
+	defer r.Close()
+	var events []string
+	c := &chat{record: record{ID: "agy:test", Native: "native", Workspace: root}, emit: func(method string, raw json.RawMessage) {
+		if method == "thread/tokenUsage/updated" {
+			events = append(events, string(raw))
+		}
+	}}
+	r.chats[c.ID] = c
+	update := func(u acp.Update) { u.SessionID = "native"; r.update(root, nil, u) }
+	update(acp.Update{Kind: "usage_update", Model: "a", Used: 50, Size: 100})
+	update(acp.Update{Kind: "model_update", Model: "b"})
+	update(acp.Update{Kind: "usage_update", Used: 20, Size: 200})
+	update(acp.Update{Kind: "model_update", Model: "b"})
+	if len(events) != 3 || !strings.Contains(events[1], `"tokenUsage":null`) || c.usage == nil || c.usage.Last.TotalTokens != 20 {
+		t.Fatalf("events=%v usage=%+v", events, c.usage)
+	}
+}
+
+func TestRetiredClientUpdatesCannotRestoreUsage(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	r := New(context.Background(), bin, root, state)
+	defer r.Close()
+	old, err := r.client(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &chat{record: record{ID: "agy:test", Native: "native", Workspace: root}}
+	r.chats[c.ID] = c
+	r.update(root, &old, acp.Update{SessionID: "native", Kind: "usage_update", Used: 10, Size: 100})
+	r.retire(root, old)
+	r.update(root, &old, acp.Update{SessionID: "native", Kind: "usage_update", Used: 10, Size: 100})
+	if c.usage != nil {
+		t.Fatalf("retired callback restored usage: %+v", c.usage)
+	}
+	current, err := r.client(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.update(root, &current, acp.Update{SessionID: "native", Kind: "usage_update", Used: 20, Size: 100})
+	r.update(root, &old, acp.Update{SessionID: "native", Kind: "usage_update", Used: 10, Size: 100})
+	if c.usage == nil || c.usage.Last.TotalTokens != 20 {
+		t.Fatalf("stale callback changed usage: %+v", c.usage)
 	}
 }

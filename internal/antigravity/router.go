@@ -49,7 +49,15 @@ type message struct {
 	Activity    *invocationItem        `json:"activity_item,omitempty"`
 	Attachments []attachment           `json:"attachments,omitempty"`
 }
+type contextUsage struct {
+	Last struct {
+		TotalTokens int64 `json:"totalTokens"`
+	} `json:"last"`
+	ModelContextWindow int64 `json:"modelContextWindow"`
+}
 type chat struct {
+	usage      *contextUsage
+	usageModel string
 	record
 	loaded                bool
 	loading               bool
@@ -238,16 +246,25 @@ func (r *Router) client(workspace string) (*acp.Client, error) {
 	if c := r.clients[workspace]; c != nil {
 		return c, nil
 	}
-	c, e := acp.StartWithPermissions(r.ctx, r.binary, workspace, func(u acp.Update) { r.update(workspace, u) }, func(p acp.PermissionRequest) bool { return r.permission(workspace, p) })
+	var c *acp.Client
+	var e error
+	c, e = acp.StartWithPermissions(r.ctx, r.binary, workspace, func(u acp.Update) { r.update(workspace, &c, u) }, func(p acp.PermissionRequest) bool { return r.permission(workspace, p) })
 	if e != nil {
 		return nil, e
 	}
 	r.clients[workspace] = c
 	return c, nil
 }
-func (r *Router) update(workspace string, u acp.Update) {
+func (r *Router) update(workspace string, source **acp.Client, u acp.Update) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var client *acp.Client
+	if source != nil {
+		client = *source
+	}
+	if r.clients[workspace] != client {
+		return
+	}
 	var c *chat
 	for _, candidate := range r.chats {
 		if candidate.Workspace == workspace && candidate.Native == u.SessionID {
@@ -293,6 +310,36 @@ func (r *Router) setTitleLocked(c *chat, value string) {
 }
 
 func (r *Router) updateLocked(c *chat, u acp.Update) {
+	if u.Kind == "model_update" {
+		if c.usageModel != "" && c.usageModel != u.Model {
+			r.clearUsageLocked(c)
+		}
+		c.usageModel = u.Model
+		return
+	}
+	if u.Kind == "usage_update" {
+		if u.Model != "" {
+			if c.usageModel != "" && c.usageModel != u.Model {
+				r.clearUsageLocked(c)
+			}
+			c.usageModel = u.Model
+		}
+		if u.Used < 0 || u.Size <= 0 {
+			return
+		}
+		if c.usage != nil && c.usage.Last.TotalTokens == u.Used && c.usage.ModelContextWindow == u.Size {
+			return
+		}
+		usage := &contextUsage{ModelContextWindow: u.Size}
+		usage.Last.TotalTokens = u.Used
+		c.usage = usage
+		params := map[string]any{"threadId": c.ID, "tokenUsage": usage}
+		if u.TurnID != "" {
+			params["turnId"] = u.TurnID
+		}
+		emitEvent(c.emit, "thread/tokenUsage/updated", params)
+		return
+	}
 	if u.Kind == "session_info_update" {
 		r.setTitleLocked(c, u.Text)
 		return
@@ -345,6 +392,13 @@ func (r *Router) updateLocked(c *chat, u acp.Update) {
 		c.messages = append(c.messages, message{ID: item, Role: "assistant", Turn: u.TurnID, Text: u.Text})
 	}
 	emitEvent(c.emit, "item/agentMessage/delta", map[string]any{"threadId": c.ID, "turnId": u.TurnID, "itemId": item, "delta": u.Text})
+}
+func (r *Router) clearUsageLocked(c *chat) {
+	if c.usage == nil {
+		return
+	}
+	c.usage = nil
+	emitEvent(c.emit, "thread/tokenUsage/updated", map[string]any{"threadId": c.ID, "tokenUsage": nil})
 }
 func (r *Router) flushUpdates(c *chat) {
 	c.admitting = false
@@ -417,6 +471,8 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		r.mu.Unlock()
 		return nil, errors.New("session is loading")
 	}
+	r.clearUsageLocked(c)
+	c.usageModel = ""
 	c.loading = true
 	c.messages = nil
 	c.calls = nil
@@ -690,7 +746,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		return result, true, nil
 	case "threads/status":
 		r.mu.Lock()
-		result := map[string]any{"session": session(c), "token_usage": nil, "rate_limits": nil}
+		result := map[string]any{"session": session(c), "token_usage": c.usage, "rate_limits": nil}
 		r.mu.Unlock()
 		return result, true, nil
 	case "threads/read":
@@ -1011,6 +1067,8 @@ func (r *Router) retire(workspace string, client *acp.Client) {
 	for _, c := range r.chats {
 		if c.Workspace == workspace {
 			c.loaded = false
+			r.clearUsageLocked(c)
+			c.usageModel = ""
 		}
 	}
 	r.mu.Unlock()

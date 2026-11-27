@@ -64,6 +64,8 @@ type configResult struct {
 }
 
 type Update struct {
+	Used, Size int64
+	Model      string
 	SessionID  string
 	TurnID     string
 	Kind       string
@@ -624,11 +626,13 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 				Type, Text, URI, MimeType string
 				Resource                  struct{ URI, MimeType string }
 			} `json:"content"`
-			ConfigOptions []nativeOption `json:"configOptions"`
-			Name          string         `json:"name"`
-			Title         string         `json:"title"`
-			ToolCallID    string         `json:"toolCallId"`
-			Status        string         `json:"status"`
+			ConfigOptions []nativeOption  `json:"configOptions"`
+			Used          json.RawMessage `json:"used"`
+			Size          json.RawMessage `json:"size"`
+			Name          string          `json:"name"`
+			Title         string          `json:"title"`
+			ToolCallID    string          `json:"toolCallId"`
+			Status        string          `json:"status"`
 			RawInput      struct {
 				Role string `json:"Role"`
 			} `json:"rawInput"`
@@ -644,11 +648,26 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 			session.options = parseOptions(event.Update.ConfigOptions)
 			session.optionsVersion++
 		}
+		var model string
+		if session != nil {
+			for _, option := range session.options {
+				if option.ID == "model" {
+					model = option.CurrentValue
+				}
+			}
+		}
 		c.mu.Unlock()
+		if model != "" && emit != nil {
+			emit(Update{SessionID: event.ID, Kind: "model_update", Model: model})
+		}
 		return
 	}
 	update := Update{SessionID: event.ID, Kind: event.Update.Kind}
 	switch event.Update.Kind {
+	case "usage_update":
+		if len(event.Update.Used) == 0 || len(event.Update.Size) == 0 || json.Unmarshal(event.Update.Used, &update.Used) != nil || json.Unmarshal(event.Update.Size, &update.Size) != nil || string(event.Update.Used) == "null" || string(event.Update.Size) == "null" || update.Used < 0 || update.Size <= 0 {
+			return
+		}
 	case "session_info_update":
 		update.Text = event.Update.Title
 	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
@@ -691,9 +710,16 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	}
 	c.mu.Lock()
 	session := c.sessions[event.ID]
-	if session == nil || (event.Update.Kind != "session_info_update" && !session.loading && session.turn == nil) {
+	if session == nil || (event.Update.Kind != "session_info_update" && event.Update.Kind != "usage_update" && !session.loading && session.turn == nil) {
 		c.mu.Unlock()
 		return
+	}
+	if update.Kind == "usage_update" {
+		for _, option := range session.options {
+			if option.ID == "model" {
+				update.Model = option.CurrentValue
+			}
+		}
 	}
 	if session.turn != nil {
 		update.TurnID = session.turn.id

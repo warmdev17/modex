@@ -122,6 +122,7 @@ class AntigravitySupervisorTests(unittest.TestCase):
                 start()
                 started = True
                 client = AttachedRPC(control[0], state, workspace)
+                self.assertIn("antigravity_context_usage", client.capabilities)
                 runtimes = client.call("agents/list")["data"]
                 self.assertIn("antigravity", {item["id"] for item in runtimes if item["ready"]})
                 thread = client.call("threads/start", {"agent": "antigravity", "workspace": str(workspace)})["thread"]
@@ -136,6 +137,7 @@ class AntigravitySupervisorTests(unittest.TestCase):
                 client.events.extend(before_disconnect)
                 stop_reason = ""
                 title = ""
+                latest_context = None
                 received = []
                 deadline = time.monotonic() + 120
                 while not stop_reason or not title:
@@ -147,6 +149,8 @@ class AntigravitySupervisorTests(unittest.TestCase):
                         received.append(params["delta"])
                     if frame["event"] == "thread/name/updated":
                         title = params["threadName"]
+                    if frame["event"] == "thread/tokenUsage/updated":
+                        latest_context = params["tokenUsage"]
                     if frame["event"] == "turn/completed":
                         self.assertEqual(params["turn"]["id"], ack["turn"]["id"])
                         stop_reason = params["turn"]["status"]
@@ -156,6 +160,18 @@ class AntigravitySupervisorTests(unittest.TestCase):
                 self.assertTrue(title.strip())
                 names = {entry["id"]: entry.get("name") for entry in client.call("threads/list")["data"]}
                 self.assertEqual(names[thread["id"]], title)
+                while client.events:
+                    frame = client.events.popleft()
+                    params = frame.get("params", {})
+                    if frame.get("event") == "thread/tokenUsage/updated" and params.get("threadId") == thread["id"]:
+                        latest_context = params["tokenUsage"]
+                usage = client.call("threads/status", target)
+                self.assertIsNotNone(latest_context, "missing native ACP context sample")
+                self.assertGreater(latest_context["last"]["totalTokens"], 0)
+                self.assertGreater(latest_context["modelContextWindow"], 0)
+                self.assertEqual(usage["token_usage"]["last"]["totalTokens"], latest_context["last"]["totalTokens"])
+                self.assertEqual(usage["token_usage"]["modelContextWindow"], latest_context["modelContextWindow"])
+                self.assertIsNone(usage["rate_limits"])
                 client.close()
                 client = None
                 stop()
