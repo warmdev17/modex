@@ -29,9 +29,10 @@ telemetry note linking the community issue, current policy and external report.
 - GitHub rendering, physical-device setup, macOS/WSL runtime and fresh provider
   inference were not tested. Competitor interoperability and actual telemetry
   behavior were not tested; compatibility is based on current project docs.
-  The branch is local; no push, PR or merge has been performed. Next: review
-  the rendered branch on GitHub, then open the required documentation PR when
-  authorized.
+  `umask 022; go test ./...` passed again before publishing the branch. The
+  branch is pushed as `origin/docs/professional-readme`; no PR or merge has
+  been performed. Next: review the rendered branch on GitHub, then open the
+  required documentation PR when authorized.
 
 ## OpenCode backend
 
