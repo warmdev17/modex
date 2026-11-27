@@ -1,5 +1,26 @@
 # Modex project state
 
+## Shared agent chats
+
+Updated 2026-11-27T19:08:00+07:00 on `feat/shared-agent-chats`. Android
+routing and the sidebar landed in `4f934c3`. The
+[plan](docs/superpowers/plans/2026-11-27-shared-agent-chats.md) covers
+agent-neutral projects, explicit per-chat routing and isolated OpenCode state.
+
+- The isolated supervisor fixture created three chats in one project,
+  checked per-agent lists and the legacy list, exercised concurrent
+  OpenCode and AGY turns, rejected a stale Stop and a foreign workspace,
+  stopped OpenCode, and reopened its history after a restart.
+- Android Gradle unit, lint and APK tasks passed offline with 177 JVM tests.
+  Pixel 4 XL emulator verified agent labels and filtering, scoped OpenCode
+  creation and the same-signature upgrade from fixture code 1000 to 1001.
+- Real OpenCode 2.4.1 started with a private database, reported a model
+  catalogue and created a chat. Its native form, permission and history
+  endpoints returned the expected lists. The managed profile did not list
+  OpenCode Go. Live OpenCode inference was not verified.
+- Next: finish host review, then verify the combined Android and supervisor
+  build with AGY session options. No release or live restart was performed.
+
 ## Public documentation refresh
 
 Updated 2026-11-27T16:09:44+07:00 on `docs/professional-readme`, source

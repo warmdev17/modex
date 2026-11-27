@@ -22,3 +22,15 @@ Chat hiện có tiếp tục dùng runtime và phiên native đã chọn. Kết 
 Chỉ có executable không đồng nghĩa agent đã sẵn sàng. Hiện tại, bộ kiểm tra Antigravity xác nhận CLI, đăng nhập và các khả năng ACP bắt buộc trước khi cho phép chọn. Host Codex và OpenCode khởi động thành công chỉ chứng minh bridge đã khởi tạo, không chứng minh provider đã xác thực hay inference sẽ thành công. Tài khoản provider và thông tin xác thực được cấu hình, kiểm tra trên host.
 
 Ma trận này mô tả bản xem trước hiện tại. [Snapshot triển khai backend OpenCode](../opencode-backend.md) ghi lại một revision đã kiểm chứng trước đây và có thể chưa gồm phần project, form hay lịch sử tool mới hơn.
+
+## Chat nhiều agent trong bản phát triển
+
+Khi đã cập nhật cả host và Android, kết nối SSH một lần rồi chọn Codex,
+OpenCode hoặc Antigravity trong **New chat**. Có thể lọc danh sách theo
+agent. Các chat cùng project giữ agent và lịch sử riêng.
+
+Đường OpenCode do Modex quản lý cần OpenCode từ 2.4 trong dòng 2.x. Nó
+dùng cơ sở dữ liệu riêng trong thư mục trạng thái supervisor. Chat và
+tài khoản OpenCode độc lập vẫn nằm trong hồ sơ hiện có. Hãy cấu hình
+quyền truy cập provider trên host và kiểm tra model cần dùng trong hồ sơ
+được quản lý trước khi làm việc.

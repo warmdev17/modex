@@ -22,3 +22,15 @@ Existing chats keep their selected runtime and native session. Connecting a host
 An executable alone does not mean an agent is ready. The current Antigravity picker probe checks its CLI, sign-in, and required ACP capabilities before enabling selection. Codex and OpenCode host startup proves that their bridge initialized, not that provider authentication or inference will succeed. Provider accounts and credentials are configured and verified on the host.
 
 This matrix describes the current preview. The [OpenCode backend implementation snapshot](opencode-backend.md) records an earlier verified revision and may not include newer projects, forms, or tool-history work.
+
+## Shared agent chats in development builds
+
+With an updated host and Android app, open one SSH connection and choose
+Codex, OpenCode or Antigravity in **New chat**. The sidebar can filter by
+agent. Chats in the same project keep their own agent and history.
+
+The managed OpenCode path requires OpenCode 2.4 or later in the 2.x series.
+It keeps its own database in the supervisor state directory. Existing
+standalone OpenCode chats and accounts stay in their existing profiles.
+Provider access must be configured for the managed runtime on the host.
+Verify the requested provider and model in that profile before starting work.
