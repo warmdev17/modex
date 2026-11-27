@@ -25,6 +25,11 @@ private const val CHOOSE_OPENCODE_PROVIDER = "Multiple OpenCode providers offer 
 internal fun validTurnAcknowledgement(result: JSONObject): Boolean =
     (result.optJSONObject("turn")?.opt("id") as? String)?.isNotBlank() == true
 
+internal fun validSteerAcknowledgement(result: JSONObject, expectedTurn: String): Boolean =
+    expectedTurn.isNotBlank() && result.opt("turnId") == expectedTurn
+
+private data class SteeringDraft(val thread: String, val draft: PromptDraft?, val expectedTurn: String = "")
+
 internal fun explainHostRejection(method: String, detail: String, agent: String = CODEX_AGENT): String {
     return when {
         method == "projects/create" -> "Project creation was not confirmed. Check the folder and update modex-host/Codex if needed. Refresh projects before retrying."
@@ -118,8 +123,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
     val activeTurnId: String get() = sessions.activeTurnId
-    val steerSending: Boolean get() = steeringDrafts.values.any { it.first == selected }
-    private val steeringDrafts = androidx.compose.runtime.mutableStateMapOf<Long, Pair<String, PromptDraft?>>()
+    val steerSending: Boolean get() = steeringDrafts.values.any { it.thread == selected }
+    private val steeringDrafts = androidx.compose.runtime.mutableStateMapOf<Long, SteeringDraft>()
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
     internal var sessionStatus by mutableStateOf<SessionStatus?>(null); private set
@@ -252,7 +257,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     val storedDraft = r.optJSONObject("steering_draft")
                     if (r.getString("method") == "turn/steer" || (r.getString("method") == "turn/start" && storedDraft != null)) {
                         val draft = storedDraft?.let { PromptDraft(it.getString("text"), readReferenceDraft(it.optString("references"))) }
-                        steeringDrafts[r.getLong("id")] = r.getString("tag") to draft
+                        steeringDrafts[r.getLong("id")] = SteeringDraft(r.getString("tag"), draft, r.optString("expected_turn_id"))
                     }
                     if (r.getString("method") == "plans/respond") handledPlans += r.getString("tag")
                     if (r.getString("method") == "decision/respond") answeringDecisionIds += r.getString("tag")
@@ -281,9 +286,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 .put("pending", JSONArray().apply {
                     pending.forEach { (id, op) ->
                         val entry = JSONObject().put("id", id).put("method", op.first).put("tag", op.second)
-                        steeringDrafts[id]?.second?.let { draft ->
+                        steeringDrafts[id]?.draft?.let { draft ->
                             entry.put("steering_draft", JSONObject().put("text", draft.text).put("references", referenceDraftJson(draft.references)))
                         }
+                        steeringDrafts[id]?.expectedTurn?.takeIf(String::isNotBlank)?.let { entry.put("expected_turn_id", it) }
                         put(entry)
                     }
                 })
@@ -622,19 +628,20 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, runtimeDefaultModel(agent), models)
-        if (!connected || steerSending || (busy && (agent == ANTIGRAVITY_AGENT || activeTurnId.isBlank() || stopping)) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && agyOptionsUncertain) || !validModelId(model) || !validEffort(effort)) return false
-        if (agent == ANTIGRAVITY_AGENT) antigravityAttachmentError(files, capabilities.agyAttachments).takeIf { it.isNotEmpty() }?.let { error = it; return false }
         val target = activeTurnId
+        if (!connected || steerSending || (busy && (activeTurnId.isBlank() || stopping || (agent == ANTIGRAVITY_AGENT && !capabilities.agySteer))) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && agyOptionsUncertain) || !validModelId(model) || !validEffort(effort)) return false
+        if (agent == ANTIGRAVITY_AGENT && busy && files.isNotEmpty()) { error = ANTIGRAVITY_STEER_ATTACHMENTS; return false }
+        if (agent == ANTIGRAVITY_AGENT) antigravityAttachmentError(files, capabilities.agyAttachments).takeIf { it.isNotEmpty() }?.let { error = it; return false }
         if (target.isEmpty() && agent == OPENCODE_AGENT && ambiguousOpenCodeModel(choice.model, models)) {
             error = CHOOSE_OPENCODE_PROVIDER
             return false
         }
-        val params = withWorkspace(if (agent == ANTIGRAVITY_AGENT) {
+        val params = if (agent == ANTIGRAVITY_AGENT && busy) turnSteerParams(selected, target, text, selectedWorkspace) else withWorkspace(if (agent == ANTIGRAVITY_AGENT) {
             turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences, agent)
         } else capabilities.supportedTurnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace)
         if (target.isNotEmpty()) {
-            val id = request("turn/steer", params.put("turn_id", target), selected) ?: return false
-            steeringDrafts[id] = selected to promptDrafts[selected]
+            val id = request("turn/steer", if (agent == ANTIGRAVITY_AGENT) params else params.put("turn_id", target), selected) ?: return false
+            steeringDrafts[id] = SteeringDraft(selected, promptDrafts[selected], target)
             sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
             return false // Clear the draft only after Codex confirms receipt.
         }
@@ -642,7 +649,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
         sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         if (agent == ANTIGRAVITY_AGENT) {
-            steeringDrafts[id] = selected to promptDrafts[selected]
+            steeringDrafts[id] = SteeringDraft(selected, promptDrafts[selected])
             return false
         }
         return true
@@ -744,8 +751,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         request("decision/respond", JSONObject().put("decision_id", id).put("result", result), id)
     }
     private fun switching() = selectionRequests.isNotEmpty()
-    private fun clearAcknowledgedDraft(draft: Pair<String, PromptDraft?>?) {
-        val (thread, submitted) = draft ?: return
+    private fun clearAcknowledgedDraft(steering: SteeringDraft?) {
+        val (thread, submitted) = steering ?: return
         if (submitted != null && promptDrafts[thread] == submitted) {
             promptDrafts.update(thread, PromptDraft())
             promptDrafts.flush()
@@ -1102,7 +1109,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
                 }
                 "turn/steer" -> {
-                    if (result.optString("turnId").isBlank() && result.optJSONObject("turn")?.optString("id").isNullOrBlank()) {
+                    val acknowledged = if (operationAgent == ANTIGRAVITY_AGENT) validSteerAcknowledgement(result, steeringDraft?.expectedTurn.orEmpty())
+                        else result.optString("turnId").isNotBlank() || !result.optJSONObject("turn")?.optString("id").isNullOrBlank()
+                    if (!acknowledged) {
                         if (operation.second == selected) error = "Follow-up was not confirmed. Check the conversation before sending it again."
                         return
                     }

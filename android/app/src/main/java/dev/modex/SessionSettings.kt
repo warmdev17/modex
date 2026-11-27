@@ -69,6 +69,7 @@ internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAge
         runtimeRouting = host.runtimeRouting,
         agySessionOptions = agent == ANTIGRAVITY_AGENT && host.agySessionOptions,
         agyAttachments = agent == ANTIGRAVITY_AGENT && host.agyAttachments,
+        agySteer = agent == ANTIGRAVITY_AGENT && host.agySteer,
     )
 }
 
@@ -122,6 +123,11 @@ internal fun turnStartParams(thread: String, text: String, model: String, effort
         if (attachments.isNotEmpty()) put("attachments", org.json.JSONArray().apply { attachments.forEach { put(it.toJson()) } })
         if (model.isNotBlank()) put("model", model.trim())
         if (effort.isNotBlank()) put("effort", effort)
+    }
+
+internal fun turnSteerParams(thread: String, turn: String, text: String, workspace: String): JSONObject =
+    JSONObject().put("thread_id", thread).put("turn_id", turn).put("text", text).apply {
+        if (workspace.isNotBlank()) put("workspace", workspace)
     }
 
 internal fun BackendCapabilities.supportedNewThreadParams(model: String, mode: String, workspace: String = "", projectId: String = ""): JSONObject =

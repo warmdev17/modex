@@ -156,6 +156,7 @@ internal fun ChatWorkspace(
     val antigravity = sessionAgent == ANTIGRAVITY_AGENT
     val attachmentsEnabled = !antigravity || sessionCapabilities.agyAttachments
     val attachmentsVisible = attachmentsEnabled || attachments.isNotEmpty()
+    val agySteerBlockedByAttachments = antigravity && busy && attachments.isNotEmpty()
     val agyModel = agyOptions.firstOrNull { it.id == "model" }
     val agyModelLabel = agyModel?.currentLabel.orEmpty()
     val agyThinking = agyOptions.firstOrNull { it.id == "thought_level" }
@@ -547,10 +548,10 @@ internal fun ChatWorkspace(
                 else (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }),
                 connected && selected.isNotBlank() && (!antigravity || backendCapabilities.agySessionOptions),
                 ::openModel,
-                connected && !historyLoading && selected.isNotBlank() && (!busy || (!antigravity && activeTurnId.isNotBlank() && !stopping)) &&
+                connected && !historyLoading && selected.isNotBlank() && (!busy || (activeTurnId.isNotBlank() && !stopping && (!antigravity || (sessionCapabilities.agySteer && attachments.isEmpty())))) &&
                     !steerSending && !attachmentWorking && !modeChanging && !permissionsWorking && !planResponding && (!antigravity || !agyOptionsUncertain),
                 if (attachmentsVisible) attachments else emptyList(), attachmentsEnabled && attachmentWorking, attachmentProgress,
-                if (!attachmentsEnabled && attachments.isNotEmpty()) ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE else if (attachmentsVisible) attachmentError else "",
+                if (agySteerBlockedByAttachments) ANTIGRAVITY_STEER_ATTACHMENTS else if (!attachmentsEnabled && attachments.isNotEmpty()) ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE else if (attachmentsVisible) attachmentError else "",
                 attachmentsEnabled && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },

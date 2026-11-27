@@ -17,6 +17,7 @@ internal data class BackendCapabilities(
     val agentDiscovery: Boolean = false,
     val agySessionOptions: Boolean = false,
     val agyAttachments: Boolean = false,
+    val agySteer: Boolean = false,
     val runtimeRouting: Boolean = false,
 ) {
     val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; "antigravity" -> "Antigravity"; else -> "Agent" }
@@ -58,6 +59,7 @@ internal data class BackendCapabilities(
                 runtimeRouting = backend == "codex" && "runtime_routing" in keys,
                 agySessionOptions = backend == "codex" && "antigravity_session_options" in keys,
                 agyAttachments = backend == "codex" && "antigravity_attachments" in keys,
+                agySteer = backend == "codex" && "antigravity_steer" in keys,
             )
         }
     }

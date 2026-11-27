@@ -10,6 +10,7 @@ internal const val MAX_ATTACHMENTS = 8
 internal const val MAX_ANTIGRAVITY_ATTACHMENT_BYTES = 8L * 1024 * 1024
 internal const val MAX_ANTIGRAVITY_TEXT_BYTES = 256L * 1024
 internal const val ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE = "Update modex-host before sending attachments to Antigravity. Your selected files are still here."
+internal const val ANTIGRAVITY_STEER_ATTACHMENTS = "Remove selected files to send this follow-up, or wait until Antigravity is idle. Your files are still here."
 
 internal fun antigravityAttachmentError(files: List<Attachment>, supported: Boolean = true): String = when {
     files.isNotEmpty() && !supported -> ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE

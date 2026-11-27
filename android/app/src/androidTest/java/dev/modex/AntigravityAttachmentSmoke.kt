@@ -19,7 +19,7 @@ internal fun Instrumentation.antigravityAttachmentSmoke() {
         val files = mutableStateOf(listOf(file))
         var submitted: List<Any>? = null
         val host = BackendCapabilities.fromReady(org.json.JSONObject("""{
-            "backend":"codex","capabilities":["agent_discovery","antigravity_session_options","antigravity_attachments"]
+            "backend":"codex","capabilities":["agent_discovery","antigravity_session_options","antigravity_attachments","antigravity_steer"]
         }"""))
         val connectedHost = mutableStateOf(host)
         runOnMainSync { activity.setContent {
@@ -72,7 +72,7 @@ internal fun Instrumentation.antigravityAttachmentSmoke() {
         waitForIdleSync()
         check(node("From this phone") == null && node("From connected computer") == null) { "Older host still allows adding Antigravity files" }
         antigravityAttachmentAcknowledgements(host)
-        output.putString("result", "PASS: Antigravity file-only send, legacy gate, and rejected/malformed/valid draft acknowledgement")
+        output.putString("result", "PASS: Antigravity file-only send, legacy gate, active attachment block, and exact-turn draft acknowledgement")
         finish(-1, output)
     } catch (failure: Throwable) {
         output.putString("result", "FAIL: Antigravity attachment composer: ${failure.message}")
@@ -126,6 +126,23 @@ private fun Instrumentation.antigravityAttachmentAcknowledgements(host: BackendC
             reply(sent, "result", JSONObject("""{"turn":{"id":"agy-attachment-turn","status":"inProgress"}}"""))
             check(vm.promptDrafts[thread] == null)
             check(vm.attachments.drafts[thread]?.map { it.path } == listOf(later.path))
+
+            val sessions = field("sessions").get(vm) as SessionState
+            sessions.event("turn/started", JSONObject("""{"threadId":"$thread","turn":{"id":"exact-turn","status":"inProgress"}}"""))
+            vm.promptDrafts.update(thread, PromptDraft("Follow up"))
+            check(!vm.send("Follow up", ""))
+            check(pending.values.none { it == ("turn/steer" to thread) })
+            check(vm.error.contains("Remove selected files") && vm.attachments.drafts[thread]?.map { it.path } == listOf(later.path))
+            vm.attachments.remove(thread, later.path)
+            check(!vm.send("Follow up", ""))
+            val steer = pending.entries.single { it.value == ("turn/steer" to thread) }.key
+            reply(steer, "result", JSONObject().put("turnId", "wrong-turn"))
+            check(vm.promptDrafts[thread]?.text == "Follow up")
+            check(!vm.send("Follow up", ""))
+            val retry = pending.entries.single { it.value == ("turn/steer" to thread) }.key
+            vm.promptDrafts.update(thread, PromptDraft("Newer draft"))
+            reply(retry, "result", JSONObject().put("turnId", "exact-turn"))
+            check(vm.promptDrafts[thread]?.text == "Newer draft")
         } finally {
             connected.value = false
             vm.promptDrafts.update(thread, PromptDraft())
