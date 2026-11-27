@@ -20,11 +20,12 @@ internal fun Instrumentation.antigravityPickerSmoke() {
         val showQuestion = mutableStateOf(false)
         val question = ChatEntry(id = "call_fixture", role = "Codex", text = "Choose a platform",
             queuedQuestions = readQueuedQuestions("call_fixture", JSONArray("""[{"title":"Platform?","options":["Android","Linux"]}]""")))
+        val transcript = mutableStateOf(listOf(question))
         runOnMainSync {
             activity.setContent { ModexTheme { Surface {
                 ChatWorkspace(
                     "fixture", true, false, if (showQuestion.value) "codex-fixture" else "", emptyList(), emptyMap(),
-                    if (showQuestion.value) listOf(question) else emptyList(),
+                    if (showQuestion.value) transcript.value else emptyList(),
                     false, false, false, "", "", "fixture-model", emptyList(), emptySet(),
                     {}, {}, {}, { _, _, _ -> }, { _, _, _, _ -> false },
                     { card, response -> answer = queuedQuestionReply(card, response).orEmpty() }, {}, {},
@@ -59,8 +60,23 @@ internal fun Instrumentation.antigravityPickerSmoke() {
         }
         click("Android")
         click("Submit answer")
-        runOnMainSync { check(readQueuedReply(answer).single().answer == "Android") }
-        result.putString("result", "PASS: Antigravity picker and Codex queued question")
+        runOnMainSync {
+            check(readQueuedReply(answer).single().answer == "Android")
+            val cliReply = """<send_user_message_question_reply>
+                |{"answer":"Linux","question":"Platform?","questionItemId":"[\"request_user_input_async\",\"call_fixture\",0]"}
+                |</send_user_message_question_reply>""".trimMargin()
+            val item = JSONObject().put("id", "reply").put("type", "userMessage")
+                .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", cliReply)))
+            transcript.value = updateChat(transcript.value, "item/completed", JSONObject().put("item", item))
+            check(queuedQuestionCards(transcript.value).isEmpty()) { "CLI reply did not resolve the fixture in the transcript" }
+        }
+        val deadline = SystemClock.elapsedRealtime() + 5000
+        while (find(uiAutomation.rootInActiveWindow, "Queued question") != null && SystemClock.elapsedRealtime() < deadline) {
+            SystemClock.sleep(100)
+        }
+        check(find(uiAutomation.rootInActiveWindow, "Queued question") == null) { "CLI reply left the question card visible" }
+        check(find(uiAutomation.rootInActiveWindow, "Platform?\nLinux") != null) { "CLI reply is missing from chat" }
+        result.putString("result", "PASS: Antigravity picker and Codex queued question dismissal")
         finish(-1, result)
     } catch (failure: Throwable) {
         result.putString("result", "FAIL: ${failure.message}")

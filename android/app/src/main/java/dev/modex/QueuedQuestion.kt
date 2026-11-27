@@ -29,13 +29,20 @@ internal fun readQueuedQuestions(itemId: String, questions: JSONArray?): List<Qu
 
 internal fun readQueuedReply(text: String): List<QueuedAnswer> {
     if (text.length > 131072) return emptyList()
-    val packet = text.trim()
+    val trimmed = text.trim()
+    val packet = if (trimmed.startsWith("# Context from my IDE setup:\n")) {
+        trimmed.substringAfterLast("\n## My request for Codex:\n", "").trim()
+    } else trimmed
     val open = "<$replyTag>"
     val close = "</$replyTag>"
     if (!packet.startsWith(open) || !packet.endsWith(close)) return emptyList()
     return runCatching {
         val payload = JSONTokener(packet.substring(open.length, packet.length - close.length))
-        val items = payload.nextValue() as JSONArray
+        val items = when (val value = payload.nextValue()) {
+            is JSONObject -> JSONArray().put(value)
+            is JSONArray -> value
+            else -> return emptyList()
+        }
         require(payload.nextClean() == '\u0000' && items.length() in 1..16)
         (0 until items.length()).map { index ->
             val entry = items.getJSONObject(index)
@@ -52,7 +59,11 @@ internal fun readQueuedReply(text: String): List<QueuedAnswer> {
 
 internal fun queuedQuestionCards(entries: List<ChatEntry>): List<JSONObject> {
     val answered = entries.flatMap { it.queuedAnswerIds }.toSet()
-    return entries.mapNotNull { entry ->
+    // A committed follow-up supersedes pending questions, as it does in the CLI composer.
+    val followUp = entries.indexOfLast {
+        it.role == "You" && it.id.isNotBlank() && !it.id.startsWith("local-") && it.queuedAnswerIds.isEmpty()
+    }
+    return entries.asSequence().drop(followUp + 1).mapNotNull { entry ->
         val questions = entry.queuedQuestions.filterNot { it.id in answered }
         if (questions.isEmpty()) return@mapNotNull null
         val form = JSONArray()
@@ -62,7 +73,7 @@ internal fun queuedQuestionCards(entries: List<ChatEntry>): List<JSONObject> {
         }
         JSONObject().put("decision_id", "queued:${entry.id}").put("method", "item/tool/requestUserInput")
             .put("context", JSONObject().put("questions", form))
-    }
+    }.toList()
 }
 
 internal fun queuedQuestionReply(card: JSONObject, result: JSONObject): String? {
