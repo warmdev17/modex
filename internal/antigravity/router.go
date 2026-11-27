@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/warmdev/modex/internal/acp"
 	"github.com/warmdev/modex/internal/bridge"
@@ -34,6 +36,7 @@ type record struct {
 	Projectless bool   `json:"projectless,omitempty"`
 	Model       string `json:"model,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
+	Name        string `json:"name,omitempty"`
 }
 type message struct {
 	ID          string          `json:"id"`
@@ -52,6 +55,7 @@ type chat struct {
 	calls                 map[string]invocationTarget
 	replayCalls           map[string]int
 	setting, optionsDirty bool
+	titleDirty            bool
 	emit                  func(string, json.RawMessage)
 	admitting             bool
 	queued                []acp.Update
@@ -113,6 +117,18 @@ func (r *Router) Close() {
 func valid(s string) bool {
 	return strings.TrimSpace(s) != "" && len(s) <= 4096 && !strings.ContainsAny(s, "\r\n\x00")
 }
+func title(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 512 || !utf8.ValidString(s) {
+		return ""
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return ""
+		}
+	}
+	return s
+}
 func uid() (string, error) {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -172,11 +188,15 @@ func (r *Router) saveLocked() error {
 	}
 	for _, c := range r.chats {
 		c.optionsDirty = false
+		c.titleDirty = false
 	}
 	return nil
 }
 func thread(c *chat) map[string]any {
 	m := map[string]any{"id": c.ID, "cwd": c.Workspace, "agent": "antigravity", "modelProvider": "antigravity", "status": map[string]any{"type": "idle"}}
+	if name := title(c.Name); name != "" {
+		m["name"] = name
+	}
 	if c.Project != "" {
 		m["projectId"] = c.Project
 	} else if c.Projectless {
@@ -252,7 +272,28 @@ func (r *Router) update(workspace string, u acp.Update) {
 	r.updateLocked(c, u)
 }
 
+func (r *Router) setTitleLocked(c *chat, value string) {
+	name := title(value)
+	if name == "" {
+		return
+	}
+	if name == c.Name {
+		if c.titleDirty {
+			_ = r.saveLocked()
+		}
+		return
+	}
+	c.Name = name
+	c.titleDirty = true
+	_ = r.saveLocked()
+	emitEvent(c.emit, "thread/name/updated", map[string]any{"threadId": c.ID, "threadName": name})
+}
+
 func (r *Router) updateLocked(c *chat, u acp.Update) {
+	if u.Kind == "session_info_update" {
+		r.setTitleLocked(c, u.Text)
+		return
+	}
 	if u.ToolCallID != "" {
 		c.updateInvocation(u)
 		return
@@ -352,6 +393,9 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		return nil, e
 	}
 	r.mu.Lock()
+	if c.titleDirty {
+		_ = r.saveLocked()
+	}
 	if c.setting {
 		r.mu.Unlock()
 		return nil, errors.New("session options are being updated")
@@ -391,6 +435,11 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		}
 		for _, s := range page.Sessions {
 			if s.ID == c.Native {
+				r.mu.Lock()
+				if c.Name == saved.Name {
+					r.setTitleLocked(c, s.Title)
+				}
+				r.mu.Unlock()
 				found = true
 				break
 			}
@@ -623,6 +672,11 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 	case "threads/options", "threads/options/set":
 		return r.handleOptions(ctx, c, cmd.Method, p)
 	case "threads/resume":
+		r.mu.Lock()
+		if emit != nil {
+			c.emit = emit
+		}
+		r.mu.Unlock()
 		_, err := r.load(ctx, c)
 		if err != nil {
 			return nil, true, err

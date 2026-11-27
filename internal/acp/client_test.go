@@ -756,3 +756,15 @@ func TestSteerRejectsUntestedVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSessionTitleUpdateForKnownIdleSession(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"known": {loaded: true}}}
+	var updates []Update
+	emit := func(u Update) { updates = append(updates, u) }
+	c.handleUpdate(json.RawMessage(`{"sessionId":"known","update":{"sessionUpdate":"session_info_update","title":"  Native title  "}}`), emit)
+	c.handleUpdate(json.RawMessage(`{"sessionId":"unknown","update":{"sessionUpdate":"session_info_update","title":"Other"}}`), emit)
+	c.handleUpdate(json.RawMessage(`{"sessionId":"known","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"idle"}}}`), emit)
+	if len(updates) != 1 || updates[0].Text != "  Native title  " {
+		t.Fatalf("updates: %#v", updates)
+	}
+}

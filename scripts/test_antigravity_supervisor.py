@@ -128,27 +128,34 @@ class AntigravitySupervisorTests(unittest.TestCase):
                 self.assertEqual(thread["agent"], "antigravity")
                 self.assertTrue(thread["id"].startswith("agy:"))
                 target = {"thread_id": thread["id"], "workspace": str(workspace)}
-                ack = client.call("turn/start", dict(target, text=f"Reply exactly {MARKER}. Do not use tools."))
+                ack = client.call("turn/start", dict(target, text=f"For a paper kite description test, reply exactly {MARKER}. Do not use tools."))
                 cursor, instance = client.cursor, client.instance
                 before_disconnect = list(client.events)
                 client.close()
                 client = AttachedRPC(control[0], state, workspace, cursor, instance)
                 client.events.extend(before_disconnect)
                 stop_reason = ""
+                title = ""
                 received = []
                 deadline = time.monotonic() + 120
-                while not stop_reason:
+                while not stop_reason or not title:
                     frame = client.events.popleft() if client.events else client.receive(deadline)
                     params = frame.get("params") or {}
                     if params.get("threadId") != thread["id"]:
                         continue
                     if frame["event"] == "item/agentMessage/delta":
                         received.append(params["delta"])
+                    if frame["event"] == "thread/name/updated":
+                        title = params["threadName"]
                     if frame["event"] == "turn/completed":
                         self.assertEqual(params["turn"]["id"], ack["turn"]["id"])
                         stop_reason = params["turn"]["status"]
+                        deadline = min(deadline, time.monotonic() + 15)
                 self.assertEqual(stop_reason, "completed")
                 self.assertIn(MARKER, "".join(received))
+                self.assertTrue(title.strip())
+                names = {entry["id"]: entry.get("name") for entry in client.call("threads/list")["data"]}
+                self.assertEqual(names[thread["id"]], title)
                 client.close()
                 client = None
                 stop()
@@ -157,10 +164,14 @@ class AntigravitySupervisorTests(unittest.TestCase):
                 start()
                 started = True
                 client = AttachedRPC(control[0], state, workspace)
-                self.assertIn(thread["id"], {entry["id"] for entry in client.call("threads/list")["data"]})
-                self.assertEqual(client.call("threads/resume", target)["thread"]["id"], thread["id"])
+                names = {entry["id"]: entry.get("name") for entry in client.call("threads/list")["data"]}
+                self.assertEqual(names[thread["id"]], title)
+                resumed = client.call("threads/resume", target)["thread"]
+                self.assertEqual(resumed["id"], thread["id"])
+                self.assertEqual(resumed["name"], title)
                 history = client.call("threads/read", dict(target, include_turns=True, limit=20))
                 self.assertTrue(history["history_revision"])
+                self.assertEqual(history["thread"]["name"], title)
                 self.assertTrue(any(item["role"] == "assistant" and MARKER in item["text"] for item in history["messages"]))
             finally:
                 if client is not None:

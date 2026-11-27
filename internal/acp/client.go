@@ -626,6 +626,7 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 			} `json:"content"`
 			ConfigOptions []nativeOption `json:"configOptions"`
 			Name          string         `json:"name"`
+			Title         string         `json:"title"`
 			ToolCallID    string         `json:"toolCallId"`
 			Status        string         `json:"status"`
 			RawInput      struct {
@@ -648,6 +649,8 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	}
 	update := Update{SessionID: event.ID, Kind: event.Update.Kind}
 	switch event.Update.Kind {
+	case "session_info_update":
+		update.Text = event.Update.Title
 	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
 		switch event.Update.Content.Type {
 		case "text":
@@ -688,7 +691,7 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	}
 	c.mu.Lock()
 	session := c.sessions[event.ID]
-	if session == nil || (!session.loading && session.turn == nil) {
+	if session == nil || (event.Update.Kind != "session_info_update" && !session.loading && session.turn == nil) {
 		c.mu.Unlock()
 		return
 	}

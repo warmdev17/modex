@@ -95,8 +95,9 @@ func TestRouterACPFixture(t *testing.T) {
 		case "session/new":
 			reply(map[string]any{"sessionId": "native", "configOptions": options()})
 		case "session/list":
-			reply(map[string]any{"sessions": []any{map[string]string{"sessionId": "native", "cwd": cwd}}})
+			reply(map[string]any{"sessions": []any{map[string]string{"sessionId": "native", "cwd": cwd, "title": "List title"}}})
 		case "session/load":
+			_ = out.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"native","update":{"sessionUpdate":"session_info_update","title":"Load title"}}}`))
 			_ = out.Encode(json.RawMessage(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"native","update":{"sessionUpdate":"user_message_chunk","content":{"type":"resource_link","uri":"file:///tmp/note%20%231.txt","mimeType":"text/plain"}}}}`))
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "native", "update": map[string]any{"sessionUpdate": "user_message_chunk", "content": map[string]string{"type": "text", "text": "restored"}}}})
 			reply(map[string]any{"configOptions": options()})
@@ -749,5 +750,97 @@ func TestAttachmentOnlyAndRefusalBeforeDispatch(t *testing.T) {
 	}
 	if json.Unmarshal(b, &request) != nil || len(request.Params.Prompt) != 1 || request.Params.Prompt[0].Type != "resource" {
 		t.Fatalf("attachment only prompt: %s", b)
+	}
+}
+
+func TestNativeTitleUpdatesAndRecovery(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	if err := os.WriteFile(filepath.Join(state, "antigravity-threads.json"), []byte(`[{"id":"agy:123","native_id":"native","workspace":`+quote(root)+`}]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r := New(context.Background(), bin, root, state)
+	defer func() { r.Close() }()
+	result, handled, err := r.Handle(context.Background(), bridge.Command{Method: "threads/resume", Params: json.RawMessage(`{"thread_id":"agy:123"}`)}, nil)
+	if err != nil || !handled {
+		t.Fatalf("resume: %v %v", handled, err)
+	}
+	if got := result.(map[string]any)["thread"].(map[string]any)["name"]; got != "Load title" {
+		t.Fatalf("resume title: %v", got)
+	}
+	var events []string
+	r.mu.Lock()
+	r.chats["agy:123"].emit = func(method string, params json.RawMessage) { events = append(events, method+":"+string(params)) }
+	r.mu.Unlock()
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "  Live title  "})
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Live title"})
+	r.update("/other", acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Wrong"})
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "bad\x01title"})
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: strings.Repeat("é", 257)})
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "   "})
+	if len(events) != 1 || !strings.Contains(events[0], `"threadName":"Live title"`) {
+		t.Fatalf("events: %v", events)
+	}
+	r.Close()
+	r = New(context.Background(), bin, root, state)
+	if got := r.Threads()[0]["name"]; got != "Live title" {
+		t.Fatalf("persisted title: %v", got)
+	}
+}
+
+func TestTitleSaveRetriesWithoutDuplicateEventsOrInterruptingStream(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	r := New(context.Background(), bin, root, state)
+	defer func() { r.Close() }()
+	var events []string
+	emit := func(method string, _ json.RawMessage) { events = append(events, method) }
+	result, _, err := r.Handle(context.Background(), bridge.Command{Method: "threads/start", Params: json.RawMessage(`{"agent":"antigravity"}`)}, emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := result.(map[string]any)["thread"].(map[string]any)["id"].(string)
+	r.mu.Lock()
+	c := r.chats[id]
+	c.emit = emit
+	c.active = "turn"
+	r.mu.Unlock()
+	broken := state + "-away"
+	if err := os.Rename(state, broken); err != nil {
+		t.Fatal(err)
+	}
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "New title"})
+	r.update(root, acp.Update{SessionID: "native", Kind: "agent_message_chunk", TurnID: "turn", Text: "still streaming"})
+	if got := r.Threads()[0]["name"]; got != "New title" {
+		t.Fatalf("visible title: %v", got)
+	}
+	if err := os.Rename(broken, state); err != nil {
+		t.Fatal(err)
+	}
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "New title"})
+	saved := New(context.Background(), bin, root, state)
+	if got := saved.Threads()[0]["name"]; got != "New title" {
+		t.Fatalf("duplicate retry did not persist title: %v", got)
+	}
+	saved.Close()
+	if len(events) != 2 || events[0] != "thread/name/updated" || events[1] != "item/agentMessage/delta" {
+		t.Fatalf("events: %v", events)
+	}
+	if err := os.Rename(state, broken); err != nil {
+		t.Fatal(err)
+	}
+	r.update(root, acp.Update{SessionID: "native", Kind: "session_info_update", Text: "Next title"})
+	if err := os.Rename(broken, state); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = r.Handle(context.Background(), bridge.Command{Method: "threads/resume", Params: json.RawMessage(`{"thread_id":` + quote(id) + `}`)}, emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved = New(context.Background(), bin, root, state)
+	if got := saved.Threads()[0]["name"]; got != "Next title" {
+		t.Fatalf("resume retry did not persist title: %v", got)
+	}
+	saved.Close()
+	if len(events) != 3 {
+		t.Fatalf("duplicate event on resume: %v", events)
 	}
 }
