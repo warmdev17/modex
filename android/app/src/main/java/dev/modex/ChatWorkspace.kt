@@ -424,7 +424,7 @@ internal fun ChatWorkspace(
                     if (sessionCapabilities.takeover && takeoverSession.isNotBlank()) TextButton(onClick = { showTakeover = true }, enabled = connected && !historyLoading) { Text("Take over on phone") }
                 }
             }
-            if (sessionCapabilities.sessionStatus && usageWarning.isNotBlank() && selected.isNotBlank()) {
+            if (!antigravity && sessionCapabilities.sessionStatus && usageWarning.isNotBlank() && selected.isNotBlank()) {
                 Surface(color = Mocha.Mantle, shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = ::openStatus)) {
                     Text(usageWarning, Modifier.padding(12.dp), color = Mocha.Red, style = MaterialTheme.typography.bodyMedium)
@@ -578,7 +578,7 @@ internal fun ChatWorkspace(
             }
         }
     }
-    if (sessionCapabilities.sessionStatus && showSessionStatus) SessionStatusDialog(sessionStatus, sessionStatusLoading, sessionStatusError, onSessionStatus) { showSessionStatus = false }
+    if (sessionCapabilities.sessionStatus && showSessionStatus) SessionStatusDialog(sessionStatus, sessionStatusLoading, sessionStatusError, antigravity, onSessionStatus) { showSessionStatus = false }
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -685,7 +685,7 @@ internal fun ChatWorkspace(
 }
 
 @Composable
-private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error: String, refresh: () -> Unit, close: () -> Unit) {
+private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error: String, antigravity: Boolean, refresh: () -> Unit, close: () -> Unit) {
     fun known(value: String) = value.ifBlank { "Unavailable" }
     fun number(value: Long?) = value?.let(java.text.NumberFormat.getIntegerInstance()::format) ?: "Unavailable"
     fun sandbox(value: String) = when (value) {
@@ -718,19 +718,24 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
                     if (context != null) "${number(status.contextTokens)} used / ${number(status.contextWindow)} tokens" else null,
                     showBar = false,
                 )
-                SessionRateLimitRow("5h limit", status.usageWindow(5 * 60L))
-                SessionRateLimitRow("Weekly limit", status.usageWindow(7 * 24 * 60L))
-                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
-                Text("Mode: ${if (status.mode == "plan") "Plan" else if (status.mode == "default") "Default" else "Unavailable"}")
-                Text("Model: ${known(status.model)}")
-                Text("Reasoning: ${known(status.effort)}")
-                Text("Workspace: ${known(status.workspace)}")
-                Text("Provider: ${known(status.provider)}")
-                Text("Sandbox: ${sandbox(status.sandbox)}")
-                Text("Approvals: ${known(status.approvalPolicy)}")
-                Text("Reviewer: ${known(status.approvalsReviewer)}")
-                Text("Session total: ${if (status.totalTokens != null) "${number(status.totalTokens)} tokens" else "Unavailable"}")
-                Text("Limits: ${listOf(status.limitName, status.planType).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Unavailable" }}")
+                if (antigravity) {
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
+                    Text("Workspace: ${known(status.workspace)}")
+                } else {
+                    SessionRateLimitRow("5h limit", status.usageWindow(5 * 60L))
+                    SessionRateLimitRow("Weekly limit", status.usageWindow(7 * 24 * 60L))
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
+                    Text("Mode: ${if (status.mode == "plan") "Plan" else if (status.mode == "default") "Default" else "Unavailable"}")
+                    Text("Model: ${known(status.model)}")
+                    Text("Reasoning: ${known(status.effort)}")
+                    Text("Workspace: ${known(status.workspace)}")
+                    Text("Provider: ${known(status.provider)}")
+                    Text("Sandbox: ${sandbox(status.sandbox)}")
+                    Text("Approvals: ${known(status.approvalPolicy)}")
+                    Text("Reviewer: ${known(status.approvalsReviewer)}")
+                    Text("Session total: ${if (status.totalTokens != null) "${number(status.totalTokens)} tokens" else "Unavailable"}")
+                    Text("Limits: ${listOf(status.limitName, status.planType).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Unavailable" }}")
+                }
             } }
         } },
         confirmButton = { TextButton(onClick = close) { Text("Close") } },

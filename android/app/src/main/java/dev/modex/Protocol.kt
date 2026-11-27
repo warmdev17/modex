@@ -18,13 +18,14 @@ internal data class BackendCapabilities(
     val agySessionOptions: Boolean = false,
     val agyAttachments: Boolean = false,
     val agySteer: Boolean = false,
+    val agyContextUsage: Boolean = false,
     val runtimeRouting: Boolean = false,
 ) {
     val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; "antigravity" -> "Antigravity"; else -> "Agent" }
     fun supports(method: String): Boolean = when (method) {
         "agents/list" -> agentDiscovery
         "threads/options", "threads/options/set" -> agySessionOptions
-        "threads/status" -> sessionStatus
+        "threads/status" -> sessionStatus || agyContextUsage
         "threads/mode", "plans/respond" -> planMode
         "threads/permissions" -> permissionProfiles
         "threads/archive", "threads/unarchive", "threads/delete", "threads/fork" -> sessionLifecycle
@@ -60,6 +61,7 @@ internal data class BackendCapabilities(
                 agySessionOptions = backend == "codex" && "antigravity_session_options" in keys,
                 agyAttachments = backend == "codex" && "antigravity_attachments" in keys,
                 agySteer = backend == "codex" && "antigravity_steer" in keys,
+                agyContextUsage = backend == "codex" && "antigravity_context_usage" in keys,
             )
         }
     }

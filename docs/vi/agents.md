@@ -57,6 +57,10 @@ chọn tiếp tục dùng model mặc định của Antigravity.
 Antigravity 1.5.17 đưa chat mới vào danh sách khôi phục sau lượt chat đầu
 tiên được ghi lại.
 
+Trên bản tương thích, đầu chat và Session status hiển thị dung lượng
+context do Antigravity báo về. Số token cập nhật theo dữ liệu từ CLI và
+có thể cần đợi mẫu mới sau khi mở lại phiên native.
+
 Khi cả host lẫn Android đã cập nhật, tên do Antigravity tạo sẽ hiện ở
 đầu chat và trong sidebar, kể cả sau khi kết nối lại. Chat cũ lấy lại
 tên khi mở nếu Antigravity cung cấp tên đó.

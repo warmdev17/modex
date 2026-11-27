@@ -57,6 +57,10 @@ Older hosts and ACP sessions without options use Antigravity's default model.
 Antigravity 1.5.17 lists a new chat for restart recovery after its first
 recorded turn.
 
+On compatible builds, the header and Session status show the context window
+reported by Antigravity. The count updates as the CLI reports usage and can
+be unavailable until the next sample after reopening a native session.
+
 With matching Modex builds, the title Antigravity generates appears in the
 chat header and sidebar and is retained when reconnecting. Older chats recover
 their native title when reopened if Antigravity supplies one.

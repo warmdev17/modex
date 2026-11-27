@@ -67,7 +67,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private data class HistoryRequest(val thread: String, val cursor: String, val activity: Long, val before: List<ChatEntry>)
     private val historyRequests = mutableMapOf<Long, HistoryRequest>()
     private data class LifecycleRequest(val target: String, val generation: Long, val selection: Long, val activity: Long)
-    private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long, val quotaRevision: Long = 0)
+    private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long, val quotaRevision: Long = 0, val contextRevision: Long = 0)
     private var listGeneration = 0L
     private var selectionGeneration = 0L
     private val listRequests = mutableMapOf<Long, Long>()
@@ -76,6 +76,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private val sessionRequests = mutableMapOf<Long, SessionRequest>()
     private var settingsRevision = 0L
     private var quotaRevision = 0L
+    private var contextRevision = 0L
     private var quotaSnapshot by mutableStateOf<JSONObject?>(null)
     private var quotaFailure by mutableStateOf("")
     val usageWarning: String get() = usageLimitWarning(quotaSnapshot).ifBlank { quotaFailure }
@@ -672,7 +673,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (!sessionCapabilities.sessionStatus || !connected || selected.isBlank() || ownedThread != selected || sessionStatusLoading || modeChanging) return
         sessionStatusLoading = true; sessionStatusError = ""
         request("threads/status", withWorkspace(JSONObject().put("thread_id", selected), selectedWorkspace), selected)?.let {
-            sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision, quotaRevision)
+            sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision, quotaRevision, contextRevision)
         } ?: run { sessionStatusLoading = false }
     }
     fun refreshAntigravityOptions() = requestAntigravityOptions()
@@ -966,15 +967,19 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 }
                 "threads/status" -> {
                     sessionStatusLoading = false; sessionStatusError = ""; modeUncertain = false
+                    if (sessionAgent == ANTIGRAVITY_AGENT &&
+                        result.optJSONObject("session")?.optJSONObject("thread")?.optString("id") != selected) return
                     if (sessionRequest?.quotaRevision == quotaRevision) {
                         result.optJSONObject("rate_limits")?.let { quotaSnapshot = it }
                     }
                     val reported = readSessionStatus(result)
                     val current = sessionStatus
-                    sessionStatus = if (sessionRequest?.settingsRevision == settingsRevision || current == null) reported
+                    val settingsMerged = if (sessionRequest?.settingsRevision == settingsRevision || current == null) reported
                     else reported.copy(mode = current.mode, model = current.model, effort = current.effort,
                         permissionProfile = current.permissionProfile, sandbox = current.sandbox,
                         approvalPolicy = current.approvalPolicy, approvalsReviewer = current.approvalsReviewer)
+                    sessionStatus = if (sessionRequest?.contextRevision == contextRevision || current == null) settingsMerged
+                    else settingsMerged.copy(contextTokens = current.contextTokens, contextWindow = current.contextWindow)
                 }
                 "threads/mode" -> {
                     modeChanging = false; modeUncertain = false; sessionStatusError = ""
@@ -1157,6 +1162,22 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         val event = frame.optString("event")
         if (event == "thread/name/updated") {
             rememberAntigravityTitle(params.optString("threadId"), params.opt("threadName"))
+        }
+        if (event == "thread/tokenUsage/updated" && backendCapabilities.agyContextUsage &&
+            sessionAgent == ANTIGRAVITY_AGENT && params.optString("threadId") == selected && ownedThread == selected &&
+            params.has("tokenUsage")) {
+            val previous = sessionStatus ?: SessionStatus(workspace = selectedWorkspace)
+            if (params.isNull("tokenUsage")) {
+                sessionStatus = previous.copy(contextTokens = null, contextWindow = null)
+                contextRevision++
+            } else params.optJSONObject("tokenUsage")?.let { usage ->
+                val used = (usage.optJSONObject("last")?.opt("totalTokens") as? Number)?.toLong()
+                val window = (usage.opt("modelContextWindow") as? Number)?.toLong()
+                if (used != null && used >= 0 && window != null && window > 0) {
+                    sessionStatus = previous.copy(contextTokens = used, contextWindow = window)
+                    contextRevision++
+                }
+            }
         }
         if (params.optString("threadId") == agentConversation.agent?.id) {
             agentConversation.event(event, params)

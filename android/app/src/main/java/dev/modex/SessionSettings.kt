@@ -57,7 +57,7 @@ internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAge
     val keys = agents.firstOrNull { it.id == agent }?.capabilities.orEmpty()
     return BackendCapabilities(
         backend = agent,
-        sessionStatus = "session_status" in keys,
+        sessionStatus = "session_status" in keys || (agent == ANTIGRAVITY_AGENT && host.agyContextUsage),
         planMode = "plan_mode" in keys,
         permissionProfiles = "permission_profiles" in keys,
         sessionLifecycle = "session_lifecycle" in keys,
@@ -70,6 +70,7 @@ internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAge
         agySessionOptions = agent == ANTIGRAVITY_AGENT && host.agySessionOptions,
         agyAttachments = agent == ANTIGRAVITY_AGENT && host.agyAttachments,
         agySteer = agent == ANTIGRAVITY_AGENT && host.agySteer,
+        agyContextUsage = agent == ANTIGRAVITY_AGENT && host.agyContextUsage,
     )
 }
 

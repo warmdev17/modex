@@ -71,6 +71,19 @@ class ProtocolTest {
         assertTrue(newHost.agySteer)
     }
 
+    @Test fun antigravityContextUsageRequiresTheExplicitCodexHostCapability() {
+        val legacy = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"legacy"}"""))
+        val oldHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","session_status"]}"""))
+        val newHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","session_status","antigravity_context_usage"]}"""))
+
+        assertFalse(legacy.agyContextUsage)
+        assertFalse(runtimeCapabilities(oldHost, emptyList(), ANTIGRAVITY_AGENT).sessionStatus)
+        assertTrue(newHost.agyContextUsage)
+        assertTrue(runtimeCapabilities(newHost, emptyList(), ANTIGRAVITY_AGENT).sessionStatus)
+        assertFalse(runtimeCapabilities(newHost, emptyList(), OPENCODE_AGENT).sessionStatus)
+        assertTrue(newHost.supports("threads/status"))
+    }
+
     @Test fun explicitBackendDisablesMalformedOrMissingOptionalCapabilitiesAndReplacementDoesNotLeak() {
         val journal = JournalState()
         journal.hello(JSONObject("""{"ready":true,"instance":"one","backend":"codex","capabilities":["references","takeover"]}"""))
