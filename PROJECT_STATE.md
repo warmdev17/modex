@@ -1,5 +1,32 @@
 # Modex project state
 
+## Antigravity file diffs
+
+Updated 2026-11-28T06:37:50+07:00 on `feat/antigravity-file-diffs`.
+Host source `55e5b16`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-file-diffs.md).
+Completed ACP edits now appear in the existing Android file change card.
+The same projection is used when a native session replays its history.
+The host only uses before/after text provided by ACP and bounds the
+preview. Large snapshots can be omitted.
+
+- The shared-agent fixture failed on `1cda380` with a missing file card.
+  On the stamped host at `55e5b16`, it passed live completion, duplicate
+  suppression, restart recovery and routing with all three runtimes.
+  AGY 1.5.17 reported provider quota during a real edit probe, so the
+  edit acceptance used synthetic ACP frames.
+- `GOMAXPROCS=4 go test -race -p 2 ./... -count=1 -timeout=150s` with
+  umask 022, `go vet ./...`, six targeted regressions and independent
+  review passed. Signed Android preview 55 passed the command timeline
+  emulator smoke including file diff expansion, and both ToolActivity
+  unit tests. This milestone uses the existing APK.
+- Host SHA-256
+  `18461d536ac942d0db5e9476773f4dd871539e8afbac2697f11ba1107c67fffe`.
+  Previous host backed up at
+  `/tmp/modex-agy-diffs.1uMQKT/modex-host.previous`.
+  Branch is local. Delayed activation and physical Android remain
+  unverified at handoff. Reset the Android session cursor after restart.
+
 ## Antigravity command activity
 
 Updated 2026-11-28T05:33:47+07:00 on `feat/antigravity-command-activity`.
@@ -26,7 +53,8 @@ Use existing Android preview 55.
   `92d26362c18ab9cc9528ae1120e61a6c80b5e4abd329a7abb95b0cbcb2d1bb84`.
   Previous host backed up at
   `/tmp/modex-agy-commands.SCBuIi/modex-host.previous`.
-  Physical Android and delayed activation remain unverified at handoff.
+  Running host `1cda380` was confirmed by version and executable
+  checksum on 2026-11-28. Physical Android remains unverified.
   Branch is local. Reset the Android session cursor after restart.
 
 ## Antigravity context usage
