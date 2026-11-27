@@ -45,6 +45,7 @@ type Process struct {
 	password    string
 	client      *http.Client
 	isolatedDir string
+	removeDir   bool
 	listening   chan int
 	waitDone    chan struct{}
 	once        sync.Once
@@ -54,32 +55,82 @@ type Process struct {
 // state directory. The caller should pass os.Environ() so the user's provider
 // auth and configuration remain available.
 func StartProcess(ctx context.Context, binary, cwd string, env []string) (*Process, error) {
-	password, err := randomPassword()
-	if err != nil {
-		return nil, errors.New("cannot initialize opencode credentials")
-	}
 	isolatedDir, err := os.MkdirTemp("", "modex-opencode-")
 	if err != nil {
 		return nil, errors.New("cannot create isolated opencode directory")
 	}
+	return startProcess(ctx, binary, cwd, env, isolatedDir, true)
+}
+
+// StartPersistentProcess keeps OpenCode's isolated state across supervisor restarts.
+func StartPersistentProcess(ctx context.Context, binary, cwd string, env []string, dir string) (*Process, error) {
+	if err := validatePrivateDirectory(dir); err != nil {
+		return nil, errors.New("invalid private opencode directory")
+	}
+	return startProcess(ctx, binary, cwd, env, dir, false)
+}
+
+func startProcess(ctx context.Context, binary, cwd string, env []string, isolatedDir string, removeDir bool) (*Process, error) {
+	cleanup := func() {
+		if removeDir {
+			_ = os.RemoveAll(isolatedDir)
+		}
+	}
+	password, err := randomPassword()
+	if err != nil {
+		cleanup()
+		return nil, errors.New("cannot initialize opencode credentials")
+	}
 	dataDir := filepath.Join(isolatedDir, "data")
 	stateDir := filepath.Join(isolatedDir, "state")
 	for _, dir := range []string{dataDir, stateDir} {
-		if err := os.Mkdir(dir, 0700); err != nil {
-			_ = os.RemoveAll(isolatedDir)
+		if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
+			cleanup()
 			return nil, errors.New("cannot create isolated opencode directory")
+		}
+		if err := validateProcessDirectory(dir, removeDir); err != nil {
+			cleanup()
+			return nil, errors.New("invalid private opencode directory")
+		}
+	}
+	if !removeDir {
+		dbDir := filepath.Join(dataDir, "opencode")
+		if err := os.Mkdir(dbDir, 0700); err != nil && !os.IsExist(err) {
+			return nil, errors.New("cannot create isolated opencode directory")
+		}
+		if err := validatePrivateDirectory(dbDir); err != nil {
+			return nil, errors.New("invalid private opencode directory")
+		}
+		db := filepath.Join(dbDir, "opencode.db")
+		f, err := os.OpenFile(db, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err == nil {
+			err = f.Close()
+		} else if os.IsExist(err) {
+			err = validatePrivateFile(db)
+		}
+		if err != nil {
+			return nil, errors.New("invalid private opencode database")
 		}
 	}
 	cmd := exec.CommandContext(ctx, binary, "serve", "--port", "0")
 	cmd.Dir = cwd
 	cmd.Env = childEnvironment(env, password, dataDir, stateDir)
+	if !removeDir {
+		filtered := cmd.Env[:0]
+		for _, kv := range cmd.Env {
+			if !strings.HasPrefix(kv, "OPENCODE_DB=") {
+				filtered = append(filtered, kv)
+			}
+		}
+		cmd.Env = append(filtered, "OPENCODE_DB="+filepath.Join(dataDir, "opencode", "opencode.db"))
+	}
 	// Startup stderr may include credential-bearing URLs; never forward it.
 	// Leaving Stderr nil connects it directly to os.DevNull without an exec
 	// copying goroutine, which Wait would otherwise wait for (and a grandchild
 	// inheriting stderr would keep alive indefinitely).
 	stdout, writer, err := os.Pipe()
 	if err != nil {
-		_ = os.RemoveAll(isolatedDir)
+		cleanup()
 		return nil, errors.New("cannot create opencode output pipe")
 	}
 	// cmd.Stdout is a plain *os.File, so exec passes the descriptor straight to
@@ -89,7 +140,7 @@ func StartProcess(ctx context.Context, binary, cwd string, env []string) (*Proce
 	if err = cmd.Start(); err != nil {
 		_ = stdout.Close()
 		_ = writer.Close()
-		_ = os.RemoveAll(isolatedDir)
+		cleanup()
 		return nil, errors.New("cannot start opencode executable")
 	}
 	// The child owns its descriptor now; drop the parent's write end so the
@@ -101,6 +152,7 @@ func StartProcess(ctx context.Context, binary, cwd string, env []string) (*Proce
 		stdout:      stdout,
 		password:    password,
 		isolatedDir: isolatedDir,
+		removeDir:   removeDir,
 		listening:   make(chan int, 1),
 		waitDone:    make(chan struct{}),
 	}
@@ -172,11 +224,13 @@ func (p *Process) kill() {
 		_ = p.cmd.Process.Kill()
 	}
 	<-p.waitDone
-	_ = os.RemoveAll(p.isolatedDir)
+	if p.removeDir {
+		_ = os.RemoveAll(p.isolatedDir)
+	}
 }
 
-// Close terminates the child with SIGTERM, then SIGKILL after a short grace,
-// and removes the isolated data/state directory.
+// Close terminates the child with SIGTERM, then SIGKILL after a short grace.
+// Temporary data/state directories are removed; persistent ones are retained.
 func (p *Process) Close() { p.close() }
 
 // CloseIdle is symmetric with Close: OpenCode has no separate idle flush.
@@ -197,7 +251,9 @@ func (p *Process) close() {
 		}
 		// Unblock the scanner even if a grandchild still holds the write end.
 		_ = p.stdout.Close()
-		_ = os.RemoveAll(p.isolatedDir)
+		if p.removeDir {
+			_ = os.RemoveAll(p.isolatedDir)
+		}
 	})
 }
 

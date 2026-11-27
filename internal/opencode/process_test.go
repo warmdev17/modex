@@ -355,3 +355,84 @@ func TestAuthTransportSetsBasicAuthWithoutMutatingRequest(t *testing.T) {
 		t.Fatal("caller request was mutated")
 	}
 }
+
+func TestPersistentProcessPreservesStateAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n")
+	for i := 0; i < 2; i++ {
+		p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), os.Environ(), dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		marker := filepath.Join(dir, "data", "marker")
+		if i == 0 {
+			if err := os.WriteFile(marker, []byte("saved"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		} else if b, err := os.ReadFile(marker); err != nil || string(b) != "saved" {
+			t.Fatalf("state lost: %q %v", b, err)
+		}
+		p.Close()
+	}
+}
+
+func TestPersistentProcessRejectsSymlinkStateDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "data")); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "exit 1\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("accepted symlink state directory")
+	}
+}
+
+func TestPersistentProcessOverridesInheritedDatabase(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(t.TempDir(), "db")
+	fake := writeFake(t, fmt.Sprintf("printenv OPENCODE_DB > '%s'\nprintf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n", envFile))
+	p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), append(os.Environ(), "OPENCODE_DB=/outside/user.db"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	raw, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != filepath.Join(dir, "data", "opencode", "opencode.db") {
+		t.Fatalf("database path=%q", got)
+	}
+}
+
+func TestPersistentProcessRejectsSymlinkDatabaseDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "data"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "data", "opencode")); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("accepted symlink database directory")
+	}
+}
+
+func TestPersistentProcessRejectsSymlinkDatabase(t *testing.T) {
+	dir := t.TempDir()
+	dbDir := filepath.Join(dir, "data", "opencode")
+	if err := os.MkdirAll(dbDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "outside"), filepath.Join(dbDir, "opencode.db")); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("accepted symlink database")
+	}
+}
