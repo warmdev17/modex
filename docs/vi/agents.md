@@ -17,7 +17,7 @@ Chat hiện có tiếp tục dùng runtime và phiên native đã chọn. Kết 
 | --- | --- | --- |
 | Codex | Đường tích hợp đầy đủ nhất: chat, streaming, lịch sử, tệp đính kèm, phê duyệt/câu hỏi được hỗ trợ và các điều khiển riêng Codex mà host công bố. | Một số khả năng và thao tác native của Codex chưa có; xem [tài liệu protocol](../history-contract.md) và [thiết kế](../design.md). |
 | OpenCode | Chat, lịch sử, chọn model, tệp đính kèm, ngữ cảnh project, form và trạng thái công cụ. | Chưa có plan mode, permission profile, takeover, reference hay toàn bộ điều khiển project riêng Codex. Trạng thái phiên chỉ tồn tại theo supervisor. |
-| Antigravity | Prompt văn bản, model mặc định, streaming, Stop, lịch sử và quyền dùng một lần. | Không có tệp đính kèm hoặc steer; không chọn được model và không có đầy đủ điều khiển như Codex/OpenCode. |
+| Antigravity | Prompt văn bản, streaming, Stop, lịch sử, quyền dùng một lần và chọn model, mức suy nghĩ trên host tương thích. | Đính kèm cần bản phát triển mô tả bên dưới. Chưa hỗ trợ gửi thêm prompt trong lúc chạy. |
 
 Chỉ có executable không đồng nghĩa agent đã sẵn sàng. Hiện tại, bộ kiểm tra Antigravity xác nhận CLI, đăng nhập và các khả năng ACP bắt buộc trước khi cho phép chọn. Host Codex và OpenCode khởi động thành công chỉ chứng minh bridge đã khởi tạo, không chứng minh provider đã xác thực hay inference sẽ thành công. Tài khoản provider và thông tin xác thực được cấu hình, kiểm tra trên host.
 
@@ -56,6 +56,14 @@ với các tùy chọn còn khả dụng khi mở lại. Host cũ và phiên ACP
 chọn tiếp tục dùng model mặc định của Antigravity.
 Antigravity 1.5.17 đưa chat mới vào danh sách khôi phục sau lượt chat đầu
 tiên được ghi lại.
+
+Khi cả host lẫn Android đã cập nhật, dùng **Attach files** trong chat
+Antigravity để gửi ảnh PNG/JPEG hoặc file văn bản UTF-8. Có thể gửi file
+riêng hoặc kèm lời nhắn. Mỗi tin nhắn gửi tối đa tám file, tổng 8 MiB.
+Mỗi file văn bản tối đa 256 KiB. Khả năng nhận ảnh còn phụ thuộc model
+đang dùng. Sau khi host khởi động lại, Modex khôi phục phần xem trước từ
+các đường dẫn file mà Antigravity trả về trong lịch sử. Một số file đã gửi
+có thể không xuất hiện lại.
 
 Bảng Agents hiển thị lượt gọi subagent do Antigravity báo về. Trạng thái
 hoàn tất của lượt gọi nghĩa là công cụ đã trả kết quả. Bản CLI được kiểm

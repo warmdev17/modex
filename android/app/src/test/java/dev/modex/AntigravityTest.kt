@@ -39,7 +39,7 @@ class AntigravityTest {
         assertTrue(params.getBoolean("standalone"))
     }
 
-    @Test fun antigravityTurnsArePlainTextOnly() {
+    @Test fun antigravityAttachmentTurnsOmitCodexOnlyFields() {
         val reference = PromptReference("skill", "review", "/work/SKILL.md", "Review", "", "review", true, "@review")
         val params = turnStartParams(
             "agy:thread",
@@ -51,7 +51,11 @@ class AntigravityTest {
             agent = "antigravity",
         )
 
-        assertEquals(setOf("thread_id", "text"), params.keysSet())
+        assertEquals(setOf("thread_id", "text", "attachments"), params.keysSet())
+        assertEquals("/tmp/a.txt", params.getJSONArray("attachments").getJSONObject(0).getString("path"))
+        assertFalse(params.has("model"))
+        assertFalse(params.has("effort"))
+        assertFalse(params.has("references"))
     }
 
     @Test fun threadMetadataWinsBeforeAntigravityPrefixFallback() {

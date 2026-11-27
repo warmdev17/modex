@@ -154,6 +154,8 @@ internal fun ChatWorkspace(
     sessionCapabilities: BackendCapabilities = backendCapabilities,
 ) {
     val antigravity = sessionAgent == ANTIGRAVITY_AGENT
+    val attachmentsEnabled = !antigravity || sessionCapabilities.agyAttachments
+    val attachmentsVisible = attachmentsEnabled || attachments.isNotEmpty()
     val agyModel = agyOptions.firstOrNull { it.id == "model" }
     val agyModelLabel = agyModel?.currentLabel.orEmpty()
     val agyThinking = agyOptions.firstOrNull { it.id == "thought_level" }
@@ -547,8 +549,10 @@ internal fun ChatWorkspace(
                 ::openModel,
                 connected && !historyLoading && selected.isNotBlank() && (!busy || (!antigravity && activeTurnId.isNotBlank() && !stopping)) &&
                     !steerSending && !attachmentWorking && !modeChanging && !permissionsWorking && !planResponding && (!antigravity || !agyOptionsUncertain),
-                if (antigravity) emptyList() else attachments, !antigravity && attachmentWorking, attachmentProgress, if (antigravity) "" else attachmentError,
-                !antigravity && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
+                if (attachmentsVisible) attachments else emptyList(), attachmentsEnabled && attachmentWorking, attachmentProgress,
+                if (!attachmentsEnabled && attachments.isNotEmpty()) ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE else if (attachmentsVisible) attachmentError else "",
+                attachmentsEnabled && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
+                connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
                 modelBrand = if (antigravity) modelBrand(agyModel?.current.orEmpty(), agyModelLabel)
                     else modelBrand(sessionModel, models.firstOrNull { it.model == sessionModel }?.name.orEmpty()),
@@ -765,7 +769,7 @@ private fun SessionUsageRow(label: String, remaining: Int?, detail: String?, sho
 private fun PromptComposer(
     prompt: String, onChange: (String, PromptReference?) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
-    attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
+    attachEnabled: Boolean, removeEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
     modelBrand: ModelBrand, modelColor: Color, focus: FocusRequester, steerSending: Boolean, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
     referencesAvailable: Boolean, referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
@@ -847,9 +851,9 @@ private fun PromptComposer(
                         selected = false, onClick = { onPreview(file) },
                         label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         leadingIcon = { ChatGlyph(if (file.kind == "image") ChatIcon.Image else ChatIcon.File) },
-                        trailingIcon = { if (attachEnabled) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
+                        trailingIcon = { if (removeEnabled) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
                         modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp), shape = RoundedCornerShape(6.dp)
-                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (attachEnabled) ({ onRemove(file.path) }) else null)
+                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (removeEnabled) ({ onRemove(file.path) }) else null)
                 }
             }
             if (attachmentWorking) Row(verticalAlignment = Alignment.CenterVertically) {

@@ -38,6 +38,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "shared-agent-chats") { sharedAgentChatsSmoke(); return }
 
         if (args.getString("preview") == "antigravity-options") { antigravityOptionsSmoke(); return }
+        if (args.getString("preview") == "antigravity-attachments") { antigravityAttachmentSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
         if (args.getString("preview") == "markdown-table") { markdownTableSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }

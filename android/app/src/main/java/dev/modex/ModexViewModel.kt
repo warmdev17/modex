@@ -22,7 +22,10 @@ internal fun takeoverTarget(method: String, detail: String, target: String): Str
 
 private const val CHOOSE_OPENCODE_PROVIDER = "Multiple OpenCode providers offer this model. Choose the provider in the model picker."
 
-internal fun explainHostRejection(method: String, detail: String): String {
+internal fun validTurnAcknowledgement(result: JSONObject): Boolean =
+    (result.optJSONObject("turn")?.opt("id") as? String)?.isNotBlank() == true
+
+internal fun explainHostRejection(method: String, detail: String, agent: String = CODEX_AGENT): String {
     return when {
         method == "projects/create" -> "Project creation was not confirmed. Check the folder and update modex-host/Codex if needed. Refresh projects before retrying."
         detail.contains("thread_has_dependents") -> "This conversation is needed by a fork. Delete dependent conversations first; nothing was deleted."
@@ -35,6 +38,11 @@ internal fun explainHostRejection(method: String, detail: String): String {
         detail == "model is offered by multiple OpenCode providers; select a provider-qualified model" -> CHOOSE_OPENCODE_PROVIDER
         method == "turn/start" && detail.contains("reference", true) -> "A selected skill or plugin is unavailable. Refresh references and review the prompt before sending a new turn."
         method == "turn/start" && detail.contains("usage_limit_exceeded") -> "Codex usage limit reached. Open Session Status to check reset times."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && (detail.contains("select a PNG or JPEG image") || detail.contains("select a UTF-8 text file")) -> "Antigravity accepts PNG or JPEG images and UTF-8 text files only."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && detail.contains("attachment is empty or exceeds the size limit") -> "Antigravity attachments must be non-empty, with text files up to 256 KiB and all files up to 8 MiB total."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && detail.contains("select up to 8 attachments") -> "Attach up to 8 files per message."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && detail.contains("Antigravity does not support", true) -> "This Antigravity session cannot accept that attachment type. Update Antigravity or choose a supported file."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && (detail.contains("attachment is unavailable") || detail.contains("attachment is not readable")) -> "Antigravity could not read an attachment. Check that it still exists and the host account can read it."
         method == "turn/start" && (detail.contains("attachment", true) || detail.contains("select PNG")) -> "An attachment could not be read. Check the file still exists, is at most 20 MiB, and images are PNG, JPEG, GIF or WebP."
         detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
         detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
@@ -614,7 +622,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, runtimeDefaultModel(agent), models)
-        if (!connected || steerSending || (busy && (agent == ANTIGRAVITY_AGENT || activeTurnId.isBlank() || stopping)) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && (text.isBlank() || files.isNotEmpty() || agyOptionsUncertain)) || !validModelId(model) || !validEffort(effort)) return false
+        if (!connected || steerSending || (busy && (agent == ANTIGRAVITY_AGENT || activeTurnId.isBlank() || stopping)) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && agyOptionsUncertain) || !validModelId(model) || !validEffort(effort)) return false
+        if (agent == ANTIGRAVITY_AGENT) antigravityAttachmentError(files, capabilities.agyAttachments).takeIf { it.isNotEmpty() }?.let { error = it; return false }
         val target = activeTurnId
         if (target.isEmpty() && agent == OPENCODE_AGENT && ambiguousOpenCodeModel(choice.model, models)) {
             error = CHOOSE_OPENCODE_PROVIDER
@@ -774,6 +783,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             val sentAttachments = sentAttachmentPaths.remove(id)
             val steeringDraft = steeringDrafts.remove(id)
             val operation = pending.remove(id) ?: return
+            val operationAgent = threadAgents[operation.second] ?: if (operation.second == selected) sessionAgent else threadAgent(JSONObject().put("id", operation.second))
             if (operation.first == "threads/options" || operation.first == "threads/options/set") {
                 applyAntigravityOptions(id, operation.second, frame.optJSONObject("result"))
                 return
@@ -905,9 +915,16 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 }
                 if (operation.first == "threads/resume" || operation.first == "threads/takeover")
                     takeoverThread = takeoverTarget(operation.first, detail, operation.second)
-                error = explainHostRejection(operation.first, detail); return
+                error = explainHostRejection(operation.first, detail, operationAgent); return
             }
-            val result = frame.optJSONObject("result") ?: return
+            val result = frame.optJSONObject("result")
+            if (operation.first == "turn/start" && operationAgent == ANTIGRAVITY_AGENT &&
+                (result == null || !validTurnAcknowledgement(result))) {
+                sessions.rejectTurn(operation.second)
+                if (operation.second == selected) error = "Antigravity did not confirm this turn. Your draft and selected files are still here. Review the conversation before retrying."
+                return
+            }
+            if (result == null) return
             when (operation.first) {
                 "threads/archive", "threads/unarchive", "threads/delete" -> {
                     val target = lifecycle?.target ?: return
@@ -1095,7 +1112,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 "turn/start" -> {
                     result.optJSONObject("turn")?.let {
                         sessions.acknowledgeTurn(operation.second, it)
-                        if (it.optString("id").isNotBlank()) clearAcknowledgedDraft(steeringDraft)
+                        if (operationAgent == ANTIGRAVITY_AGENT) clearAcknowledgedDraft(steeringDraft)
                     }
                     sentAttachments?.let { attachments.sent(it.first, it.second) }
                 }

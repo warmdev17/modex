@@ -48,6 +48,17 @@ class ProtocolTest {
         assertTrue(discovery.supports("agents/list"))
     }
 
+    @Test fun antigravityAttachmentsRequireTheExplicitCodexHostCapability() {
+        val legacy = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"legacy"}"""))
+        val oldHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery"]}"""))
+        val newHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","antigravity_attachments"]}"""))
+
+        assertFalse(legacy.agyAttachments)
+        assertFalse(runtimeCapabilities(oldHost, emptyList(), ANTIGRAVITY_AGENT).agyAttachments)
+        assertTrue(runtimeCapabilities(newHost, emptyList(), ANTIGRAVITY_AGENT).agyAttachments)
+        assertTrue(newHost.agyAttachments)
+    }
+
     @Test fun explicitBackendDisablesMalformedOrMissingOptionalCapabilitiesAndReplacementDoesNotLeak() {
         val journal = JournalState()
         journal.hello(JSONObject("""{"ready":true,"instance":"one","backend":"codex","capabilities":["references","takeover"]}"""))
@@ -153,6 +164,21 @@ class ProtocolTest {
             "Host rejected threads/list (request_rejected). Review session state before retrying.",
             explainHostRejection("threads/list", "request_rejected")
         )
+    }
+
+    @Test fun antigravityAttachmentRejectionsAreActionableWithoutEchoingUnknownDetails() {
+        assertEquals(
+            "Antigravity accepts PNG or JPEG images and UTF-8 text files only.",
+            explainHostRejection("turn/start", "select a PNG or JPEG image", ANTIGRAVITY_AGENT)
+        )
+        assertEquals(
+            "Antigravity attachments must be non-empty, with text files up to 256 KiB and all files up to 8 MiB total.",
+            explainHostRejection("turn/start", "attachment is empty or exceeds the size limit", ANTIGRAVITY_AGENT)
+        )
+        assertTrue(explainHostRejection("turn/start", "attachment is not readable", CODEX_AGENT).contains("20 MiB"))
+        val unknown = explainHostRejection("turn/start", "private upstream URL with token=secret", ANTIGRAVITY_AGENT)
+        assertFalse(unknown.contains("private upstream"))
+        assertFalse(unknown.contains("secret"))
     }
 
     @Test fun quotesRemotePaths() {

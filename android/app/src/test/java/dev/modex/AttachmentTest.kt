@@ -53,6 +53,22 @@ class AttachmentTest {
         assertEquals("/work/notes.txt", p.getJSONArray("attachments").getJSONObject(1).getString("path"))
         assertFalse(turnStartParams("t", "hello", "").has("attachments"))
     }
+    @Test fun antigravityKnownSizesUseNativeLimitsBeforeSending() {
+        assertEquals(ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE, antigravityAttachmentError(listOf(Attachment("/work/note.txt", "note.txt", "file", 4)), supported = false))
+        assertEquals("", antigravityAttachmentError(listOf(Attachment("/work/note.txt", "note.txt", "file", 256L * 1024))))
+        assertEquals("Text files for Antigravity must be at most 256 KiB.", antigravityAttachmentError(listOf(Attachment("/work/large.txt", "large.txt", "file", 256L * 1024 + 1))))
+        assertEquals("Antigravity attachments must be at most 8 MiB total.", antigravityAttachmentError(listOf(
+            Attachment("/work/a.jpg", "a.jpg", "image", 5L * 1024 * 1024),
+            Attachment("/work/b.png", "b.png", "image", 3L * 1024 * 1024 + 1),
+        )))
+    }
+
+    @Test fun onlyANonBlankTurnAcknowledgementMayClearSubmittedAttachments() {
+        assertTrue(validTurnAcknowledgement(org.json.JSONObject("""{"turn":{"id":"turn-1"}}""")))
+        assertFalse(validTurnAcknowledgement(org.json.JSONObject("""{"turn":{}}""")))
+        assertFalse(validTurnAcknowledgement(org.json.JSONObject("""{"turn":{"id":7}}""")))
+        assertFalse(validTurnAcknowledgement(org.json.JSONObject()))
+    }
     @Test fun literalSftpPathEscapesGlobsWithoutChangingSlashesOrSpaces() {
         assertEquals("/work/a\\*b\\?c\\\\d.txt", literalSftpPath("/work/a*b?c\\d.txt"))
         assertEquals("/work/a file.txt", literalSftpPath("/work/a file.txt"))

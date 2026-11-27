@@ -68,6 +68,7 @@ internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAge
         agentDiscovery = host.agentDiscovery,
         runtimeRouting = host.runtimeRouting,
         agySessionOptions = agent == ANTIGRAVITY_AGENT && host.agySessionOptions,
+        agyAttachments = agent == ANTIGRAVITY_AGENT && host.agyAttachments,
     )
 }
 
@@ -112,7 +113,10 @@ internal fun newThreadParams(
 internal fun turnStartParams(thread: String, text: String, model: String, effort: String = "", attachments: List<Attachment> = emptyList(), references: List<PromptReference> = emptyList(), agent: String = CODEX_AGENT): JSONObject =
     JSONObject().put("thread_id", thread).put("text", text).apply {
         require(agent in CHAT_AGENT_IDS)
-        if (agent == ANTIGRAVITY_AGENT) return@apply
+        if (agent == ANTIGRAVITY_AGENT) {
+            if (attachments.isNotEmpty()) put("attachments", org.json.JSONArray().apply { attachments.forEach { put(it.toJson()) } })
+            return@apply
+        }
         if (references.isNotEmpty()) put("references", org.json.JSONArray().apply { references.forEach { put(it.selectionJson()) } })
         require(validModelId(model) && validEffort(effort))
         if (attachments.isNotEmpty()) put("attachments", org.json.JSONArray().apply { attachments.forEach { put(it.toJson()) } })
