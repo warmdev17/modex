@@ -19,7 +19,8 @@ and offers a dropdown when the host reports an unlisted current level.
   find its expected chat header on either dev.39 or the preview.
 - Established signer and `dev.modex` package verified for private preview
   code 49. Upgrade from public code 48 preserved synthetic encrypted state.
-  APK staged in `/home/warmdev/Downloads/modex-preview-49-model-picker.apk`
+  APK staged in `.modex/previews/modex-0.1.0-preview.49-model-picker.apk`
+  under the main Modex checkout on the connected host
   for the in-app SFTP picker. SHA-256
   `c37ab44329d6e152e7e28dc48ee6f922b6f6aca35999a2f9ecff4b5c8769ceb7`.
   Physical-phone download and install remain unverified. Branch is local.
