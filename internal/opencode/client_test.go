@@ -117,13 +117,13 @@ func TestClientListSessionsFollowsCursorAndSlices(t *testing.T) {
 		}
 	})
 	client := NewClient(server.URL, server.Client(), "/work")
-	sessions, err := client.ListSessions(context.Background(), 2)
+	sessions, err := client.ListSessions(context.Background(), 2, "")
 	if err != nil || len(sessions) != 2 || sessions[0].ID != "ses_1" || sessions[1].ID != "ses_2" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
 	want := []recordedRequest{
-		{"GET", "/api/session", "limit=100&order=desc", ""},
-		{"GET", "/api/session", "cursor=c2&limit=100&order=desc", ""},
+		{"GET", "/api/session", "limit=100&order=desc&parentID=null", ""},
+		{"GET", "/api/session", "cursor=c2&limit=100&order=desc&parentID=null", ""},
 	}
 	if !reflect.DeepEqual(*requests, want) {
 		t.Fatalf("requests=%+v\nwant=%+v", *requests, want)
@@ -182,7 +182,7 @@ func TestClientPromptAppliesSessionSettingsAndSendsV2Body(t *testing.T) {
 	}
 }
 
-func TestClientPromptFetchesLatestUserMessage(t *testing.T) {
+func TestClientPromptDoesNotClaimOldMessageWhenAckMissing(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		switch r.URL.Path {
 		case "/api/session/ses_1/prompt":
@@ -198,10 +198,10 @@ func TestClientPromptFetchesLatestUserMessage(t *testing.T) {
 	})
 	client := NewClient(server.URL, server.Client(), "/work")
 	userID, err := client.Prompt(context.Background(), "ses_1", "hi", nil, nil, "")
-	if err != nil || userID != "msg_latest" {
+	if err == nil || userID != "" {
 		t.Fatalf("userID=%q err=%v", userID, err)
 	}
-	if len(*requests) != 2 || (*requests)[1].Query != "limit=5&order=desc" {
+	if len(*requests) != 1 {
 		t.Fatalf("requests=%+v", *requests)
 	}
 }

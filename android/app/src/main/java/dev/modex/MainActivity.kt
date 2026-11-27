@@ -81,7 +81,7 @@ internal fun HostWorkspace(
             OutlinedTextField(projectNameInput, { projectNameInput = it }, label = { Text("Project name") }, singleLine = true)
             Text(projectFolder, color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
         } },
-        confirmButton = { TextButton(enabled = vm.connected && !vm.projectCreating && projectNameInput.isNotBlank() && projectNameInput.toByteArray().size <= 256 && projectNameInput.none { it.isISOControl() }, onClick = { vm.createProject(projectNameInput, projectFolder); projectFolder = "" }) { Text("Create project") } },
+        confirmButton = { TextButton(enabled = vm.backendCapabilities.projectCreation && vm.connected && !vm.projectCreating && projectNameInput.isNotBlank() && projectNameInput.toByteArray().size <= 256 && projectNameInput.none { it.isISOControl() }, onClick = { vm.createProject(projectNameInput, projectFolder); projectFolder = "" }) { Text("Create project") } },
         dismissButton = { TextButton(onClick = { projectFolder = "" }) { Text("Cancel") } }
     )
     if (remoteThread.isNotEmpty()) RemoteFilePicker(
@@ -95,6 +95,7 @@ internal fun HostWorkspace(
     if ((vm.connected || vm.connecting || vm.savedConnection != null) && !connectionSettings) {
         ChatWorkspace(
             host = hostName, connected = vm.connected, connecting = vm.connecting,
+            backendCapabilities = vm.backendCapabilities,
             selected = vm.selected, threads = vm.threads, titles = vm.titles, messages = vm.messages,
             runningThreads = vm.runningThreads, busy = vm.busy, activeTurnId = vm.activeTurnId, steerSending = vm.steerSending, stopping = vm.stopping, onStop = vm::stop, historyLoading = vm.historyLoading, hasMore = vm.nextCursor != null, error = vm.error, sessionSettings = vm.sessionSettings,
             sessionModel = vm.sessionModel, sessionEffort = vm.sessionEffort, hostModel = vm.hostChoice.model, hostEffort = vm.hostChoice.effort, onModelChoice = vm::chooseModel, decisions = vm.decisions, answeringDecisionIds = vm.answeringDecisionIds,

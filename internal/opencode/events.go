@@ -17,7 +17,6 @@ type Synthesizer struct {
 	emit       func(method string, params json.RawMessage)
 	defaultDir string
 	turns      map[string]*turnState
-	last       string
 
 	// OnTurnComplete drops pending decisions for a finished turn. It is set
 	// before serving starts (single-threaded setup).
@@ -25,10 +24,11 @@ type Synthesizer struct {
 }
 
 type turnState struct {
-	sessionID string
-	userID    string
-	dir       string
-	startedAt time.Time
+	sessionID     string
+	userID        string
+	dir           string
+	startedAt     time.Time
+	historyAnchor string
 
 	assistantID        string
 	assistantStarted   map[string]bool
@@ -72,6 +72,7 @@ func (s *Synthesizer) StartTurn(sessionID, userID, dir string) {
 		userID:             userID,
 		dir:                dir,
 		startedAt:          time.Now(),
+		historyAnchor:      userID,
 		assistantStarted:   map[string]bool{},
 		text:               map[string]string{},
 		finalText:          map[string]string{},
@@ -83,7 +84,6 @@ func (s *Synthesizer) StartTurn(sessionID, userID, dir string) {
 		toolsCompleted:     map[string]bool{},
 	}
 	s.turns[sessionID] = state
-	s.last = sessionID
 	s.emitEvent("turn/started", map[string]any{"threadId": sessionID, "turn": map[string]any{"id": userID}})
 }
 
@@ -146,21 +146,18 @@ func (s *Synthesizer) ActiveTurn(sessionID string) (string, bool) {
 	return state.userID, !state.completed
 }
 
-// ActiveSession reports the latest turn and whether it is still running; the
-// polling reconciler uses the former for its idle tick.
-func (s *Synthesizer) ActiveSession() (string, bool) {
+// ActiveSessions reports the sessions that still need reconciliation.
+func (s *Synthesizer) ActiveSessions() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.last == "" {
-		return "", false
+	var active []string
+	for id, state := range s.turns {
+		if !state.completed {
+			active = append(active, id)
+		}
 	}
-	state := s.turns[s.last]
-	if state == nil || state.completed {
-		// Stop issuing idle reconciliation requests once the turn is terminal;
-		// a later StartTurn re-arms the poller.
-		return "", false
-	}
-	return s.last, true
+	sort.Strings(active)
+	return active
 }
 
 type eventData struct {
@@ -294,8 +291,8 @@ func (s *Synthesizer) reconcile(session session, messages []message, expected *t
 	}
 	start := -1
 	for i, item := range messages {
-		if item.ID == state.userID {
-			start = i + 1
+		if item.ID == state.historyAnchor {
+			start = i
 			break
 		}
 	}
@@ -306,7 +303,10 @@ func (s *Synthesizer) reconcile(session session, messages []message, expected *t
 	for _, item := range messages[start:] {
 		if item.Type == "idle" {
 			idleOutcome = item.Outcome
-			continue
+			break
+		}
+		if item.ID != "" {
+			state.historyAnchor = item.ID
 		}
 		if item.Type != "assistant" {
 			continue
@@ -322,34 +322,24 @@ func (s *Synthesizer) reconcile(session session, messages []message, expected *t
 				s.finishReasoning(state, item.ID, ordinal, part.Text)
 				ordinal++
 			case "tool":
-				id := part.Tool.CallID
+				call := part.toolCall()
+				id := call.CallID
 				if id == "" {
-					id = part.Tool.ID
+					id = call.ID
 				}
-				name := part.Tool.Tool
+				name := call.Tool
 				if name == "" {
-					name = part.Tool.Name
+					name = call.Name
 				}
 				s.ensureToolStarted(state, id, name)
-				status := toolStatus(part.Tool.State.Status)
+				status := toolStatus(call.State.Status)
 				if status == "completed" || status == "failed" {
-					s.completeTool(state, id, toolOutput(part.Tool), status)
+					s.completeTool(state, id, toolOutput(call), status)
 				}
 			}
 		}
 		if messageFailed(item) {
 			state.failed = true
-		}
-		if item.Time.Completed != nil {
-			status := "completed"
-			switch {
-			case state.failed || messageFailed(item) || session.Outcome == "failed":
-				status = "failed"
-			case session.Outcome == "interrupted":
-				status = "interrupted"
-			}
-			s.complete(state, status)
-			return
 		}
 	}
 	if idleOutcome != "" {
@@ -361,23 +351,6 @@ func (s *Synthesizer) reconcile(session session, messages []message, expected *t
 		default:
 			s.complete(state, "completed")
 		}
-		return
-	}
-	switch session.Outcome {
-	case "failed":
-		s.complete(state, "failed")
-	case "interrupted":
-		s.complete(state, "interrupted")
-	case "succeeded":
-		s.complete(state, "completed")
-		return
-	}
-	if session.Time.Idle != nil && (session.Time.Busy == nil || *session.Time.Idle >= *session.Time.Busy) {
-		status := "completed"
-		if state.failed {
-			status = "failed"
-		}
-		s.complete(state, status)
 	}
 }
 

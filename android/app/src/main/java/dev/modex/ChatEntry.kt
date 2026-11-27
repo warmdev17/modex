@@ -21,11 +21,24 @@ private fun boundedOutput(text: String): String {
     return if (bytes.size <= OUTPUT_LIMIT) text else bytes.decodeToString(0, OUTPUT_LIMIT).trimEnd('\uFFFD') + TRUNCATED
 }
 
+private val attachmentDrivePath = Regex("^[A-Za-z]:[\\\\/].*")
+
+private fun isAttachmentPath(path: String): Boolean =
+    path.length <= 32768 && path.none { it.isISOControl() } &&
+        (path.startsWith("/") || attachmentDrivePath.matches(path))
+
+private fun readChatAttachments(array: JSONArray?): List<Attachment> =
+    (0 until minOf(array?.length() ?: 0, 32)).mapNotNull { index ->
+        val item = array?.optJSONObject(index) ?: return@mapNotNull null
+        val path = item.optString("path")
+        val kind = item.optString("kind")
+        if (!isAttachmentPath(path) || (kind != "image" && kind != "file")) return@mapNotNull null
+        Attachment(path, attachmentName(item.optString("name").ifBlank { path }), kind, item.optLong("size"))
+    }
+
 internal fun readChat(list: JSONArray, now: Long = System.currentTimeMillis()): List<ChatEntry> = (0 until list.length()).map { i ->
     val m = list.getJSONObject(i)
-    var files = m.optJSONArray("attachments")?.let { a -> (0 until a.length()).map { n ->
-        val f = a.getJSONObject(n); Attachment(f.getString("path"), f.optString("name").ifBlank { attachmentName(f.getString("path")) }, f.getString("kind"), f.optLong("size"))
-    } }.orEmpty()
+    var files = readChatAttachments(m.optJSONArray("attachments"))
     var body = if (m.has("display_text")) m.getString("display_text") else m.optString("text")
     if (m.optString("role") in listOf("user", "You") && files.isEmpty()) {
         val recovered = legacyFileAttachments(body); body = recovered.first; files = recovered.second
@@ -132,11 +145,11 @@ internal fun updateChat(entries: List<ChatEntry>, event: String, params: JSONObj
                 val images = if (previous != null || content == null) emptyList() else (0 until content.length()).mapNotNull { n ->
                     val part = content.optJSONObject(n)?.takeIf { it.optString("type") == "localImage" } ?: return@mapNotNull null
                     val path = part.optString("path")
-                    if (path.length > 32768 || path.any { it.isISOControl() } ||
-                        !(path.startsWith("/") || Regex("^[A-Za-z]:[\\\\/].*").matches(path))) return@mapNotNull null
+                    if (!isAttachmentPath(path)) return@mapNotNull null
                     Attachment(path, attachmentName(path), "image")
                 }
-                (previous ?: ChatEntry(id, "You", recovered.first, attachments = recovered.second + images, status = "inProgress"))
+                val files = readChatAttachments(item.optJSONArray("attachments")).ifEmpty { recovered.second + images }
+                (previous ?: ChatEntry(id, "You", recovered.first, attachments = files, status = "inProgress"))
                     .copy(id = id, turnId = turnId)
             }
             "plan", "agentMessage" -> ChatEntry(id, if (item.optString("type") == "plan") "plan" else "Codex", if (item.has("text")) item.optString("text") else previous?.text.orEmpty(), status = if (event == "item/started") "inProgress" else "completed", turnId = turnId)

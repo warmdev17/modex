@@ -33,6 +33,7 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 	decisions := opencode.NewDecisions(cwd, writer.Emit, synth.TurnID, func(replyCtx context.Context, sessionID, requestID, decision string) error {
 		return client.ReplyPermission(replyCtx, sessionID, requestID, decision)
 	})
+	decisions.ReplyForm = client.ReplyForm
 	synth.OnTurnComplete = decisions.Resolve
 	decisions.OnUnsupportedInput = synth.UnsupportedInput
 
@@ -40,6 +41,7 @@ func serveOpenCodeBridge(ctx context.Context, p *opencode.Process, in io.Reader,
 	defer cancelStream()
 	stream := opencode.NewStream(client, synth, decisions.Handle)
 	stream.OnPermissions = decisions.Reconcile
+	stream.Forms = decisions
 	go func() { _ = stream.Run(streamCtx) }()
 
 	call := func(requestCtx context.Context, method string, params any, emit func(string, json.RawMessage)) (json.RawMessage, error) {

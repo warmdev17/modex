@@ -5,6 +5,10 @@ import org.json.JSONObject
 internal data class ModelChoice(val model: String = "", val effort: String = "") {
     fun toJson() = JSONObject().put("model", model).put("effort", effort)
 }
+internal fun ambiguousOpenCodeModel(model: String, models: List<ModelOption>): Boolean =
+    model.isNotBlank() && '/' !in model &&
+        models.count { it.model.substringAfter('/', "") == model } > 1
+
 internal fun readModelChoice(data: JSONObject?): ModelChoice? = data?.let {
     val model = it.optString("model"); val effort = it.optString("effort")
     if (model.isBlank() || !validModelId(model) || !validEffort(effort)) null else ModelChoice(model, effort)

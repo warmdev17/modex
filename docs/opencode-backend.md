@@ -7,9 +7,8 @@ explicitly with `--backend opencode`.
 
 The backend keeps the existing Modex protocol for the implemented surface: the
 same method names, result shapes and event names that the Codex bridge already
-returns. OpenCode's native session/message/permission API is projected into those
-shapes inside `internal/opencode`, so the Android client needs no new protocol
-handling in this slice. Android is unchanged.
+returns. The adapter in `internal/opencode` maps OpenCode sessions, messages,
+and permission prompts to those shapes.
 
 ## Prerequisites
 
@@ -42,6 +41,14 @@ Use an explicit binary path when `opencode` is not on the host service's `PATH`:
 
 Those two commands accept `--backend opencode` but ignore it; they operate on
 the supervisor selected by the state directory.
+
+After successful SSH attach, the supervisor's ready frame identifies its
+backend and optional conversation capabilities. OpenCode currently sends
+`"backend":"opencode","capabilities":[]`. Android offers chat, model
+selection, attachments, and permission approvals. The optional Codex controls
+for Usage, Plan mode, permission profiles, session actions, projects,
+references, and takeover are hidden when their capabilities are absent.
+Ready frames from older hosts use the legacy Codex defaults.
 
 ### Flags and validation
 
@@ -109,7 +116,7 @@ No parameters. Calls `GET /api/info` to prove reachability and reads the layered
 config documents to resolve the configured default agent's model. Returns:
 
 ```json
-{"workspace":"/absolute/project","config":{"provider":"provider-id","model":"model-id"}}
+{"workspace":"/absolute/project","config":{"provider":"provider-id","model":"provider-id/model-id"}}
 ```
 
 Provider or model may be empty when no default agent/model is configured.
@@ -143,7 +150,7 @@ creation uses `{location:{directory}}` and the resolved model ref
 `{id,providerID}`. Returns:
 
 ```json
-{"thread":{"id":"session-id","cwd":"/absolute/project","modelProvider":"provider-id","model":"model-id"},"model":"model-id"}
+{"thread":{"id":"session-id","cwd":"/absolute/project","modelProvider":"provider-id","model":"provider-id/model-id"},"model":"provider-id/model-id"}
 ```
 
 `model` is omitted from the thread when OpenCode has not attached one.
@@ -194,6 +201,10 @@ optional `attachments`, optional `effort`, and `references`.
   input `{"uri":"file://<path>","name":"<base name>"}`. OpenCode infers MIME;
   image and file kinds are validated but do not select a different upstream
   field.
+- Confirmed prompts carry attachment preview metadata to Android, including
+  file-only prompts and follow-ups. History restores local file paths from
+  OpenCode's persisted attachment sources. Modex does not expose inline
+  attachment bytes or create previews for remote URLs.
 - A non-empty `references` array is rejected. Codex references have no OpenCode
   equivalent in this slice.
 - `effort` is accepted and validated for client compatibility but is not
@@ -233,12 +244,15 @@ Parameters `limit`/`cursor` are validated for compatibility; the catalogue is
 returned in one page. Each entry is projected to:
 
 ```json
-{"id":"provider/model","model":"model-id","displayName":"model-id","defaultReasoningEffort":"","supportedReasoningEfforts":[]}
+{"id":"provider/model","model":"provider/model","displayName":"model","defaultReasoningEffort":"","supportedReasoningEfforts":[]}
 ```
 
 The response is `{data:[…],next_cursor:null}`. OpenCode has no reasoning-effort
 catalogue, so both effort fields are empty. The client makes up to four attempts
 at 250 ms intervals when provider discovery returns an empty catalogue.
+Model choices keep the provider prefix when creating, reading or resuming a
+chat. Older bare model IDs still work if exactly one provider offers the ID.
+If several do, select the desired provider in the picker before retrying.
 
 ### `client/attached`
 
@@ -380,14 +394,18 @@ with the fixed `unsupported_input` notice instead of leaving it stalled. A
   gateway in this slice.
 - Session state lives in a temporary isolated data directory, so cross-restart
   OpenCode session continuity is not claimed.
-- Android has not been changed for this backend; it consumes the projected
-  shapes through the existing UI.
 
 ## Operational limits
 
 - The host bridge still uses the existing 4 MiB frame cap and per-request
   deadlines. Upstream HTTP requests time out after 20 seconds and responses are
-  capped at 8 MiB.
+  capped at 8 MiB after projection. For prompt confirmations and history,
+  Modex discards embedded attachment base64 while reading the upstream
+  response. Those endpoints have a separate 256 MiB wire budget to accommodate
+  the Android limit of eight 20 MiB files. An oversized history page is
+  retried with fewer entries and the same cursor. If a single native message
+  still exceeds the limits, the read fails visibly. A prompt is never reposted
+  because its response exceeded a limit.
 - `turn/interrupt` and `decision/respond` are handled ahead of queued ordinary
   commands so a long `turn/start` cannot starve them. The ordinary command queue
   holds 16 items; overflow returns an explicit error.

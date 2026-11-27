@@ -233,3 +233,34 @@ func TestFreshAttachRecoversExpiredJournalWithoutRestartOrCommandReplay(t *testi
 		t.Fatal("recovery restarted the backend or replayed a command")
 	}
 }
+
+func TestReadyMetadataAndAuthentication(t *testing.T) {
+	for _, tc := range []struct {
+		name, backend string
+		capabilities  []string
+		want          string
+	}{
+		{"legacy", "", nil, `{"instance":"instance","ready":true}`},
+		{"opencode", "opencode", []string{}, `{"backend":"opencode","capabilities":[],"instance":"instance","ready":true}`},
+		{"codex", "codex", []string{"session_status", "plan_mode"}, `{"backend":"codex","capabilities":["session_status","plan_mode"],"instance":"instance","ready":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			s := NewServer(ctx, "token", "instance", &bytes.Buffer{}, cancel)
+			s.Backend, s.Capabilities = tc.backend, tc.capabilities
+			bad, decoder := connect(t, s, Hello{Token: "bad"})
+			var rejected map[string]any
+			if err := decoder.Decode(&rejected); err != nil || rejected["error"] == nil || rejected["backend"] != nil || rejected["capabilities"] != nil {
+				t.Fatalf("rejected=%v err=%v", rejected, err)
+			}
+			bad.Close()
+			client, decoder := connect(t, s, Hello{Token: "token"})
+			defer client.Close()
+			var reply json.RawMessage
+			if err := decoder.Decode(&reply); err != nil || string(reply) != tc.want {
+				t.Fatalf("ready=%s err=%v, want %s", reply, err, tc.want)
+			}
+		})
+	}
+}
