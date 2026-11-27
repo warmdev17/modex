@@ -1,5 +1,29 @@
 # Modex project state
 
+## Public documentation refresh
+
+Updated 2026-11-27T15:56:33+07:00 on `docs/professional-readme`, source
+`5802d34`. The repository front page is now a concise English product page with
+an equivalent Vietnamese option. New bilingual architecture, agent connection,
+status and roadmap pages separate current preview capabilities from future
+Modex Cloud and Pro orchestration direction. The earlier OpenCode backend guide
+is explicitly labeled as an implementation snapshot rather than the current
+capability matrix.
+
+- A standard-library check resolved 86 relative links and anchors across all 12
+  public pages, verified language switches and six bilingual page pairs, and
+  found no forbidden platform, license or encryption claims. `git diff --check`
+  passed, dev.38 was confirmed as a public APK pre-release, and the credential
+  pattern scan was clean.
+- Independent documentation review found no remaining findings after correcting
+  Android SSH onboarding, PATH/Go prerequisites, provider-readiness claims and
+  stale OpenCode links. The baseline `umask 022; go test ./...` passed before
+  the documentation-only changes.
+- GitHub rendering, physical-device setup, macOS/WSL runtime and fresh provider
+  inference were not tested. The branch is local; no push, PR or merge has been
+  performed. Next: review the rendered branch on GitHub, then open the required
+  documentation PR when authorized.
+
 ## OpenCode backend
 
 Updated 2026-11-26 on `feat/opencode-backend`; Stage 1 implementation source is
