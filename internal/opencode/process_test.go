@@ -358,6 +358,9 @@ func TestAuthTransportSetsBasicAuthWithoutMutatingRequest(t *testing.T) {
 
 func TestPersistentProcessPreservesStateAcrossRestart(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	fake := writeFake(t, "printf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n")
 	for i := 0; i < 2; i++ {
 		p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), os.Environ(), dir)
@@ -378,6 +381,9 @@ func TestPersistentProcessPreservesStateAcrossRestart(t *testing.T) {
 
 func TestPersistentProcessRejectsSymlinkStateDirectory(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Symlink(t.TempDir(), filepath.Join(dir, "data")); err != nil {
 		t.Fatal(err)
 	}
@@ -390,6 +396,9 @@ func TestPersistentProcessRejectsSymlinkStateDirectory(t *testing.T) {
 
 func TestPersistentProcessOverridesInheritedDatabase(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	envFile := filepath.Join(t.TempDir(), "db")
 	fake := writeFake(t, fmt.Sprintf("printenv OPENCODE_DB > '%s'\nprintf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n", envFile))
 	p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), append(os.Environ(), "OPENCODE_DB=/outside/user.db"), dir)
@@ -408,6 +417,9 @@ func TestPersistentProcessOverridesInheritedDatabase(t *testing.T) {
 
 func TestPersistentProcessRejectsSymlinkDatabaseDirectory(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(dir, "data"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -423,6 +435,9 @@ func TestPersistentProcessRejectsSymlinkDatabaseDirectory(t *testing.T) {
 
 func TestPersistentProcessRejectsSymlinkDatabase(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	dbDir := filepath.Join(dir, "data", "opencode")
 	if err := os.MkdirAll(dbDir, 0700); err != nil {
 		t.Fatal(err)
@@ -439,6 +454,9 @@ func TestPersistentProcessRejectsSymlinkDatabase(t *testing.T) {
 
 func TestPersistentProcessPreservesDataAfterStartupFailure(t *testing.T) {
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	data := filepath.Join(dir, "data")
 	if err := os.Mkdir(data, 0700); err != nil {
 		t.Fatal(err)
