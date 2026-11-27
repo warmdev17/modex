@@ -22,3 +22,17 @@ Chat hiện có tiếp tục dùng runtime và phiên native đã chọn. Kết 
 Chỉ có executable không đồng nghĩa agent đã sẵn sàng. Hiện tại, bộ kiểm tra Antigravity xác nhận CLI, đăng nhập và các khả năng ACP bắt buộc trước khi cho phép chọn. Host Codex và OpenCode khởi động thành công chỉ chứng minh bridge đã khởi tạo, không chứng minh provider đã xác thực hay inference sẽ thành công. Tài khoản provider và thông tin xác thực được cấu hình, kiểm tra trên host.
 
 Ma trận này mô tả bản xem trước hiện tại. [Snapshot triển khai backend OpenCode](../opencode-backend.md) ghi lại một revision đã kiểm chứng trước đây và có thể chưa gồm phần project, form hay lịch sử tool mới hơn.
+
+## Antigravity trong bản phát triển
+
+Khi cả host và Android hỗ trợ tùy chọn phiên Antigravity, bộ chọn trong
+chat hiển thị các model và mức suy nghĩ do ACP cung cấp. Có thể đổi khi chat
+đang rảnh. Modex lưu lựa chọn đã được xác nhận theo từng chat và đối chiếu
+với các tùy chọn còn khả dụng khi mở lại. Host cũ và phiên ACP thiếu tùy
+chọn tiếp tục dùng model mặc định của Antigravity.
+Antigravity 1.5.17 đưa chat mới vào danh sách khôi phục sau lượt chat đầu
+tiên được ghi lại.
+
+Bảng Agents hiển thị lượt gọi subagent do Antigravity báo về. Trạng thái
+hoàn tất của lượt gọi nghĩa là công cụ đã trả kết quả. Bản CLI được kiểm
+thử cung cấp trạng thái lượt gọi, còn lịch sử riêng của subagent chưa có.

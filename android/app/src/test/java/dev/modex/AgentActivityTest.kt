@@ -9,6 +9,13 @@ class AgentActivityTest {
     private fun activity(id: String, action: String, targets: String, thread: String = "chat", turn: String = "turn") =
         JSONObject("""{"threadId":"$thread","turnId":"$turn","item":{"id":"$id","type":"agentActivity","action":"$action","targets":$targets}}""")
 
+    @Test fun invocationCompletionDoesNotClaimSubagentCompleted() {
+        val frame = activity("invoke", "completed", """[{"id":"agy-call:one","label":"Reviewer","status":"invocationCompleted"}]""")
+        val timeline = agentTimeline(updateChat(emptyList(), "item/completed", frame), "", true).single()
+        assertEquals("invocationCompleted", timeline.status)
+        assertEquals(listOf("Invocation completed"), timeline.milestones)
+    }
+
     @Test fun liveAndHistoryShareAnIsolatedTimelineWithoutDoubleCounting() {
         val state = SessionState().apply { open("chat") }
         val start = activity("spawn", "started", """[{"id":"one","label":"reviewer","status":"running"},{"id":"two","status":"running"}]""")

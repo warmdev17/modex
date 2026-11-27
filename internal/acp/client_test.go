@@ -68,6 +68,10 @@ func TestACPChild(t *testing.T) {
 				os.Exit(7)
 			}
 		case "session/set_config_option":
+			if result := os.Getenv("MODEX_ACP_SET_RESPONSE"); result != "" {
+				reply(request.ID, json.RawMessage(result))
+				continue
+			}
 			if os.Getenv("MODEX_ACP_SET_UNCERTAIN") == "1" {
 				_, _ = os.Stdout.WriteString(strings.Repeat("x", 16*1024*1024+1) + "\n")
 				continue
@@ -640,5 +644,26 @@ func TestSessionLoadedDistinguishesRejectionFromUncertainExchange(t *testing.T) 
 	}
 	if err := c.SetOption(ctx, id, "model", "b"); err == nil || c.SessionLoaded(id) {
 		t.Fatal("uncertain exchange should invalidate session")
+	}
+}
+
+func TestMalformedConfigurationAcknowledgementRequiresReload(t *testing.T) {
+	for _, response := range []string{"null", "[]", `{"configOptions":[]}`} {
+		t.Run(response, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1", "MODEX_ACP_SET_RESPONSE="+response), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			id, err := c.NewSession(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.SetOption(ctx, id, "model", "b"); err == nil || c.SessionLoaded(id) || len(c.Options(id)) != 0 {
+				t.Fatal("unacknowledged value left the session usable")
+			}
+		})
 	}
 }

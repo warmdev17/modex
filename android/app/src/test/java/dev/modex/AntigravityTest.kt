@@ -59,4 +59,18 @@ class AntigravityTest {
         assertEquals("antigravity", threadAgent(JSONObject("""{"id":"agy:restored"}""")))
         assertEquals("codex", threadAgent(JSONObject("""{"id":"ordinary"}""")))
     }
+
+    @Test fun nativeSessionOptionsUseAcknowledgedChoicesAndLabels() {
+        val options = readAntigravityOptions(JSONObject("""{"options":[
+            {"id":"model","currentValue":"fixture-alt","options":[
+                {"value":"fixture-default","name":"Default"},{"value":"fixture-alt","name":"Alternate"}]},
+            {"id":"thought_level","currentValue":"high","options":[{"value":"high","name":"High"}]},
+            {"id":"unsupported","currentValue":"a","options":[{"value":"a","name":"Private"}]}
+        ]}"""))
+
+        assertEquals(listOf("model", "thought_level"), options.map { it.id })
+        assertEquals(listOf("Alternate", "High"), options.map { it.currentLabel })
+        assertEquals(setOf("fixture-default", "fixture-alt"), options.first().values.keys)
+        assertTrue(readAntigravityOptions(JSONObject("""{"options":[]}""")).isEmpty())
+    }
 }

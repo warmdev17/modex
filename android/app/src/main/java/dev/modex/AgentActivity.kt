@@ -20,7 +20,7 @@ internal data class AgentActivity(val action: String, val targets: List<AgentTar
                 val id = (target.opt("id") as? String)?.takeIf { it.isNotBlank() && it.length <= 128 } ?: return@mapNotNull null
                 val label = (target.opt("label") as? String).orEmpty().take(96)
                 val status = (target.opt("status") as? String).orEmpty()
-                AgentTarget(id, label, status.takeIf { it in setOf("pendingInit", "running", "completed", "errored", "interrupted", "shutdown", "notFound") }.orEmpty())
+                AgentTarget(id, label, status.takeIf { it in setOf("unknown", "pendingInit", "running", "completed", "invocationCompleted", "errored", "interrupted", "shutdown", "notFound") }.orEmpty())
             }.distinctBy { it.id }
             return agents.takeIf { it.isNotEmpty() }?.let { AgentActivity(action, it) }
         }
@@ -77,6 +77,7 @@ internal fun agentStatusLabel(status: String): String = when (status) {
     "pendingInit" -> "Starting"
     "running" -> "Running"
     "completed" -> "Completed"
+    "invocationCompleted" -> "Invocation completed"
     "errored" -> "Error"
     "interrupted" -> "Interrupted"
     "shutdown" -> "Stopped"

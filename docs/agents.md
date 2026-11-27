@@ -22,3 +22,17 @@ Existing chats keep their selected runtime and native session. Connecting a host
 An executable alone does not mean an agent is ready. The current Antigravity picker probe checks its CLI, sign-in, and required ACP capabilities before enabling selection. Codex and OpenCode host startup proves that their bridge initialized, not that provider authentication or inference will succeed. Provider accounts and credentials are configured and verified on the host.
 
 This matrix describes the current preview. The [OpenCode backend implementation snapshot](opencode-backend.md) records an earlier verified revision and may not include newer projects, forms, or tool-history work.
+
+## Antigravity in development builds
+
+When both the host and the Android app support Antigravity session options,
+the chat's model picker shows the model and thinking choices reported by ACP.
+Change them while the chat is idle. Modex remembers the confirmed choices for
+that chat and checks them against the available options when reopening it.
+Older hosts and ACP sessions without options use Antigravity's default model.
+Antigravity 1.5.17 lists a new chat for restart recovery after its first
+recorded turn.
+
+The Agents panel shows subagent invocations reported by Antigravity. An
+invocation marked completed means the tool returned. The CLI tested here
+reports invocation activity without a separate child transcript.

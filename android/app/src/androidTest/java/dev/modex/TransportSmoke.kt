@@ -35,6 +35,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "remote-project") { remoteProjectSmoke(); return }
         if (args.getString("preview") == "new-chat") { newChatSmoke(); return }
         if (args.getString("preview") == "antigravity-picker") { antigravityPickerSmoke(); return }
+        if (args.getString("preview") == "antigravity-options") { antigravityOptionsSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
         if (args.getString("preview") == "markdown-table") { markdownTableSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }

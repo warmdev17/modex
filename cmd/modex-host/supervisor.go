@@ -137,7 +137,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 	server.Backend = b.kind
 	server.Capabilities = []string{"projects_read"}
 	if b.kind == "codex" {
-		server.Capabilities = []string{"session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover", "agent_discovery"}
+		server.Capabilities = []string{"session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover", "agent_discovery", "antigravity_session_options"}
 	}
 	server.OnAttachment = func(attached bool) error {
 		return json.NewEncoder(input).Encode(map[string]any{"id": 2147483646, "method": "client/attached", "params": map[string]bool{"attached": attached}})

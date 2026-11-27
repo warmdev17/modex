@@ -2,21 +2,28 @@
 
 ## Antigravity stage 3
 
-Updated 2026-11-27T17:28:00+07:00 on `feat/antigravity-session-controls`,
-based on `af8f5de`. Model, thinking level and subagent monitoring are the
-next requested scope. The [proposed design](docs/superpowers/specs/2026-11-27-antigravity-session-controls-design.md)
-reuses the Android model picker and Agents surface.
+Updated 2026-11-27T18:21:00+07:00 on `feat/antigravity-session-controls`.
+ACP options/events landed in `8fce8ab`. This milestone adds acknowledged model
+and thinking choices per chat, guarded save/reload, draft retention until turn
+acknowledgement, and read-only invocation activity in Android. See the
+[design](docs/superpowers/specs/2026-11-27-antigravity-session-controls-design.md)
+and [plan](docs/superpowers/plans/2026-11-27-antigravity-session-controls.md).
 
-- `umask 022; go test ./...` passed on the clean base revision. An isolated
-  `agy 1.5.17` ACP probe showed session-specific model and thinking options.
-  Thinking changed independently, invalid values were rejected, and a
-  fresh-process load of an empty session returned its original setting.
-- A read-only subagent prompt reached `end_turn`. ACP exposed the parent
-  invocation start and completion and replayed a tool call on load. The probe
-  received no child-scoped events. The design uses invocation status on this
-  CLI and requires native identity and stream evidence for child detail.
-- Next: settle the scope of the Agents panel with bradar, then plan and
-  implement the host and Android contracts. Product code and APK are unchanged.
+- On this milestone's working tree, `umask 022; go test -race ./... -timeout=110s`,
+  `go vet ./...` and `git diff --check` passed. Independent re-review found
+  no remaining blockers after regressions for malformed native responses,
+  failed saves followed by Refresh, and duplicate replayed invocations.
+- Isolated supervisor with real AGY 1.5.17: two chats held independent settings,
+  and model/thinking choices restored after restart in the chat with one
+  recorded turn. Native session listing omitted the empty chat after restart.
+  Native subagent probes observed invocation start/completion and replay.
+  The CLI supplied no child-scoped transcript in those probes.
+- Android `testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest`
+  passed offline, with 168 JVM tests. The Pixel 4 XL emulator passed the AGY
+  picker, existing Codex Agents flow and same-signature upgrade with encrypted
+  synthetic state from versionCode 39 to fixture versionCode 1000.
+- Next: verify and integrate with shared agent routing. The live service,
+  physical phone and published APK have not been changed.
 
 ## Public documentation refresh
 

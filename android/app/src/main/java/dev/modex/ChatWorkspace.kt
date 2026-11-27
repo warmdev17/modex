@@ -152,8 +152,13 @@ internal fun ChatWorkspace(
     agentConversation: AgentConversation? = null, onOpenAgent: (AgentTimeline) -> Unit = {},
     onAgentHistory: (Boolean) -> Unit = {},
     backendCapabilities: BackendCapabilities = BackendCapabilities.LegacyCodex,
+    agyOptions: List<AntigravityOption> = emptyList(), agyOptionsLoading: Boolean = false,
+    agyOptionsError: String = "", agyOptionsUncertain: Boolean = false,
+    onRefreshAgyOptions: () -> Unit = {}, onSetAgyOption: (String, String) -> Unit = { _, _ -> },
 ) {
     val antigravity = sessionAgent == ANTIGRAVITY_AGENT
+    val agyModelLabel = agyOptions.firstOrNull { it.id == "model" }?.currentLabel.orEmpty()
+    val agyThinking = agyOptions.firstOrNull { it.id == "thought_level" }
     val agentLabel = if (antigravity) "Antigravity" else backendCapabilities.label
     var deleting by remember(host, archived) { mutableStateOf("") }
     if (backendCapabilities.sessionLifecycle && deleting.isNotBlank()) AlertDialog(
@@ -222,9 +227,16 @@ internal fun ChatWorkspace(
     var newEffort by rememberSaveable { mutableStateOf("") }
     fun defaultEffort(id: String) = if (id == hostModel && hostEffort.isNotBlank()) hostEffort else models.firstOrNull { it.model == id }?.defaultEffort.orEmpty()
     LaunchedEffect(newChat) { if (newChat) { model = hostModel; newEffort = defaultEffort(hostModel) } }
-    var showModel by rememberSaveable { mutableStateOf(false) }
+    var showModel by rememberSaveable(host, selected) { mutableStateOf(false) }
     var modelInput by rememberSaveable { mutableStateOf("") }
     fun openModel() {
+        if (antigravity) {
+            if (backendCapabilities.agySessionOptions) {
+                onRefreshAgyOptions()
+                showModel = true
+            }
+            return
+        }
         modelInput = sessionModel; effortInput = sessionEffort.ifBlank { defaultEffort(sessionModel) }; showModel = true
     }
     var showSessionStatus by remember(selected) { mutableStateOf(false) }
@@ -240,7 +252,7 @@ internal fun ChatWorkspace(
             onAgentHistory, loadAttachment)
     } else if (showAgentActivity && agents.isNotEmpty()) {
         AgentActivitySheet(agents, hasOlderHistory, olderHistoryLoading, onOlderHistory,
-            onOpenAgent.takeIf { agentConversation != null }) { showAgentActivity = false }
+            onOpenAgent.takeIf { !antigravity && agentConversation != null }) { showAgentActivity = false }
     }
     val latestPromptIndex = remember(reasoningTimeline) { reasoningTimeline.indexOfLast { it.role == "You" } }
     val latestPrompt = reasoningTimeline.getOrNull(latestPromptIndex)
@@ -503,14 +515,16 @@ internal fun ChatWorkspace(
             } else completedWork
             PromptComposer(
                 prompt, ::updatePrompt, busy,
-                if (antigravity) "Antigravity · Default model" else (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank() && !antigravity,
+                if (antigravity) listOfNotNull(agyModelLabel.ifBlank { "Antigravity · Default model" }, agyThinking?.currentLabel?.takeIf { it.isNotBlank() }).joinToString(" · ")
+                else (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }),
+                connected && selected.isNotBlank() && (!antigravity || backendCapabilities.agySessionOptions),
                 ::openModel,
                 connected && !historyLoading && selected.isNotBlank() && (!busy || (!antigravity && activeTurnId.isNotBlank() && !stopping)) &&
-                    !steerSending && !attachmentWorking && !modeChanging && !permissionsWorking && !planResponding,
+                    !steerSending && !attachmentWorking && !modeChanging && !permissionsWorking && !planResponding && (!antigravity || !agyOptionsUncertain),
                 if (antigravity) emptyList() else attachments, !antigravity && attachmentWorking, attachmentProgress, if (antigravity) "" else attachmentError,
                 !antigravity && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
-                modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) }),
+                modelColor = reasoningColor(if (antigravity) agyThinking?.current.orEmpty() else sessionEffort.ifBlank { defaultEffort(sessionModel) }),
                 focus = focus, steerSending = steerSending, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
                 referencesAvailable = backendCapabilities.references && !antigravity,
@@ -521,7 +535,7 @@ internal fun ChatWorkspace(
                 mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain,
                 showMode = backendCapabilities.planMode && !antigravity, modeEnabled = !antigravity && modeActionEnabled,
                 onMode = onSessionMode, onModeRefresh = onSessionStatus, work = work, workAction = workAction,
-                agentCount = agents.takeIf { !antigravity && it.isNotEmpty() }?.count { it.status == "running" },
+                agentCount = agents.takeIf { it.isNotEmpty() }?.count { it.status == "running" },
                 onAgentActivity = { keyboard?.hide(); showAgentActivity = true },
                 agentLabel = agentLabel,
             ) {
@@ -613,7 +627,11 @@ internal fun ChatWorkspace(
         onRequest = onSessionPermissions,
         onClose = { showSettings = false },
     )
-    if (showModel) AlertDialog(
+    if (showModel && antigravity && backendCapabilities.agySessionOptions) AntigravityOptionsDialog(
+        agyOptions, agyOptionsLoading, agyOptionsError, connected && !busy && !historyLoading && !agyOptionsUncertain,
+        onSetAgyOption, onRefreshAgyOptions, onClose = { showModel = false },
+    )
+    if (showModel && !antigravity) AlertDialog(
         onDismissRequest = { showModel = false },
         title = { Text("Model for next turn") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {

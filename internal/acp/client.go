@@ -333,20 +333,27 @@ func (c *Client) SetOption(ctx context.Context, sessionID, configID, value strin
 	session.setting = true
 	version := session.optionsVersion
 	c.mu.Unlock()
-	var result configResult
-	err := c.call(ctx, "session/set_config_option", map[string]string{"sessionId": sessionID, "configId": configID, "value": value}, &result)
+	raw, err := c.request(ctx, "session/set_config_option", map[string]string{"sessionId": sessionID, "configId": configID, "value": value}, nil)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	session.setting = false
 	if err != nil {
 		return err
 	}
-	if result.ConfigOptions == nil {
+	var result configResult
+	validResponse := json.Unmarshal(raw, &result) == nil
+	acknowledged := parseOptions(result.ConfigOptions)
+	confirmed := false
+	for _, option := range acknowledged {
+		if option.ID == configID && option.CurrentValue == value {
+			confirmed = true
+		}
+	}
+	if !validResponse || !confirmed {
 		session.options = nil
 		session.loaded = false
 		return errors.New("invalid Antigravity configuration response; reload the session")
 	}
-	acknowledged := parseOptions(result.ConfigOptions)
 	if session.optionsVersion != version && !reflect.DeepEqual(session.options, acknowledged) {
 		session.options = nil
 		session.loaded = false

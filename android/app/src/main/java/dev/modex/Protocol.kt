@@ -15,10 +15,12 @@ internal data class BackendCapabilities(
     val references: Boolean,
     val takeover: Boolean,
     val agentDiscovery: Boolean = false,
+    val agySessionOptions: Boolean = false,
 ) {
     val label: String get() = when (backend) { "opencode" -> "OpenCode"; "codex" -> "Codex"; else -> "Agent" }
     fun supports(method: String): Boolean = when (method) {
         "agents/list" -> agentDiscovery
+        "threads/options", "threads/options/set" -> agySessionOptions
         "threads/status" -> sessionStatus
         "threads/mode", "plans/respond" -> planMode
         "threads/permissions" -> permissionProfiles
@@ -51,6 +53,7 @@ internal data class BackendCapabilities(
                 "references" in keys,
                 "takeover" in keys,
                 backend == "codex" && "agent_discovery" in keys,
+                backend == "codex" && "antigravity_session_options" in keys,
             )
         }
     }
