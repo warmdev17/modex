@@ -64,6 +64,10 @@ func StartProcess(ctx context.Context, binary, cwd string, env []string) (*Proce
 
 // StartPersistentProcess keeps OpenCode's isolated state across supervisor restarts.
 func StartPersistentProcess(ctx context.Context, binary, cwd string, env []string, dir string) (*Process, error) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, errors.New("invalid private opencode directory")
+	}
 	if err := validatePrivateDirectory(dir); err != nil {
 		return nil, errors.New("invalid private opencode directory")
 	}

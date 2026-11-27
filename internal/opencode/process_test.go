@@ -436,3 +436,53 @@ func TestPersistentProcessRejectsSymlinkDatabase(t *testing.T) {
 		t.Fatal("accepted symlink database")
 	}
 }
+
+func TestPersistentProcessPreservesDataAfterStartupFailure(t *testing.T) {
+	dir := t.TempDir()
+	data := filepath.Join(dir, "data")
+	if err := os.Mkdir(data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(data, "marker")
+	if err := os.WriteFile(marker, []byte("retained"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fake := writeFake(t, "exit 1\n")
+	if p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, dir); err == nil {
+		p.Close()
+		t.Fatal("expected startup failure")
+	}
+	if raw, err := os.ReadFile(marker); err != nil || string(raw) != "retained" {
+		t.Fatalf("state lost: %q %v", raw, err)
+	}
+}
+
+func TestPersistentProcessUsesAbsoluteDatabasePath(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := os.MkdirTemp(cwd, ".managed-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	rel, err := filepath.Rel(cwd, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "db")
+	fake := writeFake(t, fmt.Sprintf("printenv OPENCODE_DB > '%s'\nprintf 'server listening on http://127.0.0.1:41234\\n'\nexec sleep 60\n", output))
+	p, err := StartPersistentProcess(context.Background(), fake, t.TempDir(), nil, rel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(strings.TrimSpace(string(raw))) {
+		t.Fatalf("relative database path: %q", raw)
+	}
+}
