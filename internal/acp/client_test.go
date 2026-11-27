@@ -667,3 +667,92 @@ func TestMalformedConfigurationAcknowledgementRequiresReload(t *testing.T) {
 		})
 	}
 }
+
+func TestNativeReplyOverflowClosesClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	c.queueReply(func() { close(started); <-release })
+	<-started
+	for i := 0; i < 129; i++ {
+		c.queueReply(func() {})
+	}
+	deadline := time.After(3 * time.Second)
+	for c.SessionLoaded(id) {
+		select {
+		case <-deadline:
+			t.Fatal("reply overflow left client usable")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func TestStalledNativeReplyClosesClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	defer close(release)
+	go c.runReply(func() { <-release }, 10*time.Millisecond)
+	select {
+	case <-c.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stalled reply did not close client")
+	}
+	deadline := time.After(3 * time.Second)
+	for c.SessionLoaded(id) {
+		select {
+		case <-deadline:
+			t.Fatal("stalled reply left client usable")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func TestSteerRejectsUntestedVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.info.Version = "1.5.18"
+	sent := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { _, e := c.PromptWithSent(ctx, id, "turn", "cancel", func() { close(sent) }); done <- e }()
+	<-sent
+	if err := c.SteerWithSent(ctx, id, "turn", "follow", nil); err == nil {
+		t.Fatal("untested version accepted steering")
+	}
+	if err := c.Cancel(ctx, id, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

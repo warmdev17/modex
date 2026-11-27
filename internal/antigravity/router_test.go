@@ -52,7 +52,7 @@ func TestRouterACPFixture(t *testing.T) {
 	cwd, _ := os.Getwd()
 	s := bufio.NewScanner(os.Stdin)
 	out := json.NewEncoder(os.Stdout)
-	var promptID json.RawMessage
+	var promptID, secondID json.RawMessage
 	model, level := "fixture-default", "high"
 	options := func() []map[string]any {
 		return []map[string]any{
@@ -83,11 +83,15 @@ func TestRouterACPFixture(t *testing.T) {
 		reply := func(v any) { _ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": v}) }
 		switch req.Method {
 		case "initialize":
-			reply(json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1"},"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"embeddedContext":true},"sessionCapabilities":{"list":{}}}}`))
+			reply(json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.17"},"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"embeddedContext":true},"sessionCapabilities":{"list":{}}}}`))
 		case "":
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]string{"stopReason": "end_turn"}})
 		case "session/cancel":
 			_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]string{"stopReason": "cancelled"}})
+			if len(secondID) > 0 {
+				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": secondID, "result": map[string]string{"stopReason": "cancelled"}})
+				secondID = nil
+			}
 		case "session/new":
 			reply(map[string]any{"sessionId": "native", "configOptions": options()})
 		case "session/list":
@@ -109,6 +113,25 @@ func TestRouterACPFixture(t *testing.T) {
 		case "session/prompt":
 			_ = os.WriteFile(filepath.Join(cwd, "captured-prompt.json"), s.Bytes(), 0600)
 			if req.Params.Prompt[0].Text == "wait" {
+				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "native", "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "before"}}}})
+				promptID = req.ID
+				continue
+			}
+			if req.Params.Prompt[0].Text == "both" {
+				secondID = req.ID
+				continue
+			}
+			if req.Params.Prompt[0].Text == "fast" {
+				reply(map[string]string{"stopReason": "end_turn"})
+				continue
+			}
+			if req.Params.Prompt[0].Text == "fail" {
+				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32001, "message": "private"}})
+				continue
+			}
+			if req.Params.Prompt[0].Text == "follow" {
+				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "native", "update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "after"}}}})
+				_ = out.Encode(map[string]any{"jsonrpc": "2.0", "id": promptID, "result": map[string]string{"stopReason": "end_turn"}})
 				promptID = req.ID
 				continue
 			}
@@ -462,6 +485,141 @@ func TestInterruptMatchesActiveTurn(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("no completion")
+	}
+}
+
+func TestSteerKeepsActiveTurnUntilBothPromptsFinish(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	r := New(context.Background(), bin, root, state)
+	defer r.Close()
+	call := func(method string, p map[string]any, emit func(string, json.RawMessage)) (any, error) {
+		raw, _ := json.Marshal(p)
+		v, _, err := r.Handle(context.Background(), bridge.Command{Method: method, Params: raw}, emit)
+		return v, err
+	}
+	start, err := call("threads/start", map[string]any{"agent": "antigravity"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := start.(map[string]any)["thread"].(map[string]any)["id"].(string)
+	completed := make(chan json.RawMessage, 1)
+	firstDelta := make(chan struct{}, 1)
+	emit := func(method string, raw json.RawMessage) {
+		if method == "item/agentMessage/delta" && strings.Contains(string(raw), "before") {
+			firstDelta <- struct{}{}
+		}
+		if method == "turn/completed" {
+			completed <- raw
+		}
+	}
+	turn, err := call("turn/start", map[string]any{"thread_id": id, "text": "wait"}, emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnID := turn.(map[string]any)["turn"].(map[string]any)["id"].(string)
+	select {
+	case <-firstDelta:
+	case <-time.After(3 * time.Second):
+		t.Fatal("missing initial delta")
+	}
+	if _, err = call("turn/steer", map[string]any{"thread_id": id, "turn_id": "stale", "text": "follow"}, emit); err == nil {
+		t.Fatal("accepted stale turn")
+	}
+	for _, extra := range []map[string]any{{"text": " "}, {"text": "follow", "attachments": []any{}}, {"text": "follow", "references": []any{}}, {"text": "follow", "model": "x"}, {"text": "follow", "effort": "high"}} {
+		extra["thread_id"] = id
+		extra["turn_id"] = turnID
+		if _, err = call("turn/steer", extra, emit); err == nil {
+			t.Fatalf("accepted invalid steer %v", extra)
+		}
+	}
+	got, err := call("turn/steer", map[string]any{"thread_id": id, "turn_id": turnID, "text": "follow"}, emit)
+	if err != nil || got.(map[string]any)["turnId"] != turnID {
+		t.Fatalf("steer: %v %v", got, err)
+	}
+	select {
+	case <-completed:
+		t.Fatal("completed before follow-up response")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, err = call("turn/steer", map[string]any{"thread_id": id, "turn_id": turnID, "text": "again"}, emit); err == nil {
+		t.Fatal("accepted second outstanding steer")
+	}
+	if _, err = call("turn/interrupt", map[string]any{"thread_id": id, "turn_id": turnID}, emit); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case raw := <-completed:
+		if !strings.Contains(string(raw), `"interrupted"`) {
+			t.Fatalf("completion: %s", raw)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("missing completion")
+	}
+	history, err := call("threads/read", map[string]any{"thread_id": id, "include_turns": true}, emit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := history.(map[string]any)["messages"].([]message)
+	var assistants []message
+	for _, m := range messages {
+		if m.Role == "assistant" {
+			assistants = append(assistants, m)
+		}
+	}
+	if len(assistants) != 2 || assistants[0].ID == assistants[1].ID || assistants[0].Text != "before" || assistants[1].Text != "after" {
+		t.Fatalf("assistant segments: %+v", assistants)
+	}
+}
+
+func TestSteerResponseBeforeOriginalAndNativeError(t *testing.T) {
+	for _, tc := range []struct{ text, status string }{{"fast", "interrupted"}, {"fail", "failed"}, {"both", "interrupted"}} {
+		t.Run(tc.text, func(t *testing.T) {
+			root, bin, state := stage3RouterFixture(t)
+			r := New(context.Background(), bin, root, state)
+			defer r.Close()
+			call := func(method string, p map[string]any, emit func(string, json.RawMessage)) (any, error) {
+				raw, _ := json.Marshal(p)
+				v, _, e := r.Handle(context.Background(), bridge.Command{Method: method, Params: raw}, emit)
+				return v, e
+			}
+			start, e := call("threads/start", map[string]any{"agent": "antigravity"}, nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			id := start.(map[string]any)["thread"].(map[string]any)["id"].(string)
+			completed := make(chan json.RawMessage, 1)
+			emit := func(method string, raw json.RawMessage) {
+				if method == "turn/completed" {
+					completed <- raw
+				}
+			}
+			turn, e := call("turn/start", map[string]any{"thread_id": id, "text": "wait"}, emit)
+			if e != nil {
+				t.Fatal(e)
+			}
+			turnID := turn.(map[string]any)["turn"].(map[string]any)["id"].(string)
+			_, e = call("turn/steer", map[string]any{"thread_id": id, "turn_id": turnID, "text": tc.text}, emit)
+			if e != nil {
+				t.Fatal(e)
+			}
+			select {
+			case <-completed:
+				t.Fatal("completed before original response")
+			case <-time.After(100 * time.Millisecond):
+			}
+			_, e = call("turn/interrupt", map[string]any{"thread_id": id, "turn_id": turnID}, emit)
+			if e != nil {
+				t.Fatal(e)
+			}
+			select {
+			case raw := <-completed:
+				if !strings.Contains(string(raw), `"`+tc.status+`"`) {
+					t.Fatalf("completion: %s", raw)
+				}
+			case <-time.After(3 * time.Second):
+				t.Fatal("missing completion")
+			}
+		})
 	}
 }
 

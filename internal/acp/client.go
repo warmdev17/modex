@@ -17,6 +17,8 @@ import (
 	"github.com/warmdev/modex/internal/diagnostic"
 )
 
+var ErrRequestRejected = errors.New("Antigravity rejected the ACP request")
+
 var ErrAuthenticationRequired = errors.New("Antigravity requires sign-in on the host with agy acp --login")
 
 type Info struct {
@@ -94,6 +96,10 @@ type Client struct {
 	permissions    map[string]pendingPermission
 	nextPermission uint64
 	closed         bool
+	replyQueue     chan func()
+	done           chan struct{}
+	stopOnce       sync.Once
+	overflowOnce   sync.Once
 }
 
 type sessionState struct {
@@ -110,6 +116,11 @@ type promptTurn struct {
 	done          chan struct{}
 	cancelling    bool
 	stopRequested bool
+	active        int
+	steering      bool
+	steerSent     chan struct{}
+	result        string
+	err           error
 }
 
 // Start launches Antigravity using the host user's credentials. onUpdate runs on
@@ -136,13 +147,23 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 	if err != nil {
 		return nil, errors.New("cannot start Antigravity CLI; check the agy executable on the host")
 	}
-	c := &Client{process: process, cwd: canonical, sessions: map[string]*sessionState{}, permissions: map[string]pendingPermission{}}
+	c := &Client{process: process, cwd: canonical, sessions: map[string]*sessionState{}, permissions: map[string]pendingPermission{}, replyQueue: make(chan func(), 128), done: make(chan struct{})}
+	go func() {
+		for {
+			select {
+			case reply := <-c.replyQueue:
+				c.runReply(reply, 20*time.Second)
+			case <-c.done:
+				return
+			}
+		}
+	}()
 	process.SetRequestHandler(func(id json.RawMessage, method string, params json.RawMessage) {
 		if method == "session/request_permission" {
 			c.handlePermission(ctx, id, params, onPermission)
 			return
 		}
-		_ = process.Reject(id)
+		c.queueReply(func() { _ = process.Reject(id) })
 	})
 	process.SetNotificationHandler(func(method string, raw json.RawMessage) {
 		if method == "session/update" {
@@ -186,6 +207,7 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 }
 
 func (c *Client) Close() {
+	c.stopOnce.Do(func() { close(c.done) })
 	c.mu.Lock()
 	c.closed = true
 	clear(c.permissions)
@@ -193,6 +215,21 @@ func (c *Client) Close() {
 	c.process.CloseIdle()
 }
 func (c *Client) Info() Info { return c.info }
+
+func (c *Client) runReply(reply func(), timeout time.Duration) {
+	timer := time.AfterFunc(timeout, c.Close)
+	defer timer.Stop()
+	reply()
+}
+
+func (c *Client) queueReply(reply func()) {
+	select {
+	case <-c.done:
+	case c.replyQueue <- reply:
+	default:
+		c.overflowOnce.Do(func() { go c.Close() })
+	}
+}
 
 func (c *Client) List(ctx context.Context, cursor string) (Page, error) {
 	if !c.info.ListSessions {
@@ -426,25 +463,64 @@ func (c *Client) PromptBlocksWithSent(ctx context.Context, sessionID, turnID str
 		c.mu.Unlock()
 		return "", errors.New("Antigravity session is unavailable for a new prompt")
 	}
-	turn := &promptTurn{id: turnID, sent: make(chan struct{}), done: make(chan struct{})}
+	turn := &promptTurn{id: turnID, sent: make(chan struct{}), done: make(chan struct{}), active: 1}
 	session.turn = turn
 	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		c.clearTurnPermissions(turn)
-		if !turn.cancelling {
-			session.turn = nil
-		}
-		close(turn.done)
-		c.mu.Unlock()
-	}()
-	params := map[string]any{"sessionId": sessionID, "prompt": blocks}
-	raw, err := c.request(ctx, "session/prompt", params, func() {
+	stop, err := c.promptRequest(ctx, sessionID, blocks, func() {
 		close(turn.sent)
 		if sent != nil {
 			sent()
 		}
 	})
+	c.finishPrompt(session, turn, stop, err, false)
+	<-turn.done
+	c.mu.Lock()
+	result, finalErr := turn.result, turn.err
+	c.mu.Unlock()
+	return result, finalErr
+}
+
+// SteerWithSent submits a single additional prompt under an existing local turn.
+func (c *Client) SteerWithSent(ctx context.Context, sessionID, turnID, text string, sent func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.info.Version != "1.5.17" || strings.TrimSpace(text) == "" || len(text) > 1024*1024 {
+		return errors.New("Antigravity steering is unavailable")
+	}
+	c.mu.Lock()
+	session := c.sessions[sessionID]
+	if c.closed || session == nil || session.turn == nil || session.turn.id != turnID || session.turn.steering || session.turn.stopRequested || session.turn.active == 0 {
+		c.mu.Unlock()
+		return errors.New("Antigravity turn is unavailable for steering")
+	}
+	turn := session.turn
+	select {
+	case <-turn.sent:
+	default:
+		c.mu.Unlock()
+		return errors.New("Antigravity turn is not yet sent")
+	}
+	turn.active++
+	turn.steering = true
+	turn.steerSent = make(chan struct{})
+	steerSent := turn.steerSent
+	c.mu.Unlock()
+	var once sync.Once
+	written := func() {
+		once.Do(func() { close(steerSent) })
+		if sent != nil {
+			sent()
+		}
+	}
+	stop, err := c.promptRequest(ctx, sessionID, []PromptBlock{{Type: "text", Text: text}}, written)
+	once.Do(func() { close(steerSent) })
+	c.finishPrompt(session, turn, stop, err, true)
+	return err
+}
+
+func (c *Client) promptRequest(ctx context.Context, sessionID string, blocks []PromptBlock, sent func()) (string, error) {
+	raw, err := c.request(ctx, "session/prompt", map[string]any{"sessionId": sessionID, "prompt": blocks}, sent)
 	if err != nil {
 		return "", err
 	}
@@ -456,6 +532,28 @@ func (c *Client) PromptBlocksWithSent(ctx context.Context, sessionID, turnID str
 		return "", errors.New("invalid Antigravity turn result")
 	}
 	return result.Stop, nil
+}
+
+func (c *Client) finishPrompt(session *sessionState, turn *promptTurn, stop string, err error, steering bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if steering {
+		turn.steering = false
+	}
+	if err != nil {
+		turn.err = err
+	}
+	if stop == "cancelled" || turn.result == "" {
+		turn.result = stop
+	}
+	turn.active--
+	if turn.active == 0 {
+		c.clearTurnPermissions(turn)
+		if !turn.cancelling {
+			session.turn = nil
+		}
+		close(turn.done)
+	}
 }
 
 func (c *Client) Cancel(ctx context.Context, sessionID, turnID string) error {
@@ -486,8 +584,17 @@ func (c *Client) Cancel(ctx context.Context, sessionID, turnID string) error {
 	// Keep the session reserved until cancel is written, even if prompt finishes.
 	turn.cancelling = true
 	turn.stopRequested = true
+	steerSent := turn.steerSent
 	c.clearTurnPermissions(turn)
 	c.mu.Unlock()
+	if steerSent != nil {
+		select {
+		case <-steerSent:
+		case <-ctx.Done():
+			c.process.Close()
+			return errors.New("Antigravity cancellation delivery could not be confirmed")
+		}
+	}
 	stop := context.AfterFunc(ctx, c.process.Close)
 	err := c.process.Notify("session/cancel", map[string]string{"sessionId": sessionID})
 	stop()
@@ -637,15 +744,12 @@ func (c *Client) exchangeError(err error) error {
 		if rejected.Code() == -32000 {
 			return ErrAuthenticationRequired
 		}
-		return errors.New("Antigravity rejected the ACP request")
+		return ErrRequestRejected
 	}
 	// The native request may still be running. Retire this connection before
 	// admitting another request that could receive the first request's updates.
 	c.process.Close()
-	c.mu.Lock()
-	c.closed = true
-	clear(c.permissions)
-	c.mu.Unlock()
+	c.Close()
 	return errors.New("Antigravity ACP exchange failed; refresh the session before retrying")
 }
 
@@ -725,12 +829,12 @@ func (c *Client) handlePermission(ctx context.Context, nativeID, raw json.RawMes
 			if !pending {
 				return
 			}
-			_ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`))
+			c.queueReply(func() { _ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`)) })
 			return
 		}
 		c.mu.Unlock()
 	}
-	_ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`))
+	c.queueReply(func() { _ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`)) })
 }
 
 // ReplyPermission sends at most one response for an active native request.
@@ -739,12 +843,13 @@ func (c *Client) ReplyPermission(ctx context.Context, requestID, optionID string
 		return err
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	p, ok := c.permissions[requestID]
 	if !ok || p.turn.stopRequested || (optionID != "" && optionID != p.request.AllowOption && optionID != p.request.DenyOption) {
+		c.mu.Unlock()
 		return errors.New("Antigravity permission is unavailable or option is invalid")
 	}
 	delete(c.permissions, requestID)
+	c.mu.Unlock()
 	outcome := map[string]string{"outcome": "cancelled"}
 	if optionID != "" {
 		outcome = map[string]string{"outcome": "selected", "optionId": optionID}
@@ -755,7 +860,9 @@ func (c *Client) ReplyPermission(ctx context.Context, requestID, optionID string
 	stop()
 	if err != nil {
 		c.process.Close()
+		c.mu.Lock()
 		clear(c.permissions)
+		c.mu.Unlock()
 		return errors.New("Antigravity permission delivery could not be confirmed")
 	}
 	return nil

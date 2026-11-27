@@ -53,6 +53,12 @@ type chat struct {
 	replayCalls           map[string]int
 	setting, optionsDirty bool
 	emit                  func(string, json.RawMessage)
+	admitting             bool
+	queued                []acp.Update
+	segment               int
+	finishPending         string
+	queuedBytes           int
+	queueOverflow         bool
 }
 type pending struct {
 	request acp.PermissionRequest
@@ -229,6 +235,24 @@ func (r *Router) update(workspace string, u acp.Update) {
 	if c == nil {
 		return
 	}
+	if c.admitting {
+		c.queuedBytes += len(u.Text) + len(u.URI) + len(u.ToolCallID) + 256
+		if c.queuedBytes > 4<<20 || len(c.queued) >= 1024 {
+			if !c.queueOverflow {
+				c.queueOverflow = true
+				if client := r.clients[workspace]; client != nil {
+					go client.Close()
+				}
+			}
+			return
+		}
+		c.queued = append(c.queued, u)
+		return
+	}
+	r.updateLocked(c, u)
+}
+
+func (r *Router) updateLocked(c *chat, u acp.Update) {
 	if u.ToolCallID != "" {
 		c.updateInvocation(u)
 		return
@@ -266,7 +290,7 @@ func (r *Router) update(workspace string, u acp.Update) {
 	if c.active == "" || c.active != u.TurnID || u.Kind != "agent_message_chunk" {
 		return
 	}
-	item := "assistant-" + u.TurnID
+	item := fmt.Sprintf("assistant-%s-%d", u.TurnID, c.segment)
 	index := len(c.messages) - 1
 	for index >= 0 && c.messages[index].Role == "agent_activity" && c.messages[index].Turn == u.TurnID {
 		index--
@@ -278,6 +302,22 @@ func (r *Router) update(workspace string, u acp.Update) {
 	}
 	emitEvent(c.emit, "item/agentMessage/delta", map[string]any{"threadId": c.ID, "turnId": u.TurnID, "itemId": item, "delta": u.Text})
 }
+func (r *Router) flushUpdates(c *chat) {
+	c.admitting = false
+	queued := c.queued
+	c.queued = nil
+	c.queuedBytes = 0
+	c.queueOverflow = false
+	for _, u := range queued {
+		r.updateLocked(c, u)
+	}
+	if c.finishPending != "" {
+		status := c.finishPending
+		c.finishPending = ""
+		r.finishLocked(c, c.active, status)
+	}
+}
+
 func (r *Router) permission(workspace string, p acp.PermissionRequest) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -680,6 +720,9 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		c.active = turn
 		c.emit = emit
 		c.calls = nil
+		c.admitting = true
+		c.segment = 0
+		r.mu.Unlock()
 		sent := make(chan struct{})
 		done := make(chan error, 1)
 		go func() {
@@ -687,13 +730,30 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			defer cancelPrompt()
 			timer := time.AfterFunc(20*time.Second, cancelPrompt)
 			defer timer.Stop()
-			stop, e := client.PromptBlocksWithSent(promptCtx, c.Native, turn, blocks, func() { timer.Stop(); close(sent) })
-			if e != nil {
-				select {
-				case done <- e:
-				default:
+			stop, e := client.PromptBlocksWithSent(promptCtx, c.Native, turn, blocks, func() {
+				timer.Stop()
+				r.mu.Lock()
+				c.messages = append(c.messages, message{ID: "user-" + turn, Role: "user", Text: text, Turn: turn, Attachments: attachments})
+				emitEvent(emit, "turn/started", map[string]any{"threadId": id, "turn": map[string]any{"id": turn, "status": "inProgress"}})
+				item := map[string]any{"id": "user-" + turn, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}
+				if len(attachments) > 0 {
+					item["attachments"] = attachments
 				}
-				r.retire(c.Workspace, client)
+				emitEvent(emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": item})
+				r.flushUpdates(c)
+				r.mu.Unlock()
+				close(sent)
+			})
+			if e != nil {
+				r.mu.Lock()
+				if c.admitting {
+					r.flushUpdates(c)
+				}
+				r.mu.Unlock()
+				done <- e
+				if !errors.Is(e, acp.ErrRequestRejected) && !errors.Is(e, acp.ErrAuthenticationRequired) {
+					r.retire(c.Workspace, client)
+				}
 				r.finish(c, turn, "failed")
 				return
 			}
@@ -703,35 +763,72 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			}
 			r.finish(c, turn, status)
 		}()
-		announce := func() {
-			c.messages = append(c.messages, message{ID: "user-" + turn, Role: "user", Text: text, Turn: turn, Attachments: attachments})
-			emitEvent(emit, "turn/started", map[string]any{"threadId": id, "turn": map[string]any{"id": turn, "status": "inProgress"}})
-			item := map[string]any{"id": "user-" + turn, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}
-			if len(attachments) > 0 {
-				item["attachments"] = attachments
-			}
-			emitEvent(emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": item})
-		}
 		select {
 		case <-sent:
-			announce()
-			r.mu.Unlock()
 			return map[string]any{"turn": map[string]any{"id": turn, "status": "inProgress"}}, true, nil
 		case e := <-done:
-			r.mu.Unlock()
 			return nil, true, e
 		case <-ctx.Done():
-			// Preserve event order if the write wins the race with the caller's deadline.
-			go func() {
-				select {
-				case <-sent:
-					announce()
-				case <-done:
-				}
-				r.mu.Unlock()
-			}()
 			return nil, true, errors.New("Antigravity turn delivery is uncertain; refresh before retrying")
 		}
+	case "turn/steer":
+		for _, key := range []string{"references", "model", "effort", "reasoning", "attachments"} {
+			if _, ok := p[key]; ok {
+				return nil, true, errors.New("unsupported Antigravity steer option")
+			}
+		}
+		text, turn := str("text"), str("turn_id")
+		if strings.TrimSpace(text) == "" || len(text) > 1024*1024 || turn == "" {
+			return nil, true, errors.New("invalid Antigravity steer")
+		}
+		r.mu.Lock()
+		client := r.clients[c.Workspace]
+		if client == nil || c.active != turn || c.admitting {
+			r.mu.Unlock()
+			return nil, true, errors.New("Antigravity turn is unavailable for steering")
+		}
+		c.admitting = true
+		r.mu.Unlock()
+		sent := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			promptCtx, cancelPrompt := context.WithCancel(r.ctx)
+			defer cancelPrompt()
+			timer := time.AfterFunc(20*time.Second, cancelPrompt)
+			defer timer.Stop()
+			e := client.SteerWithSent(promptCtx, c.Native, turn, text, func() {
+				timer.Stop()
+				r.mu.Lock()
+				c.segment++
+				itemID := fmt.Sprintf("user-%s-%d", turn, c.segment)
+				c.messages = append(c.messages, message{ID: itemID, Role: "user", Text: text, Turn: turn})
+				emitEvent(c.emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": map[string]any{"id": itemID, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}})
+				r.flushUpdates(c)
+				r.mu.Unlock()
+				close(sent)
+			})
+			if e != nil {
+				select {
+				case <-sent:
+				default:
+					r.mu.Lock()
+					if c.admitting {
+						r.flushUpdates(c)
+					}
+					r.mu.Unlock()
+				}
+				done <- e
+			}
+		}()
+		select {
+		case <-sent:
+			return map[string]any{"turnId": turn}, true, nil
+		case e := <-done:
+			return nil, true, e
+		case <-ctx.Done():
+			return nil, true, errors.New("Antigravity steer delivery is uncertain; refresh before retrying")
+		}
+
 	case "turn/interrupt":
 		turn := str("turn_id")
 		r.mu.Lock()
@@ -758,6 +855,14 @@ func (r *Router) finish(c *chat, turn, status string) {
 	if c.active != turn {
 		return
 	}
+	if c.admitting {
+		c.finishPending = status
+		return
+	}
+	r.finishLocked(c, turn, status)
+}
+
+func (r *Router) finishLocked(c *chat, turn, status string) {
 	for _, target := range c.calls {
 		if target.Status == "running" || target.Status == "pendingInit" {
 			target.Status = "unknown"
