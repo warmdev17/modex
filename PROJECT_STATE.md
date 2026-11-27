@@ -1,5 +1,34 @@
 # Modex project state
 
+## Antigravity context usage
+
+Updated 2026-11-28T02:00:49+07:00 on `feat/antigravity-context-usage`.
+Host source `aca969a`, Android source `95e66aa`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-context-usage.md).
+The Android header and Session status show the context window reported by
+AGY. The host scopes samples to the active native client and resets them
+on model changes or retirement. A reopened session can require a new
+sample. Provider quota is outside this milestone.
+
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with umask
+  022 and `go vet ./...` passed for the host source. The stamped binary
+  passed all three isolated `test_antigravity_supervisor.py` cases with
+  AGY 1.5.17 and the `test_shared_agent_supervisor.py` routing fixture.
+- Offline Gradle unit, lint and app/test APK builds passed for the Android
+  source, with 192 unit tests and zero lint errors. Emulator smoke passed
+  for AGY context, titles, attachments, shared chats, and an in-place
+  upgrade from code 54 to 55 with synthetic encrypted state.
+- Signed preview `.modex/previews/modex-0.1.0-preview.55-antigravity-context.apk`
+  in the main checkout. APK SHA-256
+  `95c5ac57e9f6cad2cc91911bd15a1c7c8a7ff27cb7471d5dc781719eff094860`.
+  Host SHA-256
+  `48d1c2e7e828373207e68a00c23521b52f38595951143cfd5eaf584d3e1d956b`.
+  Previous host binary is backed up at
+  `/tmp/modex-agy-context.chaHjZ/modex-host.previous`.
+  Physical Android and service activation remain unverified at handoff.
+  The branch and preview are local. After activation, reset the Android
+  session cursor and reconnect to the new supervisor.
+
 ## Antigravity turn outcomes
 
 Updated 2026-11-28T01:42:22+07:00 on `fix/antigravity-turn-outcomes`.
