@@ -2,7 +2,7 @@
 
 ## Combined agent routing and Antigravity controls
 
-Updated 2026-11-27T20:33:08+07:00 on `feat/antigravity-session-controls`.
+Updated 2026-11-27T20:43:10+07:00 on `main` after merge commit `79a64a6`.
 Integrated shared agent routing through `a95ab4b` with Antigravity controls
 through `f5334e6`. Both plans and the bilingual agent guide describe the
 scoped capabilities and the managed OpenCode profile.
@@ -20,17 +20,19 @@ scoped capabilities and the managed OpenCode profile.
   Codex read-only transcripts and SSH cursor reconnect and wrong-pin
   rejection. The transcript test passed after using semantic clicks for
   controls that move during animation.
-- Existing public APK and branch history on the remote have not changed.
-  Physical-device verification and OpenCode provider inference remain
+- [PR #39](https://github.com/warmdev17/modex/pull/39) merged with all five
+  GitHub Verify jobs passing. Tag `v0.1.0-dev.39` points to merge commit
+  `79a64a6`; its pre-release title names multi-agent chats and Antigravity
+  controls.
+- Published APK `0.1.0-dev.39` uses versionCode 48 and the established
+  development certificate. Unit tests, lint, package/signature verification,
+  the code-47-to-48 encrypted-state upgrade, shared-agent chats, Antigravity
+  options and agent-activity emulator smokes passed. Downloading the published
+  assets and checking `SHA256SUMS` passed; the APK SHA-256 is
+  `d21f03972add22ac3be4dee53cf9566e1673f5b54e8bccdf09f5ccb7e6c48c5b`.
+  Physical-phone installation and OpenCode provider inference remain
   unverified. AGY reports invocation status; child transcripts remain
   unavailable in the tested ACP runtime.
-- Built the private installable preview `0.1.0-dev.39` with versionCode 48 and
-  the established development certificate. Unit tests, lint, package/signature
-  verification, the code-47-to-48 encrypted-state upgrade, shared-agent chats,
-  Antigravity options and agent-activity emulator smokes passed. The exact APK
-  is `/home/warmdev/Downloads/modex-0.1.0-dev.39-agent-routing.apk`, SHA-256
-  `d21f03972add22ac3be4dee53cf9566e1673f5b54e8bccdf09f5ccb7e6c48c5b`.
-  It has not been published, installed on a physical phone or tagged.
 
 ## Shared agent chats
 
