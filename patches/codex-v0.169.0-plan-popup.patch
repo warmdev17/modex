@@ -1,0 +1,67 @@
+--- a/tui/src/chatwidget/plan_implementation.rs
++++ b/tui/src/chatwidget/plan_implementation.rs
+@@ -7,6 +7,7 @@
+ use crate::bottom_pane::popup_consts::standard_popup_hint_line;
+
+ pub(super) const PLAN_IMPLEMENTATION_TITLE: &str = "Implement this plan?";
++pub(super) const VIEW_ID: &str = "plan_implementation";
+ const PLAN_IMPLEMENTATION_YES: &str = "Yes, implement this plan";
+ const PLAN_IMPLEMENTATION_CLEAR_CONTEXT: &str = "Yes, clear context and implement";
+ const PLAN_IMPLEMENTATION_NO: &str = "No, stay in Plan mode";
+@@ -67,6 +68,7 @@
+     );
+
+     SelectionViewParams {
++        view_id: Some(VIEW_ID),
+         title: Some(PLAN_IMPLEMENTATION_TITLE.to_string()),
+         subtitle: None,
+         footer_hint: Some(standard_popup_hint_line()),
+--- a/tui/src/chatwidget/protocol.rs
++++ b/tui/src/chatwidget/protocol.rs
+@@ -107,6 +107,7 @@
+                         MisalignmentTurnSource::ServerNotification,
+                     );
+                 }
++                let new_turn = self.last_turn_id() != Some(notification.turn.id.as_str());
+                 self.turn_lifecycle.last_turn_id = Some(notification.turn.id);
+                 self.last_non_retry_error = None;
+                 if !matches!(replay_kind, Some(ReplayKind::ResumeInitialMessages)) {
+@@ -115,6 +116,14 @@
+                         self.on_replayed_task_started(notification.turn.started_at);
+                     } else {
+                         self.on_task_started();
++                        if new_turn
++                            && self
++                                .bottom_pane
++                                .dismiss_view_by_id(plan_implementation::VIEW_ID)
++                            && self.bottom_pane.no_modal_or_popup_active()
++                        {
++                            self.on_modal_or_popup_closed();
++                        }
+                         if self.turn_lifecycle.admitted_turn_id == self.turn_lifecycle.last_turn_id
+                         {
+                             self.turn_lifecycle.admitted_turn_id = None;
+--- a/tui/src/chatwidget/tests/plan_mode.rs
++++ b/tui/src/chatwidget/tests/plan_mode.rs
+@@ -91,6 +91,21 @@
+ }
+
+ #[tokio::test]
++async fn plan_implementation_popup_closes_when_a_remote_client_starts_a_new_turn() {
++    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
++    handle_turn_started(&mut chat, "planning");
++    handle_turn_completed(&mut chat, "planning", /*duration_ms*/ None);
++    chat.open_plan_implementation_prompt();
++    assert!(render_bottom_popup(&chat, 80).contains(PLAN_IMPLEMENTATION_TITLE));
++
++    handle_turn_started(&mut chat, "planning");
++    assert!(render_bottom_popup(&chat, 80).contains(PLAN_IMPLEMENTATION_TITLE));
++
++    handle_turn_started(&mut chat, "implementing");
++    assert!(!render_bottom_popup(&chat, 80).contains(PLAN_IMPLEMENTATION_TITLE));
++}
++
++#[tokio::test]
+ async fn plan_implementation_popup_context_usage_snapshot() {
+     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
+     chat.set_token_info(Some(make_token_info(
