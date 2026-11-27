@@ -69,6 +69,23 @@ The SSH connection carries the app's requests and agent events. Agent execution 
 
 The host's supported operations are Linux and macOS. Windows host workflows use WSL2. See [agent support](docs/agents.md) for capability detail.
 
+## Similar projects
+
+This is a selected, non-exhaustive map of adjacent projects. Compatibility below is what each project publicly documents as of **2026-11-27**, not a Modex interoperability test. Named support may use a dedicated integration, ACP, or a terminal path, so feature depth can differ by agent.
+
+| Project | Highlights | Documented agent compatibility |
+| --- | --- | --- |
+| [T3 Code](https://github.com/pingdotgg/t3code) | Desktop, web, and mobile control plane; worktrees, Git review, remote access, and cross-agent delegation. See the telemetry note below. | Names Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Pi, Muse Code, and fx; also accepts local or registry ACP agents. |
+| [Happy](https://github.com/slopus/happy) | Mobile/web/desktop clients, encrypted relay, push notifications, multiplayer sessions, and orchestration. | Direct Claude, Codex, and Grok paths; Gemini through Antigravity; OpenCode and other ACP agents through harnesses. |
+| [Sesori](https://github.com/sesori-ai/sesori_apps_monorepo) | iOS/Android remote control, encrypted relay, diffs, worktrees, subagent views, notifications, and managed runtime installs. | Claude Code, Codex, OpenCode, Cursor, GitHub Copilot, Antigravity, Grok Build, DeepSeek Harness, Hermes Agent, Pi, and Oh My Pi. |
+| [OpenCode Mobile](https://github.com/alvarolorentedev/opencode-mobile) | Focused iOS/Android companion with live tools, approvals, diffs, terminal, voice, and direct connection to self-hosted servers. | OpenCode only; it follows the models, providers, agents, commands, and plugins exposed by the connected OpenCode server. |
+| [AndCode](https://github.com/yuga-hashimoto/and-code) | Runs coding agents locally on Android through PRoot, so on-device use needs no PC or SSH; also supports remote OpenCode. | OpenCode stable; Claude Code, Codex, and Antigravity marked beta. Remote-PC mode is documented for OpenCode. |
+| [MobileFlow](https://github.com/cwx2/mobile-flow) | Phone client plus desktop agent with files, terminal, Git, local preview, relay, and self-hosted tunnel options. | ACP paths for Claude Code, Codex, Aider, Gemini CLI, GitHub Copilot, and Kiro; generic CLI tools through its terminal. |
+
+**T3 Code telemetry note.** A [community issue](https://github.com/pingdotgg/t3code/issues/4123) challenged default-on telemetry and earlier privacy messaging; that issue was closed on November 4, 2026. T3 Code's [current telemetry documentation](https://github.com/pingdotgg/t3code/blob/main/docs/user/telemetry.md) says it sends product-usage events and relay diagnostics, documents server/desktop opt-out environment variables and mobile diagnostics toggles, and says prompts, responses, file contents, and credentials are excluded unless a user explicitly approves conversation text in an agent-feedback report. See also the [KuCoin report](https://www.kucoin.com/vi/news/flash/t3-code-telemetry-controversy-sparks-community-outcry-and-code-fixes). Review the current settings and policy yourself before using any remote agent controller with sensitive repositories.
+
+Modex currently takes a narrower path: native Android over user-managed SSH, no required Modex account or relay, target-owned credentials, and explicit capability boundaries for each runtime. It does not yet match the broader projects above in Claude Code support, hosted remote access, push delivery, or total agent count.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) · [Agent support](docs/agents.md)

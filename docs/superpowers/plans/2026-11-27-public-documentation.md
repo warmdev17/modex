@@ -37,9 +37,9 @@
 - Consumes: current install/release commands and the design spec
 - Produces: language-linked entry points into the docs tree
 
-- [ ] Replace the protocol-first README with matching English and Vietnamese product pages: hero, release/CI badges, product promise, current capabilities, download, quick start, architecture summary, support matrix, privacy boundary, docs links, roadmap preview, and preview warning.
-- [ ] Check every relative link and command against the current tree.
-- [ ] Commit both README files with the directly related docs in Task 2 so no public link lands on a missing page.
+- [x] Replace the protocol-first README with matching English and Vietnamese product pages: hero, release/CI badges, product promise, current capabilities, download, quick start, architecture summary, support matrix, privacy boundary, docs links, roadmap preview, and preview warning.
+- [x] Check every relative link and command against the current tree.
+- [x] Commit both README files with the directly related docs in Task 2 so no public link lands on a missing page.
 
 ### Task 2: Bilingual user and product documentation
 
@@ -59,8 +59,23 @@
 - Consumes: `docs/design.md`, `docs/install.md`, `docs/opencode-backend.md`, `PROJECT_STATE.md`, and current source capability declarations
 - Produces: stable public links used by both README files
 
-- [ ] Write matching language indexes and four focused topic pages per language.
-- [ ] Use a Mermaid diagram for the current local/SSH architecture and plain tables for runtime support and status.
-- [ ] Link detailed install, OpenCode, protocol, mobile-development, and release documents rather than duplicating them.
-- [ ] Validate Markdown links, language symmetry, forbidden overclaims, and working tree scope with a small standard-library script or shell checks.
-- [ ] Review the final diff and commit only the documentation scope.
+- [x] Write matching language indexes and four focused topic pages per language.
+- [x] Use a Mermaid diagram for the current local/SSH architecture and plain tables for runtime support and status.
+- [x] Link detailed install, OpenCode, protocol, mobile-development, and release documents rather than duplicating them.
+- [x] Validate Markdown links, language symmetry, forbidden overclaims, and working tree scope with a small standard-library script or shell checks.
+- [x] Review the final diff and commit only the documentation scope.
+
+### Task 3: Similar-project map
+
+**Files:**
+- Modify: `README.md`
+- Modify: `README.vi.md`
+
+**Interfaces:**
+- Consumes: official project repositories/documentation and the linked T3 Code telemetry report, issue, and current policy
+- Produces: matching English/Vietnamese comparison sections with dated, source-attributed claims
+
+- [x] Add a compact table of selected similar projects with highlights and declared agent compatibility.
+- [x] Define the compatibility labels and state that Modex did not independently test those projects.
+- [x] Add a neutral T3 Code telemetry note that distinguishes the controversy from the current documented collection, exclusions, and opt-outs.
+- [x] Re-run bilingual parity, link, wording, and diff checks before committing.

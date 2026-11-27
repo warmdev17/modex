@@ -69,6 +69,23 @@ Kết nối SSH truyền yêu cầu từ ứng dụng và sự kiện agent. Vi�
 
 Các thao tác host được hỗ trợ trên Linux và macOS. Quy trình host trên Windows hiện dùng WSL2. Xem [chi tiết hỗ trợ agent](docs/vi/agents.md).
 
+## Các dự án tương tự
+
+Đây là danh sách chọn lọc, không phải toàn bộ thị trường. Mức tương thích bên dưới là nội dung từng dự án công bố tại ngày **2026-11-27**, không phải kết quả kiểm thử tương tác của Modex. Hỗ trợ được nêu tên có thể dùng tích hợp riêng, ACP hoặc terminal nên độ sâu tính năng sẽ khác nhau giữa các agent.
+
+| Dự án | Điểm nổi bật | Mức tương thích agent được công bố |
+| --- | --- | --- |
+| [T3 Code](https://github.com/pingdotgg/t3code) | Control plane trên desktop, web và mobile; worktree, review Git, truy cập từ xa và giao việc chéo agent. Xem ghi chú telemetry bên dưới. | Công bố hỗ trợ Claude Code, Codex, Cursor, OpenCode, Grok Build, Antigravity, Kiro, Pi, Muse Code và fx; đồng thời nhận agent ACP local hoặc từ registry. |
+| [Happy](https://github.com/slopus/happy) | Client mobile/web/desktop, relay mã hóa, push notification, phiên nhiều người và orchestration. | Đường tích hợp trực tiếp cho Claude, Codex và Grok; Gemini qua Antigravity; OpenCode cùng agent ACP khác qua harness. |
+| [Sesori](https://github.com/sesori-ai/sesori_apps_monorepo) | Điều khiển từ xa trên iOS/Android, relay mã hóa, diff, worktree, xem subagent, notification và cài runtime được quản lý. | Claude Code, Codex, OpenCode, Cursor, GitHub Copilot, Antigravity, Grok Build, DeepSeek Harness, Hermes Agent, Pi và Oh My Pi. |
+| [OpenCode Mobile](https://github.com/alvarolorentedev/opencode-mobile) | Companion iOS/Android tập trung cho mobile, có tool trực tiếp, approval, diff, terminal, voice và kết nối thẳng tới server tự host. | Chỉ OpenCode; dùng model, provider, agent, command và plugin mà server OpenCode đang kết nối cung cấp. |
+| [AndCode](https://github.com/yuga-hashimoto/and-code) | Chạy agent ngay trên Android qua PRoot nên không cần PC hay SSH khi dùng on-device; đồng thời hỗ trợ OpenCode từ xa. | OpenCode stable; Claude Code, Codex và Antigravity được đánh dấu beta. Chế độ remote PC hiện được ghi rõ cho OpenCode. |
+| [MobileFlow](https://github.com/cwx2/mobile-flow) | Client điện thoại và desktop agent với file, terminal, Git, local preview, relay và tunnel tự host. | Đường ACP cho Claude Code, Codex, Aider, Gemini CLI, GitHub Copilot và Kiro; công cụ CLI khác chạy qua terminal. |
+
+**Ghi chú telemetry của T3 Code.** Một [issue cộng đồng](https://github.com/pingdotgg/t3code/issues/4123) phản đối telemetry bật mặc định và thông điệp quyền riêng tư trước đó; issue này được đóng ngày 4/11/2026. [Tài liệu telemetry hiện tại](https://github.com/pingdotgg/t3code/blob/main/docs/user/telemetry.md) của T3 Code cho biết sản phẩm gửi sự kiện sử dụng và chẩn đoán relay, cung cấp biến môi trường để opt-out trên server/desktop cùng các toggle chẩn đoán trên mobile, đồng thời nói prompt, response, nội dung file và credential không được gửi trừ khi người dùng chủ động duyệt kèm nội dung hội thoại trong báo cáo agent-feedback. Xem thêm [bài KuCoin](https://www.kucoin.com/vi/news/flash/t3-code-telemetry-controversy-sparks-community-outcry-and-code-fixes). Hãy tự kiểm tra policy và setting hiện tại trước khi dùng bất kỳ công cụ remote agent nào với repository nhạy cảm.
+
+Modex hiện chọn phạm vi hẹp hơn: Android native qua SSH do người dùng quản lý, không bắt buộc tài khoản hay relay Modex, credential nằm trên máy đích và từng runtime có ranh giới khả năng rõ ràng. Modex chưa có độ phủ Claude Code, truy cập remote được host sẵn, push notification hay tổng số agent rộng bằng các dự án trên.
+
 ## Tài liệu
 
 - [Kiến trúc](docs/vi/architecture.md) · [Hỗ trợ agent](docs/vi/agents.md)

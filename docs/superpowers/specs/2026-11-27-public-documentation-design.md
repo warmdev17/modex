@@ -14,6 +14,9 @@ requiring them to read protocol notes or implementation plans.
   local-first security boundary.
 - Document architecture, connecting agent runtimes, current delivery status,
   and future direction, including the Basic/Plus/Pro Modex Cloud distinction.
+- Give readers a sourced, dated map of comparable mobile/remote agent projects,
+  their highlights and declared agent compatibility, including a neutral T3
+  Code telemetry note that links the report, primary issue and current policy.
 - Keep claims aligned with the source tree and the dev.38 release.
 
 ## Non-goals and anti-goals
@@ -24,6 +27,8 @@ requiring them to read protocol notes or implementation plans.
   support, invent a project license, or describe future cloud/orchestration
   work as shipped.
 - Do not delete the existing developer and protocol documents.
+- Do not turn self-reported competitor compatibility into Modex test results or
+  present a privacy controversy without the project's current policy and scope.
 
 ## Approaches
 
