@@ -1,5 +1,10 @@
 # OpenCode backend
 
+> [!NOTE]
+> This is a low-level implementation snapshot verified at revision `771c518`.
+> For the current preview's user-facing capability scope, see the
+> [agent support matrix](agents.md).
+
 Modex normally remote-controls the Codex CLI. This document describes the
 optional OpenCode backend, verified against OpenCode 2.4.1 at revision
 `771c518`. Codex remains the default; the OpenCode backend is selected
