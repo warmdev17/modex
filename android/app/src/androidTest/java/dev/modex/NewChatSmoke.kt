@@ -39,6 +39,11 @@ internal fun Instrumentation.newChatSmoke() {
                 reply(requestId("threads/start"), """{"thread":{"id":"new","cwd":"/remote/other"}}""")
                 check(vm.selectedWorkspace == "/remote/other")
                 check(vm.selected == "new" && !vm.historyLoading && vm.messages.isEmpty() && !vm.busy)
+                pending[900L] = "agents/list" to ""
+                reply(900L, """{"data":[{"id":"antigravity","label":"Antigravity","ready":true}]}""")
+                vm.create("", "host-default", workspace = "/remote/other", projectId = "p1", agent = ANTIGRAVITY_AGENT)
+                reply(requestId("threads/start"), """{"thread":{"id":"agy:fixture","cwd":"/remote/other","agent":"antigravity","projectId":"p1"}}""")
+                check(vm.sessionAgent == ANTIGRAVITY_AGENT && vm.selected == "agy:fixture" && !vm.historyLoading)
                 vm.select("old")
                 val lateResume = requestId("threads/resume")
                 vm.disconnect()

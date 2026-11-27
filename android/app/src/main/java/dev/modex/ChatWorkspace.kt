@@ -129,6 +129,8 @@ internal fun ChatWorkspace(
     onSessionAction: (String, String, Boolean) -> Unit = { _, _, _ -> },
     takeoverSession: String = "", onTakeover: () -> Unit = {},
     models: List<ModelOption> = emptyList(), modelCatalogStatus: String = "",
+    chatAgents: List<ChatAgent> = listOf(ChatAgent(CODEX_AGENT, "Codex", true)), agentsLoading: Boolean = false,
+    sessionAgent: String = CODEX_AGENT, threadAgents: Map<String,String> = emptyMap(),
     referenceCatalog: ReferenceCatalog = ReferenceCatalog(), referencesLoading: Boolean = false,
     referenceStatus: String = "", onRefreshReferences: () -> Unit = {},
     sessionEffort: String = "", hostModel: String = "", hostEffort: String = "", onModelChoice: (String, String) -> Unit = { _, _ -> },
@@ -144,6 +146,7 @@ internal fun ChatWorkspace(
     loadAttachment: suspend (Attachment) -> java.io.File = { error("Reconnect to open attachment") },
     onNewProject: () -> Unit = {},
     onCreateInProject: (String, String, String, String, String) -> Unit = { model, mode, effort, _, _ -> onCreate(model, mode, effort) },
+    onCreateWithAgent: (String, String, String, String, String, String) -> Unit = { _, model, mode, effort, workspace, project -> onCreateInProject(model, mode, effort, workspace, project) },
     onPhoneFiles: () -> Unit = {}, onRemoteFiles: () -> Unit = {}, onRemoveAttachment: (String) -> Unit = {},
     promptDrafts: PromptDrafts? = null, activeTurnId: String = "", steerSending: Boolean = false,
     agentConversation: AgentConversation? = null, onOpenAgent: (AgentTimeline) -> Unit = {},
@@ -202,11 +205,12 @@ internal fun ChatWorkspace(
     var newWorkspace by rememberSaveable { mutableStateOf("") }
     var newProjectId by rememberSaveable { mutableStateOf("") }
     var projectMenu by remember { mutableStateOf(false) }
+    var newAgent by rememberSaveable { mutableStateOf(CODEX_AGENT) }
     fun openNewChat(workspace: String = "", projectId: String = "") {
         newWorkspace = workspace; newProjectId = projectId; newChat = true
     }
     var permissionMode by rememberSaveable { mutableStateOf("host-default") }
-    LaunchedEffect(newChat) { if (newChat) permissionMode = "host-default" }
+    LaunchedEffect(newChat) { if (newChat) { permissionMode = "host-default"; newAgent = CODEX_AGENT } }
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf("") }
     var effortInput by rememberSaveable { mutableStateOf("") }
@@ -238,11 +242,12 @@ internal fun ChatWorkspace(
     val showWorkStatus = !historyLoading && selected.isNotBlank()
     val completedWork = latestPrompt?.takeIf { showWorkStatus && !busy && it.status != "inProgress" }
     val selectedDecisions = decisions.filter { selected.isNotBlank() && it.optString("thread_id") == selected }
+    val antigravity = sessionAgent == ANTIGRAVITY_AGENT
     LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
     val modeActionEnabled = canSwitch && selected.isNotBlank() && selectedDecisions.isEmpty() && !modeChanging && !sessionStatusLoading && (!busy || modeUncertain)
-    fun openStatus() { if (selected.isNotBlank()) { showSessionStatus = true; onSessionStatus() } }
+    fun openStatus() { if (selected.isNotBlank() && !antigravity) { showSessionStatus = true; onSessionStatus() } }
     val status = when { connecting -> "Connecting…"; !connected -> "Disconnected"; historyLoading -> "Loading history…"; busy -> "Working…"; else -> "Connected · SSH" }
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -292,12 +297,12 @@ internal fun ChatWorkspace(
                             }
                         }
                         if (path !in collapsedProjects || search.isNotEmpty()) items(ids, key = { "project:$it" }) { id ->
-                            SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, Modifier.padding(start = 20.dp), archived, id in actionThreads, decisions.none { it.optString("thread_id") == id }, ::sessionAction) { onSelect(id); scope.launch { drawer.close() } }
+                            SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, Modifier.padding(start = 20.dp), archived, id in actionThreads, decisions.none { it.optString("thread_id") == id }, threadAgents[id] != ANTIGRAVITY_AGENT && !id.startsWith("agy:"), ::sessionAction) { onSelect(id); scope.launch { drawer.close() } }
                         }
                     }
                     if (visible.isNotEmpty()) item { Text(if (archived) "Archived conversations" else "Recents", Modifier.padding(horizontal = 12.dp, vertical = 12.dp), color = Mocha.Subtext, style = MaterialTheme.typography.labelLarge) }
                     items(visible, key = { "recent:$it" }) { id ->
-                        SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, archived = archived, working = id in actionThreads, canFork = decisions.none { it.optString("thread_id") == id }, onAction = ::sessionAction) { onSelect(id); scope.launch { drawer.close() } }
+                        SessionSidebarRow(id, titles[id], id == selected, canSwitch, id in runningThreads, archived = archived, working = id in actionThreads, canFork = decisions.none { it.optString("thread_id") == id }, actionsEnabled = threadAgents[id] != ANTIGRAVITY_AGENT && !id.startsWith("agy:"), onAction = ::sessionAction) { onSelect(id); scope.launch { drawer.close() } }
                     }
                     if (threadListLoading) item { Text("Loading sessions…", Modifier.padding(12.dp), style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext) }
                     if (hasMore && !threadListLoading) item { TextButton(onClick = onMore, enabled = connected) { Text("Load more") } }
@@ -317,7 +322,7 @@ internal fun ChatWorkspace(
             var autoScrolling by remember(selected) { mutableStateOf(false) }
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = ::openSessions) { ChatGlyph(ChatIcon.Menu,"Open sessions") }
-                Column(Modifier.weight(1f).padding(horizontal = 8.dp).clickable(enabled = selected.isNotBlank(), onClick = ::openStatus).semantics { if (selected.isNotBlank()) contentDescription = "Open session status" }) {
+                Column(Modifier.weight(1f).padding(horizontal = 8.dp).clickable(enabled = selected.isNotBlank() && !antigravity, onClick = ::openStatus).semantics { if (selected.isNotBlank() && !antigravity) contentDescription = "Open session status" }) {
                     Text(if (selected.isBlank()) "modex" else titles[selected] ?: "Conversation", style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.SemiBold)
                     Text(if (onHome != null) "$host · $status" else status, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = if (connected) Mocha.Blue else Mocha.Subtext)
                     if (selected.isNotBlank()) Text(contextSummary(sessionStatus), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = if (sessionStatus?.contextTokens != null) Mocha.Text else Mocha.Subtext)
@@ -325,7 +330,7 @@ internal fun ChatWorkspace(
                 Box {
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
                     ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true; onSessionPermissions("") })
+                        DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank() && !antigravity, onClick = { menu = false; showSettings = true; onSessionPermissions("") })
                         if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, onClick = { menu = false; onHome() })
                         DropdownMenuItem(text = { Text("Connection settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, onClick = { menu = false; onConnection() })
                         if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, leadingIcon = { ChatGlyph(ChatIcon.Disconnect) }, onClick = { menu = false; onDisconnect() })
@@ -370,7 +375,7 @@ internal fun ChatWorkspace(
                     if (takeoverSession.isNotBlank()) TextButton(onClick = { showTakeover = true }, enabled = connected && !historyLoading) { Text("Take over on phone") }
                 }
             }
-            if (usageWarning.isNotBlank() && selected.isNotBlank()) {
+            if (usageWarning.isNotBlank() && selected.isNotBlank() && !antigravity) {
                 Surface(color = Mocha.Mantle, shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = ::openStatus)) {
                     Text(usageWarning, Modifier.padding(12.dp), color = Mocha.Red, style = MaterialTheme.typography.bodyMedium)
@@ -449,7 +454,7 @@ internal fun ChatWorkspace(
                 items(selectedDecisions, key = { "decision-${it.optString("decision_id")}" }) { decision ->
                     InlineDecisionCard(decision, decision.optString("decision_id") in answeringDecisionIds, connected) { onAnswer(decision, it) }
                 }
-                pendingPlan(messages, busy, handledPlans)?.let { plan ->
+                pendingPlan(messages, busy, handledPlans)?.takeUnless { antigravity }?.let { plan ->
                     item(key = "plan-review-${planKey(plan)}") { PlanReviewCard(connected && !historyLoading, planResponding) { onPlanAction(plan, it) } }
                 }
                 item(key = "history-bottom") { Spacer(Modifier.height(1.dp)) }
@@ -487,25 +492,26 @@ internal fun ChatWorkspace(
             } else completedWork
             PromptComposer(
                 prompt, ::updatePrompt, busy,
-                (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank(),
+                if (antigravity) "Antigravity · Default model" else (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }), connected && selected.isNotBlank() && !antigravity,
                 ::openModel,
-                connected && !historyLoading && selected.isNotBlank() && (!busy || (activeTurnId.isNotBlank() && !stopping)) &&
+                connected && !historyLoading && selected.isNotBlank() && (!busy || (!antigravity && activeTurnId.isNotBlank() && !stopping)) &&
                     !steerSending && !attachmentWorking && !modeChanging && !permissionsWorking && !planResponding,
-                attachments, attachmentWorking, attachmentProgress, attachmentError,
-                connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
+                if (antigravity) emptyList() else attachments, !antigravity && attachmentWorking, attachmentProgress, if (antigravity) "" else attachmentError,
+                !antigravity && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
                 modelColor = reasoningColor(sessionEffort.ifBlank { defaultEffort(sessionModel) }),
                 focus = focus, steerSending = steerSending, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
-                referenceEnabled = connected && selected.isNotBlank() && !historyLoading, chosenReferences = chosenReferences,
+                referenceEnabled = !antigravity && connected && selected.isNotBlank() && !historyLoading, chosenReferences = if (antigravity) emptyList() else chosenReferences,
                 onRemoveReference = { updatePrompt(removeReferenceMarkers(prompt, it)) }, onRefreshReferences = onRefreshReferences,
                 suggestionsEnabled = !drawer.isOpen,
-                mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain, modeEnabled = modeActionEnabled,
+                mode = sessionStatus?.mode.orEmpty(), modeChanging = modeChanging, modeUncertain = modeUncertain, modeEnabled = !antigravity && modeActionEnabled,
                 onMode = onSessionMode, onModeRefresh = onSessionStatus, work = work, workAction = workAction,
-                agentCount = agents.takeIf { it.isNotEmpty() }?.count { it.status == "running" },
+                agentCount = agents.takeIf { !antigravity && it.isNotEmpty() }?.count { it.status == "running" },
                 onAgentActivity = { keyboard?.hide(); showAgentActivity = true },
+                advancedControls = !antigravity, messageTarget = if (antigravity) "Antigravity" else "Codex",
             ) {
-                if (onSend(prompt, sessionModel, sessionEffort.ifBlank { defaultEffort(sessionModel) }, chosenReferences)) updatePrompt("")
+                if (onSend(prompt, if (antigravity) "" else sessionModel, if (antigravity) "" else sessionEffort.ifBlank { defaultEffort(sessionModel) }, if (antigravity) emptyList() else chosenReferences)) updatePrompt("")
             }
         }
     }
@@ -513,7 +519,29 @@ internal fun ChatWorkspace(
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Uses your host’s provider.", color = Mocha.Subtext)
+            Text("Agent", style = MaterialTheme.typography.labelLarge, color = Mocha.Subtext)
+            Column(Modifier.selectableGroup()) {
+                chatAgents.forEach { agent ->
+                    Row(
+                        Modifier.fillMaxWidth().selectable(
+                            selected = newAgent == agent.id,
+                            enabled = agent.ready,
+                            role = Role.RadioButton,
+                            onClick = { newAgent = agent.id },
+                        ).heightIn(min = 48.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = newAgent == agent.id, onClick = null, enabled = agent.ready)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(agent.label, color = if (agent.ready) Mocha.Text else Mocha.Subtext)
+                            if (!agent.ready && agent.reason.isNotBlank()) Text(agent.reason, style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+                        }
+                    }
+                }
+            }
+            if (agentsLoading) Text("Checking installed agents…", style = MaterialTheme.typography.bodySmall, color = Mocha.Subtext)
+            Text(if (newAgent == ANTIGRAVITY_AGENT) "Uses Antigravity’s default model. Text and one-time permission prompts are supported." else "Uses your host’s Codex provider.", color = Mocha.Subtext)
             Box {
                 OutlinedButton(onClick = { projectMenu = true }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
                     ChatGlyph(ChatIcon.Folder)
@@ -528,24 +556,29 @@ internal fun ChatWorkspace(
                 }
             }
             Text(newWorkspace.ifBlank { "Outside projects" }, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
-            ModelPicker(models, modelCatalogStatus, model, { model = it; newEffort = defaultEffort(it) })
-            ReasoningControl(models.firstOrNull { it.model == model }, newEffort) { newEffort = it }
-            Column(Modifier.selectableGroup()) {
-                permissionModes.forEach { (mode, label) ->
-                    Row(Modifier.fillMaxWidth().selectable(selected = permissionMode == mode, role = Role.RadioButton, onClick = { permissionMode = mode }).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = permissionMode == mode, onClick = null)
-                        Spacer(Modifier.width(12.dp))
-                        Text(label)
+            if (newAgent == CODEX_AGENT) {
+                ModelPicker(models, modelCatalogStatus, model, { model = it; newEffort = defaultEffort(it) })
+                ReasoningControl(models.firstOrNull { it.model == model }, newEffort) { newEffort = it }
+                Column(Modifier.selectableGroup()) {
+                    permissionModes.forEach { (mode, label) ->
+                        Row(Modifier.fillMaxWidth().selectable(selected = permissionMode == mode, role = Role.RadioButton, onClick = { permissionMode = mode }).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = permissionMode == mode, onClick = null)
+                            Spacer(Modifier.width(12.dp))
+                            Text(label)
+                        }
                     }
                 }
+                Text(when (permissionMode) {
+                    "full-access" -> "Unrestricted access with no command approval prompts."
+                    "host-default" -> "Inherits your host configuration, which may allow full access."
+                    else -> "Requests user approval when sandbox restrictions need to be lifted. Host policy may restrict this mode."
+                }, style = MaterialTheme.typography.bodySmall, color = if (permissionMode == "full-access") MaterialTheme.colorScheme.error else Mocha.Subtext)
             }
-            Text(when (permissionMode) {
-                "full-access" -> "Unrestricted access with no command approval prompts."
-                "host-default" -> "Inherits your host configuration, which may allow full access."
-                else -> "Requests user approval when sandbox restrictions need to be lifted. Host policy may restrict this mode."
-            }, style = MaterialTheme.typography.bodySmall, color = if (permissionMode == "full-access") MaterialTheme.colorScheme.error else Mocha.Subtext)
         } },
-        confirmButton = { TextButton(enabled = canSwitch && model.isNotBlank() && validModelId(model), onClick = { onCreateInProject(model.trim(), permissionMode, newEffort, newWorkspace, newProjectId); newChat = false; scope.launch { drawer.close() } }) { Text("Create chat") } },
+        confirmButton = { TextButton(enabled = canSwitch && chatAgents.any { it.id == newAgent && it.ready } && (newAgent == ANTIGRAVITY_AGENT || model.isNotBlank() && validModelId(model)), onClick = {
+            onCreateWithAgent(newAgent, if (newAgent == CODEX_AGENT) model.trim() else "", if (newAgent == CODEX_AGENT) permissionMode else "host-default", if (newAgent == CODEX_AGENT) newEffort else "", newWorkspace, newProjectId)
+            newChat = false; scope.launch { drawer.close() }
+        }) { Text("Create chat") } },
         dismissButton = { TextButton(onClick = { newChat = false }) { Text("Cancel") } }
     )
     if (showSettings) SessionPermissionsDialog(
@@ -669,7 +702,7 @@ private fun PromptComposer(
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
     suggestionsEnabled: Boolean, mode: String, modeChanging: Boolean, modeUncertain: Boolean, modeEnabled: Boolean,
     onMode: (String) -> Unit, onModeRefresh: () -> Unit, work: ChatEntry?, workAction: String?,
-    agentCount: Int?, onAgentActivity: () -> Unit, onSend: () -> Unit
+    agentCount: Int?, onAgentActivity: () -> Unit, advancedControls: Boolean = true, messageTarget: String = "Codex", onSend: () -> Unit
 ) {
     var attachMenu by remember { mutableStateOf(false) }
     var editor by remember(draftKey) { mutableStateOf(TextFieldValue(prompt, TextRange(prompt.length))) }
@@ -693,7 +726,7 @@ private fun PromptComposer(
     Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
         Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             val modeAvailable = modeEnabled && control.enabled
-            Row(
+            if (advancedControls) Row(
                 Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                     .clickable(
                         interactionSource = null, indication = null, enabled = modeAvailable, role = Role.Button,
@@ -755,8 +788,8 @@ private fun PromptComposer(
             }
             if (attachmentError.isNotEmpty()) Text(attachmentError, style = MaterialTheme.typography.bodySmall, color = Mocha.Red)
             BasicTextField(editor, { changeEditor(it) }, textStyle = MaterialTheme.typography.bodyLarge.copy(color = Mocha.Text), cursorBrush = SolidColor(Mocha.Blue), maxLines = 6,
-                modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.heightIn(min = 48.dp).semantics { contentDescription = "Message Codex" },
-                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message Codex", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused }.heightIn(min = 48.dp).semantics { contentDescription = "Message $messageTarget" },
+                decorationBox = { inner -> Box(Modifier.padding(vertical = 8.dp)) { if (prompt.isEmpty()) Text("Message $messageTarget", color = Mocha.Subtext, style = MaterialTheme.typography.bodyLarge); inner() } })
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Box {
                     IconButton(onClick = { attachMenu = true }, enabled = attachEnabled) { ChatGlyph(ChatIcon.Attach, "Attach files") }
@@ -809,12 +842,15 @@ private fun PromptComposer(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, enabled: Boolean, running: Boolean, modifier: Modifier = Modifier,
-    archived: Boolean = false, working: Boolean = false, canFork: Boolean = true, onAction: (String, String) -> Unit = { _, _ -> }, onClick: () -> Unit) {
+    archived: Boolean = false, working: Boolean = false, canFork: Boolean = true, actionsEnabled: Boolean = true,
+    onAction: (String, String) -> Unit = { _, _ -> }, onClick: () -> Unit) {
     var menu by remember(id, archived) { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
     val openActions = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); menu = true }
     val actionLabel = "Actions for ${title ?: id}"
-    val interaction = if (archived) {
+    val interaction = if (!actionsEnabled) {
+        Modifier.clickable(enabled = enabled && !working, onClick = onClick)
+    } else if (archived) {
         Modifier.pointerInput(enabled, working, id) { if (enabled && !working) detectTapGestures(onLongPress = { openActions() }) }
             .then(if (enabled && !working) Modifier.semantics { onLongClick(actionLabel) { openActions(); true } } else Modifier)
     } else Modifier.combinedClickable(
@@ -831,7 +867,7 @@ private fun SessionSidebarRow(id: String, title: String?, selected: Boolean, ena
                     Text(title ?: "Untitled session · ${id.take(8)}", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                     if (running || working) CircularProgressIndicator(Modifier.size(14.dp).semantics { contentDescription = if (working) "Session action pending" else "Session running" }, strokeWidth = 2.dp, color = if (selected) Mocha.Base else Mocha.Blue)
                 }
-                Box {
+                if (actionsEnabled) Box {
                     IconButton(onClick = { menu = true }, enabled = enabled && !working,
                         modifier = Modifier.semantics { contentDescription = actionLabel }) {
                         ChatGlyph(ChatIcon.More, color = if (selected) Mocha.Base else Mocha.Subtext)

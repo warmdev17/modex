@@ -1,0 +1,62 @@
+package dev.modex
+
+import org.json.JSONObject
+import org.junit.Assert.*
+import org.junit.Test
+
+class AntigravityTest {
+    private fun JSONObject.keysSet() = keys().asSequence().toSet()
+
+    @Test fun agentCatalogKeepsKnownRuntimesAndReadinessReason() {
+        val agents = readChatAgents(JSONObject("""{"data":[
+            {"id":"codex","label":"Codex","ready":true},
+            {"id":"antigravity","label":"Antigravity","ready":false,"reason":"Sign in to Antigravity"},
+            {"id":"future","label":"Future","ready":true}
+        ]}"""))
+
+        assertEquals(listOf("codex", "antigravity"), agents.map { it.id })
+        assertTrue(agents.first().ready)
+        assertEquals("Sign in to Antigravity", agents.last().reason)
+    }
+
+    @Test fun antigravityChatCreationOmitsCodexSettings() {
+        val params = newThreadParams(
+            model = "gpt-test",
+            mode = "full-access",
+            workspace = "/work/project",
+            projectId = "project-1",
+            agent = "antigravity",
+        )
+
+        assertEquals(setOf("agent", "workspace", "project_id"), params.keysSet())
+        assertEquals("antigravity", params.getString("agent"))
+    }
+
+    @Test fun standaloneAntigravityChatKeepsStandaloneContract() {
+        val params = newThreadParams("gpt-test", "read-only", standalone = true, agent = "antigravity")
+
+        assertEquals(setOf("agent", "standalone"), params.keysSet())
+        assertTrue(params.getBoolean("standalone"))
+    }
+
+    @Test fun antigravityTurnsArePlainTextOnly() {
+        val reference = PromptReference("skill", "review", "/work/SKILL.md", "Review", "", "review", true, "@review")
+        val params = turnStartParams(
+            "agy:thread",
+            "hello @review",
+            "gpt-test",
+            "high",
+            attachments = listOf(Attachment("/tmp/a.txt", "a.txt", "file", 1)),
+            references = listOf(reference),
+            agent = "antigravity",
+        )
+
+        assertEquals(setOf("thread_id", "text"), params.keysSet())
+    }
+
+    @Test fun threadMetadataWinsBeforeAntigravityPrefixFallback() {
+        assertEquals("codex", threadAgent(JSONObject("""{"id":"agy:legacy","agent":"codex"}""")))
+        assertEquals("antigravity", threadAgent(JSONObject("""{"id":"agy:restored"}""")))
+        assertEquals("codex", threadAgent(JSONObject("""{"id":"ordinary"}""")))
+    }
+}
