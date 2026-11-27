@@ -103,6 +103,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var threadListLoading by mutableStateOf(false); private set
     var threadListStatus by mutableStateOf(""); private set
     var titles by mutableStateOf(mapOf<String, String>()); private set
+    private val antigravityTitleEventRequests = mutableMapOf<String, Long>()
     var historyLoading by mutableStateOf(false); private set
     var takeoverThread by mutableStateOf(""); private set
     private var saveJob: kotlinx.coroutines.Job? = null
@@ -163,6 +164,14 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private fun rememberChoice(id: String, reported: ModelChoice? = null) {
         val choice = resolveModelChoice(modelChoices[id], reported, runtimeDefaultModel(threadAgents[id] ?: sessionAgent), models)
         if (choice.model.isNotBlank()) modelChoices = modelChoices + (id to choice)
+    }
+    private fun rememberAntigravityTitle(id: String, value: Any?, requestId: Long? = null) {
+        val name = sessionTitle(value) ?: return
+        if (threadAgents[id] != ANTIGRAVITY_AGENT) return
+        val eventRequest = antigravityTitleEventRequests[id]
+        if (requestId != null && eventRequest != null && requestId <= eventRequest) return
+        titles = titles + (id to name)
+        if (requestId == null) antigravityTitleEventRequests[id] = sequence - 1
     }
     internal val references = ReferenceCatalogState()
     fun refreshReferences(force: Boolean = true) {
@@ -335,7 +344,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         disconnect(); transport = null; connected = false; connecting = false; projectCreating = false; reconnectAllowed = false; saveJob?.cancel()
         historyCache.clear(); lastThread = ""; ownedThread = ""
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
-        threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
+        threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); antigravityTitleEventRequests.clear(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
         journal = JournalState(); config = null; savedConnection = null; pending.clear(); handledPlans = emptySet(); planSending = false; sessions.reset(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList()
     }
     private fun loadHistory(older: Boolean = false) {
@@ -941,7 +950,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         historyCache.remove(target); sessions.remove(target)
                         promptDrafts.update(target, PromptDraft())
                         decisions = decisions.filterNot { it.optString("thread_id") == target }
-                        modelChoices -= target; threadWorkspaces -= target; threadAgents -= target; titles -= target; projectMembership -= target
+                        modelChoices -= target; threadWorkspaces -= target; threadAgents -= target; titles -= target; antigravityTitleEventRequests.remove(target); projectMembership -= target
                     }
                     threadListLoading = false; listGeneration++
                     refreshThreads()
@@ -1000,9 +1009,19 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 "threads/list" -> {
                     if (error.startsWith("Host rejected threads/list")) error = ""
                     val list = result.optJSONArray("data") ?: JSONArray()
-                    titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
-                    val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
                     val runtimes = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to connectionThreadAgent(backendCapabilities, t) }
+                    titles = titles + (0 until list.length()).associate { i ->
+                        val thread = list.getJSONObject(i)
+                        val threadId = thread.getString("id")
+                        val name = sessionTitle(thread.opt("name"))
+                        val eventRequest = antigravityTitleEventRequests[threadId]
+                        threadId to if (runtimes[threadId] == ANTIGRAVITY_AGENT && (name == null || eventRequest != null && id <= eventRequest)) {
+                            titles[threadId] ?: sessionLabel(thread, "")
+                        } else {
+                            name ?: sessionLabel(thread)
+                        }
+                    }
+                    val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
                     val membership = readProjectMembership(list)
                     projectMembership = projectMembership + membership
                     threadWorkspaces = threadWorkspaces + paths
@@ -1041,6 +1060,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     sessions.open(openedThread.getString("id"))
                     ownedThread = selected; lastThread = selected
                     threadAgents = threadAgents + (selected to connectionThreadAgent(backendCapabilities, openedThread))
+                    rememberAntigravityTitle(openedThread.optString("id"), openedThread.opt("name"), id)
                     visibleHistory = historyCache.get(selected)
                     visibleHistory?.let { sessions.loadHistory(selected, it.entries, selected in runningThreads); hasOlderHistory = it.cursor.isNotBlank() }
                     val reported = ModelChoice(result.optString("model"), result.optString("effort"))
@@ -1071,6 +1091,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     }
                     val thread = result.optJSONObject("thread")
                     rememberChoice(selected, thread?.let { ModelChoice(it.optString("model"), it.optString("reasoningEffort")) })
+                    if (thread?.opt("id") == selected) rememberAntigravityTitle(selected, thread.opt("name"), id)
                     // Do not replace newer streamed items with an older history snapshot.
                     val changed = request.activity != sessions.activityVersion(selected)
                     val entries = readChat(result.getJSONArray("messages"))
@@ -1134,6 +1155,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             params.optString("plan_key").takeIf { it.isNotBlank() }?.let { handledPlans += it }
         }
         val event = frame.optString("event")
+        if (event == "thread/name/updated") {
+            rememberAntigravityTitle(params.optString("threadId"), params.opt("threadName"))
+        }
         if (params.optString("threadId") == agentConversation.agent?.id) {
             agentConversation.event(event, params)
             if ((event == "turn/started" || event == "turn/completed") &&

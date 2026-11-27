@@ -1,5 +1,35 @@
 # Modex project state
 
+## Antigravity session titles
+
+Updated 2026-11-28T01:34:12+07:00 on `feat/antigravity-session-titles`,
+based on `0810079`. Host source `0f7d00c`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-session-titles.md).
+Titles reported by AGY appear in the Android header and sidebar. The host
+persists them and recovers older native titles when reopening a chat. Android
+keeps a live title across missing and older in-flight snapshots.
+
+- At `0f7d00c`, `GOMAXPROCS=4 go test -race -p 1 ./... -count=1
+  -timeout=120s` with umask 022 and `go vet ./...` passed. The stamped
+  isolated supervisor passed all three `test_antigravity_supervisor.py`
+  cases with real AGY 1.5.17 and the shared-agent supervisor fixture.
+- Offline Android unit, lint and APK builds passed with 191 unit tests
+  and zero lint errors. The title smoke failed on preview 53 and passed on
+  54, covering live titles, stale snapshots, validation, header and drawer.
+  Shared chats, attachment composer and the signed 53-to-54 upgrade with
+  synthetic encrypted state passed. The older session-management smoke
+  missed its long-title actions control on both builds. Physical Android
+  was not tested.
+- Signed APK `.modex/previews/modex-0.1.0-preview.54-antigravity-titles.apk`
+  in the main checkout. SHA-256
+  `830660507661c22a1a921412aec19f58973449770986107b6b9aadd81a4b57c6`.
+  Verified host SHA-256
+  `670ed88c9161af2992fbf45ef3c270b226bc1d4d50e0f4b2f6100a62e0258e52`.
+  Previous host backed up at
+  `/tmp/modex-agy-titles.cG5YOk/modex-host.previous`.
+  Host activation uses a delayed restart and remains unverified at handoff.
+  Branch and preview are local.
+
 ## Antigravity attachment feedback
 
 Updated 2026-11-28T00:52:24+07:00 on `fix/antigravity-attachment-feedback`

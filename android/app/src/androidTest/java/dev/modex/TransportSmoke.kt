@@ -17,6 +17,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "opencode-capabilities") { openCodeCapabilitiesSmoke(); return }
         if (args.getString("preview") == "opencode-projects-read") { openCodeCapabilitiesSmoke(projectsRead = true); return }
         if (args.getString("preview") == "session-management") { sessionManagementSmoke(); return }
+        if (args.getString("preview") == "antigravity-titles") { antigravityTitleSmoke(); return }
         if (args.getString("preview") == "plan-review") { planReviewSmoke(); return }
         if (args.getString("preview") == "prompt-drafts") { promptDraftSmoke(args); return }
         if (args.getString("preview") == "agent-activity") { agentActivitySmoke(); return }

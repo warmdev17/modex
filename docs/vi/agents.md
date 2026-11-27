@@ -57,6 +57,10 @@ chọn tiếp tục dùng model mặc định của Antigravity.
 Antigravity 1.5.17 đưa chat mới vào danh sách khôi phục sau lượt chat đầu
 tiên được ghi lại.
 
+Khi cả host lẫn Android đã cập nhật, tên do Antigravity tạo sẽ hiện ở
+đầu chat và trong sidebar, kể cả sau khi kết nối lại. Chat cũ lấy lại
+tên khi mở nếu Antigravity cung cấp tên đó.
+
 Khi cả host lẫn Android đã cập nhật, dùng **Attach files** trong chat
 Antigravity để gửi ảnh PNG/JPEG hoặc file văn bản UTF-8. Có thể gửi file
 riêng hoặc kèm lời nhắn. Mỗi tin nhắn gửi tối đa tám file, tổng 8 MiB.

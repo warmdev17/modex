@@ -57,6 +57,10 @@ Older hosts and ACP sessions without options use Antigravity's default model.
 Antigravity 1.5.17 lists a new chat for restart recovery after its first
 recorded turn.
 
+With matching Modex builds, the title Antigravity generates appears in the
+chat header and sidebar and is retained when reconnecting. Older chats recover
+their native title when reopened if Antigravity supplies one.
+
 With a compatible host and Android build, use **Attach files** in an
 Antigravity chat to send PNG or JPEG images and UTF-8 text files. You can
 send a file on its own or include a prompt. Each message can carry up to
