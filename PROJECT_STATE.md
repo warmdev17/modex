@@ -2,7 +2,7 @@
 
 ## Android model picker
 
-Updated 2026-11-27T21:30:30+07:00 on `feat/android-model-picker`, APK source
+Updated 2026-11-27T22:05:36+07:00 on `feat/android-model-picker`, APK source
 `bcf0929` based on `884538a`. Codex, OpenCode and Antigravity share the model
 dropdown and level slider. Brand matching uses the model ID before its label.
 Antigravity retains per-option acknowledgement, commits slider gestures once,
@@ -20,8 +20,9 @@ and offers a dropdown when the host reports an unlisted current level.
 - Established signer and `dev.modex` package verified for private preview
   code 49. Upgrade from public code 48 preserved synthetic encrypted state.
   APK staged in `.modex/previews/modex-0.1.0-preview.49-model-picker.apk`
-  under the main Modex checkout on the connected host
-  for the in-app SFTP picker. SHA-256
+  under the main Modex checkout on the connected host for the in-app SFTP
+  picker. AGENTS.md and the mobile delivery guide now specify this path and
+  the phone's path-entry flow. SHA-256
   `c37ab44329d6e152e7e28dc48ee6f922b6f6aca35999a2f9ecff4b5c8769ceb7`.
   Physical-phone download and install remain unverified. Branch is local.
 
