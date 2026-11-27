@@ -363,18 +363,7 @@ func (c *Client) prompt(ctx context.Context, sessionID, text string, files []pro
 	if expectedTurn != "" {
 		return "", errors.New("opencode did not confirm the follow-up; check the conversation before resending")
 	}
-	// Older or asynchronous prompt responses may omit the message; resolve the
-	// newest user message instead.
-	page, err := c.ListMessagesPage(ctx, sessionID, 5, "desc", "")
-	if err != nil {
-		return "", err
-	}
-	for _, item := range page.Data {
-		if item.Type == "user" && item.ID != "" {
-			return item.ID, nil
-		}
-	}
-	return "", errors.New("opencode did not return the user message")
+	return "", errors.New("opencode did not confirm the prompt; check the conversation before resending")
 }
 
 // ListPermissions returns the pending permission requests for a session.

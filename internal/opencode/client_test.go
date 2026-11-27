@@ -182,7 +182,7 @@ func TestClientPromptAppliesSessionSettingsAndSendsV2Body(t *testing.T) {
 	}
 }
 
-func TestClientPromptFetchesLatestUserMessage(t *testing.T) {
+func TestClientPromptDoesNotClaimOldMessageWhenAckMissing(t *testing.T) {
 	server, requests := fakeServer(t, func(w http.ResponseWriter, r *http.Request, body string) {
 		switch r.URL.Path {
 		case "/api/session/ses_1/prompt":
@@ -198,10 +198,10 @@ func TestClientPromptFetchesLatestUserMessage(t *testing.T) {
 	})
 	client := NewClient(server.URL, server.Client(), "/work")
 	userID, err := client.Prompt(context.Background(), "ses_1", "hi", nil, nil, "")
-	if err != nil || userID != "msg_latest" {
+	if err == nil || userID != "" {
 		t.Fatalf("userID=%q err=%v", userID, err)
 	}
-	if len(*requests) != 2 || (*requests)[1].Query != "limit=5&order=desc" {
+	if len(*requests) != 1 {
 		t.Fatalf("requests=%+v", *requests)
 	}
 }

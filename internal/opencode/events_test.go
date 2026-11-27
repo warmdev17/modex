@@ -185,12 +185,12 @@ func TestTurnCompletionResolvesPendingDecisions(t *testing.T) {
 func TestActiveSessionStopsAfterTerminalTurn(t *testing.T) {
 	synth := NewSynthesizer("/work", nil)
 	synth.StartTurn("ses_1", "msg_user", "/work")
-	if id, active := synth.ActiveSession(); id != "ses_1" || !active {
-		t.Fatalf("active=%q,%v", id, active)
+	if active := synth.ActiveSessions(); !reflect.DeepEqual(active, []string{"ses_1"}) {
+		t.Fatalf("active=%v", active)
 	}
 	synth.Handle("session.execution.succeeded", json.RawMessage(`{"sessionID":"ses_1"}`))
-	if id, active := synth.ActiveSession(); id != "" || active {
-		t.Fatalf("terminal turn still polls: %q,%v", id, active)
+	if active := synth.ActiveSessions(); len(active) != 0 {
+		t.Fatalf("terminal turn still polls: %v", active)
 	}
 }
 
@@ -302,6 +302,50 @@ func TestToolOnlyTurnSuppressesEmptyAgentMessage(t *testing.T) {
 	}
 }
 
+func TestSynthesizerIgnoresPreviousOutcomeAndIntermediateAssistant(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "new_prompt", "/work")
+	finishedStep := int64(101)
+	messages := []message{
+		{ID: "previous_idle", Type: "idle", Outcome: "succeeded"},
+		{ID: "new_prompt", Type: "user"},
+	}
+	stale := session{ID: "ses_1", Outcome: "succeeded"}
+	synth.Reconcile(stale, messages)
+	if _, active := synth.ActiveTurn("ses_1"); !active {
+		t.Fatal("previous outcome finished the new turn")
+	}
+	step := message{ID: "step", Type: "assistant", Content: []part{{Type: "text", Text: "Checking"}}}
+	step.Time.Completed = &finishedStep
+	messages = append(messages, step)
+	synth.Reconcile(stale, messages)
+	if _, active := synth.ActiveTurn("ses_1"); !active {
+		t.Fatal("intermediate assistant message finished the turn")
+	}
+	messages = append(messages, message{ID: "final", Type: "assistant", Content: []part{{Type: "text", Text: "Final answer"}}},
+		message{ID: "current_idle", Type: "idle", Outcome: "succeeded"})
+	synth.Reconcile(stale, messages)
+	if _, active := synth.ActiveTurn("ses_1"); active || !collector.hasMethod("turn/completed") {
+		t.Fatal("current idle marker did not finish the turn")
+	}
+}
+
+func TestReconcileContinuesFromKnownHistoryProgress(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("s", "prompt", "/work")
+	current := session{ID: "s"}
+	synth.Reconcile(current, []message{{ID: "prompt", Type: "user"}, {ID: "step", Type: "assistant"}})
+	synth.Reconcile(current, []message{
+		{ID: "step", Type: "assistant", Content: []part{{Type: "text", Text: "done"}}},
+		{ID: "idle", Type: "idle", Outcome: "succeeded"},
+	})
+	if _, active := synth.ActiveTurn("s"); active || !collector.hasMethod("item/completed") {
+		t.Fatal("latest window with verified overlap did not complete the turn with its answer")
+	}
+}
+
 func TestSynthesizerReconcileCompletesMissedTurn(t *testing.T) {
 	collector := &eventCollector{}
 	synth := NewSynthesizer("/work", collector.emit)
@@ -318,6 +362,7 @@ func TestSynthesizerReconcileCompletesMissedTurn(t *testing.T) {
 	messages := []message{
 		{ID: "msg_user", Type: "user", Text: "hi"},
 		{ID: "msg_asst", Type: "assistant", Content: []part{{Type: "text", Text: "done"}}},
+		{ID: "msg_idle", Type: "idle", Outcome: "succeeded"},
 	}
 	messages[0].Time.Created = created
 	messages[1].Time.Created = completed

@@ -437,8 +437,8 @@ func TestUnsupportedFormFailsTurnVisibly(t *testing.T) {
 	if notice == "" || !failed {
 		t.Fatalf("form request did not fail visibly: notice=%q failed=%v", notice, failed)
 	}
-	if id, active := synth.ActiveSession(); id != "" || active {
-		t.Fatalf("turn still in progress after unsupported input: %q,%v", id, active)
+	if active := synth.ActiveSessions(); len(active) != 0 {
+		t.Fatalf("turn still in progress after unsupported input: %v", active)
 	}
 }
 

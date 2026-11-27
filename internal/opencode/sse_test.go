@@ -17,6 +17,17 @@ func ssePayload(id, typ, data string) string {
 	return string(raw)
 }
 
+func TestStreamDoesNotCloseTurnFromUncorrelatedTerminalEvent(t *testing.T) {
+	collector := &eventCollector{}
+	synth := NewSynthesizer("/work", collector.emit)
+	synth.StartTurn("ses_1", "new_prompt", "/work")
+	stream := NewStream(nil, synth)
+	stream.dispatch(ssePayload("evt_previous", "session.execution.succeeded", `{"sessionID":"ses_1"}`))
+	if _, active := synth.ActiveTurn("ses_1"); !active {
+		t.Fatal("uncorrelated session event closed the new turn")
+	}
+}
+
 func TestStreamParsesSSEAndDedupesReconnect(t *testing.T) {
 	payloads := []string{
 		ssePayload("evt_1", "session.execution.started", `{"sessionID":"ses_1"}`),
@@ -30,7 +41,20 @@ func TestStreamParsesSSEAndDedupesReconnect(t *testing.T) {
 		ssePayload("evt_9", "session.execution.succeeded", `{"sessionID":"ses_1"}`),
 	}
 	var connections atomic.Int32
+	var terminalDelivered atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/session/ses_1" {
+			jsonResponse(w, http.StatusOK, `{"data":{"id":"ses_1","location":{"directory":"/work"}}}`)
+			return
+		}
+		if r.URL.Path == "/api/session/ses_1/message" {
+			if terminalDelivered.Load() {
+				jsonResponse(w, http.StatusOK, `{"data":[{"id":"idle","type":"idle","outcome":"succeeded"},{"id":"msg_user","type":"user"}]}`)
+			} else {
+				jsonResponse(w, http.StatusOK, `{"data":[{"id":"msg_user","type":"user"}]}`)
+			}
+			return
+		}
 		if r.URL.Path != "/api/event" {
 			http.NotFound(w, r)
 			return
@@ -50,7 +74,11 @@ func TestStreamParsesSSEAndDedupesReconnect(t *testing.T) {
 	synth := NewSynthesizer("/work", collector.emit)
 	synth.StartTurn("ses_1", "msg_user", "/work")
 	client := NewClient(server.URL, server.Client(), "/work")
-	stream := NewStream(client, synth)
+	stream := NewStream(client, synth, func(typ string, _ json.RawMessage, _ string) {
+		if typ == "session.execution.succeeded" {
+			terminalDelivered.Store(true)
+		}
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -96,6 +124,7 @@ func TestStreamParsesSSEAndDedupesReconnect(t *testing.T) {
 func TestStreamPollingCompletesMissedTurn(t *testing.T) {
 	sessionJSON := `{"id":"ses_1","outcome":"succeeded","time":{"created":1,"updated":3,"busy":2,"idle":3},"location":{"directory":"/work"}}`
 	messagesJSON := `{"data":[
+		{"id":"msg_idle","type":"idle","outcome":"succeeded"},
 		{"id":"msg_asst","type":"assistant","content":[{"type":"text","text":"done"}],"time":{"created":2,"completed":3}},
 		{"id":"msg_user","type":"user","text":"hi","time":{"created":1}}
 	],"cursor":{"previous":null,"next":null}}`
@@ -153,6 +182,33 @@ func TestStreamPollingCompletesMissedTurn(t *testing.T) {
 	}
 }
 
+func TestStreamPollingCompletesBothActiveSessions(t *testing.T) {
+	server, _ := fakeServer(t, func(w http.ResponseWriter, r *http.Request, _ string) {
+		switch r.URL.Path {
+		case "/api/session/one":
+			jsonResponse(w, 200, `{"data":{"id":"one"}}`)
+		case "/api/session/two":
+			jsonResponse(w, 200, `{"data":{"id":"two"}}`)
+		case "/api/session/one/message", "/api/session/two/message":
+			jsonResponse(w, 200, `{"data":[{"id":"idle","type":"idle","outcome":"succeeded"},{"id":"prompt","type":"user"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	synth := NewSynthesizer("/work", nil)
+	synth.StartTurn("one", "prompt", "/work")
+	synth.StartTurn("two", "prompt", "/work")
+	stream := NewStream(NewClient(server.URL, server.Client(), "/work"), synth)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	stream.poll(ctx)
+	for _, id := range []string{"one", "two"} {
+		if _, active := synth.ActiveTurn(id); active {
+			t.Fatalf("session %s remained active", id)
+		}
+	}
+}
+
 func TestPollRejectsSnapshotForReplacedTurn(t *testing.T) {
 	started, release := make(chan struct{}), make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -195,9 +251,9 @@ func TestPollFindsTurnAnchorOnOlderPage(t *testing.T) {
 				jsonResponse(w, http.StatusOK, `{"data":[{"id":"start","type":"user"}],"cursor":{}}`)
 				return
 			}
-			recent := []map[string]string{{"id": "idle", "type": "idle", "outcome": "succeeded"}}
+			recent := []map[string]any{{"id": "idle", "type": "idle", "outcome": "succeeded"}}
 			for i := 1; i < pollMessages; i++ {
-				recent = append(recent, map[string]string{"id": fmt.Sprintf("followup-%d", i), "type": "user"})
+				recent = append(recent, map[string]any{"id": fmt.Sprintf("followup-%d", i), "type": "user", "metadata": map[string]string{"modex_turn_id": "start"}})
 			}
 			raw, _ := json.Marshal(map[string]any{"data": recent, "cursor": map[string]string{"next": "older"}})
 			jsonResponse(w, http.StatusOK, string(raw))
@@ -235,7 +291,7 @@ func TestPollFindsTurnAnchorAfterSeveralShrunkPages(t *testing.T) {
 			case 6:
 				jsonResponse(w, 200, `{"data":[{"id":"start","type":"user"}],"cursor":{}}`)
 			default:
-				jsonResponse(w, 200, fmt.Sprintf(`{"data":[{"id":"followup-%d","type":"user"}],"cursor":{"next":"%d"}}`, page, page+1))
+				jsonResponse(w, 200, fmt.Sprintf(`{"data":[{"id":"followup-%d","type":"user","metadata":{"modex_turn_id":"start"}}],"cursor":{"next":"%d"}}`, page, page+1))
 			}
 		default:
 			http.NotFound(w, r)
