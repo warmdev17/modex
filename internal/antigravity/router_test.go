@@ -316,9 +316,18 @@ func TestReplayInvocationUpdatesExistingCall(t *testing.T) {
 	}
 }
 
+func canonicalTestDir(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func stage3RouterFixture(t *testing.T) (root, binary, state string) {
 	t.Helper()
-	root, state = t.TempDir(), t.TempDir()
+	root, state = canonicalTestDir(t), t.TempDir()
 	binary = filepath.Join(t.TempDir(), "agy")
 	exe, err := os.Executable()
 	if err != nil {
@@ -967,7 +976,7 @@ func TestTitleSaveRetriesWithoutDuplicateEventsOrInterruptingStream(t *testing.T
 }
 
 func TestUsageSnapshotDeduplicatesAndAcceptsCompaction(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTestDir(t)
 	r := New(context.Background(), "", root, t.TempDir())
 	defer r.Close()
 	var events []string
@@ -1215,7 +1224,7 @@ func TestAttachmentContextAppliesOnlyToFutureProcesses(t *testing.T) {
 }
 
 func TestReadinessUsesRequestedWorkspaceAndCancellation(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTestDir(t)
 	marker := filepath.Join(root, "marker")
 	bin := filepath.Join(t.TempDir(), "agy")
 	script := "#!/bin/sh\npwd > \"$MODEX_TEST_MARKER\"\nexec sleep 30\n"

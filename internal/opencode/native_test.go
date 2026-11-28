@@ -17,8 +17,17 @@ import (
 	"github.com/warmdev/modex/internal/bridge"
 )
 
+func canonicalTestDir(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestNativeCLIHandoffValidatesScopeAndPrivateConnection(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := canonicalTestDir(t)
 	state := t.TempDir()
 	if err := os.Chmod(state, 0700); err != nil {
 		t.Fatal(err)
@@ -79,7 +88,7 @@ func TestNativeCLIHandoffValidatesScopeAndPrivateConnection(t *testing.T) {
 }
 
 func TestNativeWatchAdoptsPromptDecisionsCompletionAndHistory(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := canonicalTestDir(t)
 	state := t.TempDir()
 	if err := os.Chmod(state, 0700); err != nil {
 		t.Fatal(err)
@@ -192,7 +201,7 @@ func TestNativeWatchAdoptsPromptDecisionsCompletionAndHistory(t *testing.T) {
 }
 
 func TestNativeWatchDoesNotDuplicateConcurrentModexPrompt(t *testing.T) {
-	workspace := t.TempDir()
+	workspace := canonicalTestDir(t)
 	state := t.TempDir()
 	if err := os.Chmod(state, 0700); err != nil {
 		t.Fatal(err)

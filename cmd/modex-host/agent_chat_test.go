@@ -227,8 +227,17 @@ func TestGoalRejectsOtherAgentThreads(t *testing.T) {
 	}
 }
 
+func canonicalTestDir(t *testing.T) string {
+	t.Helper()
+	path, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestCLIReadinessAndScopedList(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTestDir(t)
 	link := root + "-link"
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatal(err)
@@ -263,7 +272,7 @@ func (r *readinessFixture) Readiness(_ context.Context, workspace string) map[st
 	return map[string]any{"id": "antigravity", "ready": true}
 }
 func TestCLICheckAuthorizationAndCanonicalWorkspace(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTestDir(t)
 	link := root + "-link"
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatal(err)
@@ -282,7 +291,7 @@ func TestCLICheckAuthorizationAndCanonicalWorkspace(t *testing.T) {
 }
 
 func TestExplicitCodexListCanonicalWorkspace(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTestDir(t)
 	link := root + "-link"
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatal(err)
@@ -302,7 +311,7 @@ func TestExplicitCodexListCanonicalWorkspace(t *testing.T) {
 }
 
 func TestExplicitOpenCodeListCanonicalWorkspace(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTestDir(t)
 	link := root + "-link"
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatal(err)
@@ -327,7 +336,7 @@ func TestExplicitOpenCodeListCanonicalWorkspace(t *testing.T) {
 }
 
 func TestCombinedListUsesExplicitWorkspaceForAgentChats(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTestDir(t)
 	router := &fixtureAgentRouter{listed: []map[string]any{{"id": "agy:in", "cwd": root}, {"id": "agy:out", "cwd": "/other"}}}
 	codex := func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error) {
 		return json.RawMessage(`{"data":[],"nextCursor":null}`), nil
