@@ -19,7 +19,9 @@ Chat hiện có tiếp tục dùng runtime và phiên native đã chọn. Kết 
 | OpenCode | Chat, lịch sử, chọn model, tệp đính kèm, ngữ cảnh project, form và trạng thái công cụ. | Chưa có plan mode, permission profile, takeover, reference hay toàn bộ điều khiển project riêng Codex. Trạng thái phiên chỉ tồn tại theo supervisor. |
 | Antigravity | Prompt văn bản, streaming, Stop, lịch sử, quyền dùng một lần và chọn model, mức suy nghĩ trên host tương thích. | Đính kèm và gửi thêm prompt cần bản phát triển mô tả bên dưới. |
 
-Chỉ có executable không đồng nghĩa agent đã sẵn sàng. Hiện tại, bộ kiểm tra Antigravity xác nhận CLI, đăng nhập và các khả năng ACP bắt buộc trước khi cho phép chọn. Host Codex và OpenCode khởi động thành công chỉ chứng minh bridge đã khởi tạo, không chứng minh provider đã xác thực hay inference sẽ thành công. Tài khoản provider và thông tin xác thực được cấu hình, kiểm tra trên host.
+Antigravity cần tải được danh sách model và hỗ trợ khôi phục phiên qua
+ACP thì mới chọn được. Codex và OpenCode cần khởi tạo được bridge. Khi
+gửi prompt, mỗi provider kiểm tra tài khoản và quota theo quy định riêng.
 
 Ma trận này mô tả bản xem trước hiện tại. [Snapshot triển khai backend OpenCode](../opencode-backend.md) ghi lại một revision đã kiểm chứng trước đây và có thể chưa gồm phần project, form hay lịch sử tool mới hơn.
 
@@ -64,6 +66,8 @@ Antigravity, chạy từ workspace của phiên hoặc chỉ định `--workspac
 
 Khi kết nối qua SSH, Modex chuyển ngữ cảnh từ OpenSSH để Antigravity
 dùng luồng xác thực SSH của nó và thông tin đăng nhập sẵn có trên host.
+Nếu bộ chọn yêu cầu đăng nhập, chạy `agy acp --login` trong terminal
+SSH bằng tài khoản chạy Modex trên host, rồi mở lại bộ chọn.
 
 Khi cả host và Android hỗ trợ tùy chọn phiên Antigravity, bộ chọn trong
 chat hiển thị các model và mức suy nghĩ do ACP cung cấp. Có thể đổi khi chat

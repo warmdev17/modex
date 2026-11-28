@@ -576,20 +576,24 @@ func (r *Router) readiness() map[string]any {
 		entry["reason"] = "Host workspace is unavailable"
 		return entry
 	}
-	cmd := exec.CommandContext(ctx, path, "-p", "/model", "--output-format", "json")
+	// The models command reports a missing login without starting OAuth.
+	cmd := exec.CommandContext(ctx, path, "models")
 	cmd.Dir = workspace
 	cmd.Env = env
-	var output bytes.Buffer
+	var output, problems bytes.Buffer
 	cmd.Stdout = &limitedWriter{dst: &output, remaining: 65536}
+	cmd.Stderr = &limitedWriter{dst: &problems, remaining: 4096}
 	if e = cmd.Run(); e != nil {
-		entry["reason"] = "Antigravity is unavailable or requires sign-in on the host"
+		entry["reason"] = "Antigravity model discovery failed"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			entry["reason"] = "Antigravity model discovery timed out"
+		} else if bytes.Contains(bytes.ToLower(problems.Bytes()), []byte("sign in")) {
+			entry["reason"] = "Run agy acp --login on the host"
+		}
 		return entry
 	}
-	var probe struct {
-		Status string `json:"status"`
-	}
-	if json.Unmarshal(output.Bytes(), &probe) != nil || probe.Status != "SUCCESS" {
-		entry["reason"] = "Antigravity is unavailable or requires sign-in on the host"
+	if len(bytes.TrimSpace(output.Bytes())) == 0 {
+		entry["reason"] = "Antigravity returned no models"
 		return entry
 	}
 	c, e := acp.StartWithEnvironment(ctx, path, workspace, env, nil, nil)

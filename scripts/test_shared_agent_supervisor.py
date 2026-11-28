@@ -133,8 +133,8 @@ if kind == "opencode":
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     print(f"server listening on http://127.0.0.1:{server.server_port}", flush=True)
     server.serve_forever()
-elif kind == "agy" and "-p" in sys.argv:
-    print('{"status":"SUCCESS"}')
+elif kind == "agy" and "models" in sys.argv:
+    print("fixture-model\tFixture model")
 else:
     thread = {"id": "codex-fixture", "cwd": workspace, "name": "Codex fixture",
               "projectId": "shared-project", "turns": []}

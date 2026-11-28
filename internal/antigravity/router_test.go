@@ -720,15 +720,32 @@ func TestAntigravityTurnOutcomes(t *testing.T) {
 	}
 }
 
-func TestReadinessRejectsSuccessfulExitWithErrorStatus(t *testing.T) {
+func TestReadinessRejectsEmptyModelList(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "agy")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '%s' '{\"status\":\"ERROR\"}'\n"), 0700); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	r := New(context.Background(), bin, t.TempDir(), t.TempDir())
 	defer r.Close()
-	if ready := r.readiness()["ready"]; ready != false {
-		t.Fatalf("error probe marked ready: %v", ready)
+	if entry := r.readiness(); entry["ready"] != false || entry["reason"] != "Antigravity returned no models" {
+		t.Fatalf("empty model list readiness: %v", entry)
+	}
+}
+
+func TestReadinessReportsMissingSSHLoginWithoutOpeningIt(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "agy")
+	script := "#!/bin/sh\n" +
+		"[ \"$1\" = models ] || exit 2\n" +
+		"printf 'Please sign in before fetching models.\\n' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	r := New(context.Background(), bin, t.TempDir(), t.TempDir())
+	defer r.Close()
+	entry := r.readiness()
+	if entry["ready"] != false || entry["reason"] != "Run agy acp --login on the host" {
+		t.Fatalf("sign-in readiness: %v", entry)
 	}
 }
 
@@ -1154,7 +1171,7 @@ func TestAttachmentContextAppliesOnlyToFutureProcesses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := "#!/bin/sh\nprintf '%s\\n' \"${SSH_CONNECTION-unset}\" >> " + strconv.Quote(log) + "\nif [ \"$1\" = '-p' ]; then printf '%s' '{\"status\":\"SUCCESS\"}'; exit; fi\nMODEX_ROUTER_FIXTURE=1 exec " + strconv.Quote(exe) + " -test.run=^TestRouterACPFixture$\n"
+	script := "#!/bin/sh\nprintf '%s\\n' \"${SSH_CONNECTION-unset}\" >> " + strconv.Quote(log) + "\nif [ \"$1\" = models ]; then printf 'fixture-model\\tFixture model\\n'; exit; fi\nMODEX_ROUTER_FIXTURE=1 exec " + strconv.Quote(exe) + " -test.run=^TestRouterACPFixture$\n"
 	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

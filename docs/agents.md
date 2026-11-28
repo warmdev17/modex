@@ -19,7 +19,10 @@ Existing chats keep their selected runtime and native session. Connecting a host
 | OpenCode | Chat, history, model selection, attachments, project context, forms, and tool state. | No Codex-specific plan mode, permission profiles, takeover, references, or full project controls. Session state is temporary per supervisor. |
 | Antigravity | Text prompts, streaming, Stop, history, one-time permissions, and model and thinking selection on compatible hosts. | Attachments and text follow-ups require the development build described below. |
 
-An executable alone does not mean an agent is ready. The current Antigravity picker probe checks its CLI, sign-in, and required ACP capabilities before enabling selection. Codex and OpenCode host startup proves that their bridge initialized, not that provider authentication or inference will succeed. Provider accounts and credentials are configured and verified on the host.
+Antigravity must return a model catalog and support ACP session recovery
+before the picker enables it. Codex and OpenCode must initialize their
+bridges. Each provider applies its own account and quota requirements when
+you send a prompt.
 
 This matrix describes the current preview. The [OpenCode backend implementation snapshot](opencode-backend.md) records an earlier verified revision and may not include newer projects, forms, or tool-history work.
 
@@ -67,6 +70,8 @@ from that workspace or pass its directory with `--workspace`.
 Over SSH, Modex starts Antigravity with the connection context from
 OpenSSH so AGY can choose its usual SSH authentication path. It uses
 the credentials already available to the host user.
+If the picker asks you to sign in, run `agy acp --login` as the Modex
+host user in an SSH terminal, then reopen the picker.
 
 When both the host and the Android app support Antigravity session options,
 the chat's model picker shows the model and thinking choices reported by ACP.

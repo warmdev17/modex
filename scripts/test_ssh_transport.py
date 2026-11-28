@@ -100,8 +100,11 @@ for line in sys.stdin:
 connection = os.environ.get("SSH_CONNECTION", "").split()
 authenticated = (len(connection) == 4 and connection[0] == connection[2] == "127.0.0.1"
                  and connection[1].isdigit() and connection[3] == expected_port)
-if "-p" in sys.argv:
-    print(json.dumps({"status": "SUCCESS" if authenticated else "MISSING_SSH_CONTEXT"}))
+if "models" in sys.argv:
+    if not authenticated:
+        print("Please sign in to fetch models.", file=sys.stderr)
+        sys.exit(1)
+    print("fixture-model\tFixture model")
     sys.exit(0)
 for line in sys.stdin:
     request = json.loads(line)
