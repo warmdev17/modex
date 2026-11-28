@@ -2,7 +2,8 @@
 
 ## Shared Modex CLI
 
-Updated 2026-11-28 on `feat/modex-shared-cli`, source `e452df6`.
+Updated 2026-11-28T08:18:40+07:00 on `feat/modex-shared-cli`.
+CLI source `e452df6` and host source `cdd19ba`.
 See the [plan](docs/superpowers/plans/2026-11-28-shared-cli.md).
 `modex cli` selects an agent, then an existing or new session. The picker
 uses terminal-width frames, light/dark RGB accents and monochrome output
@@ -10,27 +11,36 @@ for redirected output or `NO_COLOR`. Codex opens its native TUI.
 Antigravity and OpenCode use a private local supervisor connection, so the
 terminal and phone can both work in the same session.
 
-- On `e452df6`, `GOMAXPROCS=4 go test -race -p 2 ./... -count=1
+- On `cdd19ba`, `GOMAXPROCS=4 go test -race -p 2 ./... -count=1
   -timeout=150s` with umask 022, `go vet ./...` and `git diff --check`
   passed. Independent review was followed by regression checks for
   attach-time stream duplication and queued forms.
 - `test_shared_agent_supervisor.py` passed phone/terminal prompts in
   both directions, history reopen, permissions and phone lease survival
   with fixture runtimes. `test_ssh_transport.py` with
-  `MODEX_TEST_AGY=/usr/sbin/agy` and `MODEX_TEST_SHARED_CLI=1` passed
-  the same-session prompt flow in both directions with real OpenSSH and
-  AGY 1.5.17. The framed picker passed at 44 columns in a pseudo-terminal
-  with both light and dark accents.
-- Installed OpenCode 2.4.1 passed discovery and model listing. OpenCode
-  Go inference and a physical Android device were outside the verified
-  flows. Android uses existing preview 55.
+  fixture AGY passed real OpenSSH. At `e452df6` the genuine AGY 1.5.17
+  end-to-end test initially passed both directions. A later attempt
+  failed at native SSH sign-in before reaching any prompt. A direct
+  local Gemini 4 Hydrogen prompt returned a provider quota error.
+- `cdd19ba` uses `agy models` for readiness and reports
+  `agy acp --login` when AGY requires sign-in. The hint was verified
+  with installed AGY over an isolated real SSH connection. Rerun
+  the native two-way smoke after the host user's SSH login is available.
+- The installed CLI at `e452df6` rendered both palettes in a live
+  pseudo-terminal and entered the OpenCode session picker. OpenCode
+  2.4.1 passed two-way prompts and history reopen on the stamped
+  `cdd19ba` host against a loopback model fixture. OpenCode Go
+  inference and a physical Android device remain unverified.
+  Android uses existing preview 55.
 - Verified host SHA-256
-  `e0bcb2e6daf7104761247247c35c8206da019108b8c3600958b45901051367a2`
+  `4ccee54f3baccf011b2884060c322aba15ccf200302a23bd86b3a5c42af7105a`
   and CLI SHA-256
   `24ec4e1c2a13d57bec45fcb607d7949c82338a2287c6ac36bb52eb512f7bfc0d`.
-  Previous binaries backed up in `/tmp/modex-shared-cli.9gUTDL/`.
-  Delayed host activation requires a live check. Reset the Android
-  session cursor and reconnect after restart. Branch is local.
+  The running host at `e452df6` was verified by version and checksum.
+  Previous binaries are in `/tmp/modex-shared-cli.9gUTDL/`, with the
+  current host backup in its `readiness/` subdirectory. Host activation
+  for `cdd19ba` requires a live check. Reset the Android session cursor
+  and reconnect after restart. Branch is local.
 
 ## Antigravity SSH authentication context
 
