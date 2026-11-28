@@ -24,6 +24,9 @@ type EventCaller func(ctx context.Context, method string, params any, emit func(
 type Caller func(ctx context.Context, method string, params any) (json.RawMessage, error)
 
 var unsupportedMethods = map[string]bool{
+	"threads/goal/get":    true,
+	"threads/goal/set":    true,
+	"threads/goal/clear":  true,
 	"threads/archive":     true,
 	"threads/unarchive":   true,
 	"threads/delete":      true,

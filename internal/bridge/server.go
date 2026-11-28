@@ -60,6 +60,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "threads/goal/get", "threads/goal/set", "threads/goal/clear":
+		allowed["thread_id"], allowed["workspace"] = true, true
+		if cmd.Method == "threads/goal/set" {
+			allowed["objective"], allowed["status"], allowed["token_budget"] = true, true, true
+		}
 	case "threads/permissions":
 		allowed["thread_id"], allowed["workspace"], allowed["profile"] = true, true, true
 	case "threads/mode", "threads/status":
@@ -169,6 +174,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 	}
 	switch cmd.Method {
+	case "threads/goal/get", "threads/goal/set", "threads/goal/clear":
+		return threadGoal(cmd.Method, p, cwd, fetch)
 	case "threads/permissions":
 		return sessionPermissions(p, cwd, fetch)
 	case "threads/archive", "threads/unarchive", "threads/delete", "threads/fork":

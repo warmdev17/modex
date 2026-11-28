@@ -169,7 +169,7 @@ for line in sys.stdin:
  if r.get('method') != 'initialized':
   result={'config':{'model':'fixture','model_provider':'fixture'}} if r.get('method') == 'config/read' else {}
   print(json.dumps({'id':r.get('id'),'result':result}),flush=True)
-`, `["session_status","plan_mode","permission_profiles","session_lifecycle","projects","references","takeover","agent_discovery","runtime_routing","antigravity_session_options","antigravity_attachments","antigravity_steer","antigravity_context_usage"]`},
+`, `["goals","session_status","plan_mode","permission_profiles","session_lifecycle","projects","references","takeover","agent_discovery","runtime_routing","antigravity_session_options","antigravity_attachments","antigravity_steer","antigravity_context_usage"]`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {

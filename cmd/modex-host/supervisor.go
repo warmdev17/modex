@@ -143,7 +143,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 	server.Backend = b.kind
 	server.Capabilities = []string{"projects_read"}
 	if b.kind == "codex" {
-		server.Capabilities = []string{"session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover", "agent_discovery", "runtime_routing", "antigravity_session_options", "antigravity_attachments", "antigravity_steer", "antigravity_context_usage"}
+		server.Capabilities = []string{"goals", "session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover", "agent_discovery", "runtime_routing", "antigravity_session_options", "antigravity_attachments", "antigravity_steer", "antigravity_context_usage"}
 	}
 	server.OnAttachment = func(attached bool, sshConnection string) error {
 		params := map[string]any{"attached": attached}

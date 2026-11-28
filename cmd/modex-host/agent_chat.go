@@ -150,6 +150,14 @@ func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agen
 			result.Data = append(result.Data, oc.Readiness(ctx, p.Workspace))
 			return result, nil
 		}
+		if strings.HasPrefix(cmd.Method, "threads/goal/") {
+			var p struct {
+				ThreadID string `json:"thread_id"`
+			}
+			if json.Unmarshal(cmd.Params, &p) == nil && (strings.HasPrefix(p.ThreadID, "agy:") || strings.HasPrefix(p.ThreadID, "oc:")) {
+				return nil, errors.New("goals are unsupported by this agent")
+			}
+		}
 		explicitCodexStart := false
 		if cmd.Method == "threads/start" {
 			var p map[string]json.RawMessage

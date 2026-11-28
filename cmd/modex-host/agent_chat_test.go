@@ -206,3 +206,19 @@ func TestAntigravityModelsReturnsEmptyCatalogueForValidWorkspace(t *testing.T) {
 		t.Fatal("accepted relative workspace")
 	}
 }
+
+func TestGoalRejectsOtherAgentThreads(t *testing.T) {
+	codex := func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error) {
+		t.Fatal("sent another agent goal to Codex")
+		return nil, nil
+	}
+	run := agentCommands("/work", codex, &fixtureAgentRouter{})
+	for _, id := range []string{"agy:one", "oc:one"} {
+		for _, method := range []string{"threads/goal/get", "threads/goal/set", "threads/goal/clear"} {
+			params, _ := json.Marshal(map[string]string{"thread_id": id})
+			if _, err := run(context.Background(), bridge.Command{Method: method, Params: params}, nil); err == nil {
+				t.Fatalf("accepted %s %s", method, id)
+			}
+		}
+	}
+}

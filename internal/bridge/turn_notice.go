@@ -9,6 +9,25 @@ import (
 
 // This boundary is mobile-only: native TUI clients retain the original event.
 func mobileEventParams(method string, raw json.RawMessage) (json.RawMessage, error) {
+	if method == "thread/goal/updated" || method == "thread/goal/cleared" {
+		var event struct {
+			ThreadID string          `json:"threadId"`
+			TurnID   *string         `json:"turnId"`
+			Goal     json.RawMessage `json:"goal"`
+		}
+		if json.Unmarshal(raw, &event) != nil || event.ThreadID == "" {
+			return nil, errors.New("invalid goal event")
+		}
+		if method == "thread/goal/cleared" {
+			return json.Marshal(map[string]any{"threadId": event.ThreadID})
+		}
+		g, err := projectGoal(event.Goal, event.ThreadID)
+		if err != nil || g == nil {
+			return nil, errors.New("invalid goal event")
+		}
+		native := nativeGoal{g.ThreadID, g.Objective, g.Status, g.TokenBudget, g.TokensUsed, g.TimeUsedSeconds, g.CreatedAt, g.UpdatedAt}
+		return json.Marshal(map[string]any{"threadId": event.ThreadID, "turnId": event.TurnID, "goal": native})
+	}
 	if method == "item/started" || method == "item/completed" || method == "item/fileChange/patchUpdated" {
 		return mobileActivityParams(method, raw)
 	}
