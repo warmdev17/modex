@@ -1,5 +1,43 @@
 # Modex project state
 
+## dev.40 release and branch cleanup
+
+Updated 2026-11-28T17:31+07:00. [PR #40](https://github.com/warmdev17/modex/pull/40)
+merged with every original commit at `4e83231`; source tag `v0.1.0-dev.40`
+points to that merge. [Published pre-release](https://github.com/warmdev17/modex/releases/tag/v0.1.0-dev.40):
+**Codex Goals, Native CLI & Antigravity Tools**, Android code 58.
+
+- APK `.modex/previews/modex-0.1.0-dev.40.apk` in the main checkout;
+  SHA-256 `9932f3554c4e9a3e634a53cd0c6af5ed6397c96d3901ee2fdaeeae955dd17a3d`.
+  Anonymous public download matched the tested file. Release includes
+  checksums, version code and verification notes; established signer retained.
+- On tested `bd6b5fe` (merge tree identical), all five GitHub CI jobs passed:
+  Linux/macOS/Windows Go, Android and native packaging. Local full Go race/vet
+  passed, Python ran 39 tests with five opt-in skips, including a passing
+  real native paused-goal supervisor reconnect check without inference.
+- Android 197 unit tests passed; lint 0 errors, 19 existing warnings and one
+  hint. Encrypted synthetic upgrade from preview57 to release58 passed.
+  Matching release instrumentation passed `codex-goal`, `shared-agent-chats`
+  and `native-session-controls` against the actual signed distributable.
+  Temporary Gradle init selected `testBuildType=release`: debug test Kotlin
+  internal accessor names cannot target a release app.
+- CI exposed 13 raw-versus-canonical temporary-path fixture failures on
+  macOS. Reproduced with symlink TMPDIR on Linux, then fixed only four Go
+  test files at `bd6b5fe`. Independent race regression and real macOS CI
+  passed; production workspace/auth validation was unchanged.
+- Removed 19 merged local branches, seven merged remote branches and four
+  clean merged worktrees. Remote now has only `main`. Main checkout is on
+  updated `main`; its pre-existing `AGENTS.md` edits were preserved byte
+  for byte. Eight local task branches remain because of uncommitted work
+  or unique commits: `feat/antigravity-chat`, `feat/antigravity-host-core`,
+  `feat/opencode-backend`, `feat/opencode-single-choice-forms`, and the four
+  `work/android-ux-*` branches. Dirty worktrees, including detached dev37,
+  remain intact. Current release worktree is retained for build artifacts.
+- No host install/restart: installed `dfdb049` already has identical Go
+  production code. Physical phone, provider-backed Active goal completion
+  and OAuth rotation were not checked. The completion/duration mismatch
+  below remains deferred. Next work needs a new feature branch.
+
 ## Clear goal resets modal drafts
 
 Updated 2026-11-28 on `fix/goal-clear-draft`, source `897d3d2`.
@@ -19,8 +57,8 @@ requiring manual deletion. Native clear itself does not require objective.
 - Preview `.modex/previews/modex-0.1.0-preview.57-goal-clear.apk` is staged
   in the main checkout. SHA-256
   `cf0e69b52ed83e16add0c1bffbb45c00c5d31b24b2ac264182a2ca27613b4e0e`.
-  Android-only change: no host rebuild/restart, source tag, public release,
-  push or merge. Worktree clean after this state commit.
+  This Android-only fix required no host rebuild/restart and is now included
+  in the dev.40 merge/release above.
 - Physical Android and provider inference were not tested for this UI fix.
 
 ## Responsive project CLI picker
