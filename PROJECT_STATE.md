@@ -1,5 +1,28 @@
 # Modex project state
 
+## Clear goal resets modal drafts
+
+Updated 2026-11-28 on `fix/goal-clear-draft`, source `897d3d2`.
+User clarified the bug: successful Clear left Objective text in the modal,
+requiring manual deletion. Native clear itself does not require objective.
+
+- Draft objective/budget and edit/confirmation state now use the displayed
+  goal's thread identity as `rememberSaveable` input. A confirmed transition
+  to no goal resets them; unchanged goal and usage updates preserve edits.
+- Emulator regression failed before the fix with `Confirmed clear retained
+  objective draft`. It now passes Android Clear, external Clear while editing,
+  budget reset, usage-update draft preservation and unconfirmed-clear checks.
+  The test waits for edited accessibility text before testing usage refresh.
+- Android 197 unit tests passed, lint has 0 errors (19 existing warnings,
+  1 hint), and app/test builds passed offline. In-place 56 to 57 upgrade
+  retained encrypted synthetic state. Signature/package/version verified.
+- Preview `.modex/previews/modex-0.1.0-preview.57-goal-clear.apk` is staged
+  in the main checkout. SHA-256
+  `cf0e69b52ed83e16add0c1bffbb45c00c5d31b24b2ac264182a2ca27613b4e0e`.
+  Android-only change: no host rebuild/restart, source tag, public release,
+  push or merge. Worktree clean after this state commit.
+- Physical Android and provider inference were not tested for this UI fix.
+
 ## Responsive project CLI picker
 
 Updated 2026-11-28 on `feat/cli-project-picker`, source `dfdb049`
