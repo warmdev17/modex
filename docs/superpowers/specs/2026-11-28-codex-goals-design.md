@@ -10,7 +10,7 @@ state, disable duplicate submission and surface uncertain errors without
 retrying mutations. Goal refresh only reads state. Native chat opening keeps
 Codex's behavior: an existing Active goal can continue on thread resume.
 Paused goals remain paused until explicit Resume. The modal explains this.
-This is the primary's implementation choice to preserve native semantics.
+The user explicitly approved native Active-goal continuation on chat open.
 Pause changes goal continuation, not the currently executing turn; Stop
 remains separate. Resume is an explicit user action and may run inference.
 

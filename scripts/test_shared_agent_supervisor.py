@@ -443,6 +443,14 @@ class SharedAgentSupervisorTests(unittest.TestCase):
                     self.assertEqual(chat["agent"], agent)
                     self.assertEqual(chat["projectId"], "shared-project")
                     chats[agent] = chat["id"]
+                    if agent != "codex":
+                        for method in ("threads/goal/get", "threads/goal/set", "threads/goal/clear"):
+                            goal_params = dict(project, thread_id=chat["id"])
+                            goal_params.pop("project_id")
+                            if method == "threads/goal/set":
+                                goal_params.update(objective="Unsupported runtime fixture", status="paused")
+                            with self.assertRaisesRegex(RuntimeError, "request_rejected:" + method):
+                                client.call(method, goal_params)
                 self.assertEqual(len(set(chats.values())), 3)
                 for agent, expected in chats.items():
                     page = client.call("threads/list", {"agent": agent, "all_workspaces": True})
