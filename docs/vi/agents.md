@@ -27,6 +27,22 @@ Ma trận này mô tả bản xem trước hiện tại. [Snapshot triển khai 
 
 ## Chat nhiều agent trong bản phát triển
 
+### Goal
+
+Trong chat Codex với host và APK mới, mở menu chat rồi chọn **Goal**.
+Modal cho nhập mục tiêu và ngân sách token tùy chọn, đồng thời xem trạng
+thái, token đã dùng và thời gian. Pause dừng việc tự tiếp tục goal;
+muốn ngắt lượt đang chạy thì dùng Stop. Resume cho phép Codex tiếp tục
+làm việc. Thay đổi goal từ CLI được đồng bộ, mở lại modal sẽ đọc trạng
+thái mới từ host.
+
+Mốc đầu dùng API goal của Codex 0.169.0. OpenCode 2.4.1 có goal gốc với
+pause/resume/clear nhưng Modex chưa nối API đó. Antigravity 1.5.17 chưa
+công bố khả năng goal qua ACP. Vì vậy modal Goal chỉ bật cho chat Codex
+trong mốc này. Chat OpenCode và Antigravity vẫn dùng các chức năng hiện có.
+
+### Chọn runtime
+
 Khi đã cập nhật cả host và Android, kết nối SSH một lần rồi chọn Codex,
 OpenCode hoặc Antigravity trong **New chat**. Có thể lọc danh sách theo
 agent. Các chat cùng project giữ agent và lịch sử riêng.

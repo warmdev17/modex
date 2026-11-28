@@ -28,6 +28,23 @@ This matrix describes the current preview. The [OpenCode backend implementation 
 
 ## Shared agent chats in development builds
 
+### Goals
+
+On a Codex chat with an updated host and Android app, open the chat menu
+and choose **Goal**. The modal creates a native Codex goal with an optional
+token budget and shows the objective, status, tokens used and elapsed time.
+Pause disables goal continuation; use Stop separately to interrupt the
+current turn. Resume explicitly allows Codex to continue working. Goal
+state follows native CLI updates and is refreshed when reopening the modal.
+
+The first goal integration targets Codex 0.169.0. OpenCode 2.4.1 has native
+goals, including pause/resume/clear, but its goal API is not yet connected
+to Modex. Antigravity 1.5.17 does not advertise a goal capability through
+ACP. Goal controls are therefore limited to Codex in this milestone;
+ordinary OpenCode and Antigravity chat controls keep their existing scope.
+
+### Runtime selection
+
 With an updated host and Android app, open one SSH connection and choose
 Codex, OpenCode or Antigravity in **New chat**. The sidebar can filter by
 agent. Chats in the same project keep their own agent and history.

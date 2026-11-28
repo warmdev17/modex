@@ -7,7 +7,10 @@ Use the installed Codex app-server goal API as the source of truth. A Goal
 entry in the chat menu opens a compact Mocha dialog. An optional positive
 token budget is only sent when specified. Actions await acknowledged server
 state, disable duplicate submission and surface uncertain errors without
-retrying mutations. Opening/reconnecting reads state without starting work.
+retrying mutations. Goal refresh only reads state. Native chat opening keeps
+Codex's behavior: an existing Active goal can continue on thread resume.
+Paused goals remain paused until explicit Resume. The modal explains this.
+This is the primary's implementation choice to preserve native semantics.
 Pause changes goal continuation, not the currently executing turn; Stop
 remains separate. Resume is an explicit user action and may run inference.
 
