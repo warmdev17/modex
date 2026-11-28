@@ -1,5 +1,32 @@
 # Modex project state
 
+## Antigravity SSH authentication context
+
+Updated 2026-11-28T07:29:00+07:00 on `fix/antigravity-ssh-auth-context`.
+Host source `a4b1249`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-ssh-auth-context.md).
+A same-model A/B with AGY 1.5.17 reproduced a quota response under the
+service environment and a successful reply using a real SSH session
+context. The host-side attach helper now forwards the validated value
+over the private handshake. It is used in new AGY processes and readiness.
+An existing ACP process keeps its environment through reconnect.
+
+- The prior host failed the OpenSSH fixture at AGY readiness. The stamped
+  host passed it with both a synthetic ACP runtime and real AGY 1.5.17.
+  A text-only Gemini 4 Hydrogen Medium prompt answered through the full
+  OpenSSH attach and supervisor route. The shared-agent routing test passed.
+- `GOMAXPROCS=4 go test -race -p 2 ./... -count=1 -timeout=150s` with
+  umask 022, `go vet ./...`, independent review and `git diff --check`
+  passed. Unit tests cover private metadata, forged relay commands and
+  preserving an existing ACP client. A disconnect during a real AGY turn
+  and physical Android were outside these checks.
+- Host SHA-256
+  `5d9f96e98923acab1c22957a3a9884ae9880a7eed38f2d6a089db9e9846fae8d`.
+  Previous host backed up at
+  `/tmp/modex-agy-ssh.4uIMT2/modex-host.previous`.
+  Android continues to use preview 55. Delayed activation is unverified
+  at handoff. Reset the Android session cursor and reconnect after restart.
+
 ## Antigravity file diffs
 
 Updated 2026-11-28T06:37:50+07:00 on `feat/antigravity-file-diffs`.
@@ -24,8 +51,8 @@ preview. Large snapshots can be omitted.
   `18461d536ac942d0db5e9476773f4dd871539e8afbac2697f11ba1107c67fffe`.
   Previous host backed up at
   `/tmp/modex-agy-diffs.1uMQKT/modex-host.previous`.
-  Branch is local. Delayed activation and physical Android remain
-  unverified at handoff. Reset the Android session cursor after restart.
+  Running host `55e5b16` was confirmed by version. Physical Android
+  remains unverified. Branch is local.
 
 ## Antigravity command activity
 
