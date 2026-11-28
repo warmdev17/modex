@@ -564,19 +564,22 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 	r.mu.Unlock()
 	return client, nil
 }
-func (r *Router) readiness() map[string]any {
+func (r *Router) Readiness(ctx context.Context, workspace string) map[string]any {
 	r.mu.Lock()
 	env := r.childEnvironment()
 	r.mu.Unlock()
 	entry := map[string]any{"id": "antigravity", "label": "Antigravity", "ready": false}
-	ctx, cancel := context.WithTimeout(r.ctx, 8*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	path, e := exec.LookPath(r.binary)
 	if e != nil {
 		entry["reason"] = "Install the agy CLI on the host"
 		return entry
 	}
-	workspace, e := canonical(r.workspace)
+	if workspace == "" {
+		workspace = r.workspace
+	}
+	workspace, e = canonical(workspace)
 	if e != nil {
 		entry["reason"] = "Host workspace is unavailable"
 		return entry
@@ -627,7 +630,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 	}
 	str := func(key string) string { var s string; _ = json.Unmarshal(p[key], &s); return s }
 	if cmd.Method == "agents/list" {
-		return map[string]any{"data": []any{map[string]any{"id": "codex", "label": "Codex", "ready": true}, r.readiness()}}, true, nil
+		return map[string]any{"data": []any{map[string]any{"id": "codex", "label": "Codex", "ready": true}, r.Readiness(ctx, r.workspace)}}, true, nil
 	}
 	if cmd.Method == "client/attached" {
 		if string(p["attached"]) == "true" {

@@ -3,9 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/warmdev/modex/internal/bridge"
+	"github.com/warmdev/modex/internal/opencode"
 )
 
 func TestAgentChatListPreservesCodexPagination(t *testing.T) {
@@ -220,5 +224,117 @@ func TestGoalRejectsOtherAgentThreads(t *testing.T) {
 				t.Fatalf("accepted %s %s", method, id)
 			}
 		}
+	}
+}
+
+func TestCLIReadinessAndScopedList(t *testing.T) {
+	root := t.TempDir()
+	link := root + "-link"
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(link) })
+	router := &fixtureAgentRouter{listed: []map[string]any{{"id": "agy:in", "cwd": root}, {"id": "agy:out", "cwd": "/other"}}}
+	run := agentCommands("/other", nil, router)
+	params, _ := json.Marshal(map[string]any{"agent": "antigravity", "workspace": link})
+	value, err := run(context.Background(), bridge.Command{Method: "threads/list", Params: params}, nil)
+	if err != nil || !strings.Contains(string(mustJSON(value)), "agy:in") || strings.Contains(string(mustJSON(value)), "agy:out") {
+		t.Fatalf("scoped list: %s %v", mustJSON(value), err)
+	}
+	params, _ = json.Marshal(map[string]any{"agent": "codex", "workspace": root})
+	if _, err := run(context.Background(), bridge.Command{ID: 1, Method: "cli/agents/check", Params: params}, nil); err == nil {
+		t.Fatal("public readiness accepted")
+	}
+	value, err = run(context.Background(), bridge.Command{ID: 2000000000, Method: "cli/agents/check", Params: params}, nil)
+	if err != nil || !strings.Contains(string(mustJSON(value)), `"ready":true`) {
+		t.Fatalf("codex readiness: %s %v", mustJSON(value), err)
+	}
+}
+
+type readinessFixture struct {
+	fixtureAgentRouter
+	called    bool
+	workspace string
+}
+
+func (r *readinessFixture) Readiness(_ context.Context, workspace string) map[string]any {
+	r.called = true
+	r.workspace = workspace
+	return map[string]any{"id": "antigravity", "ready": true}
+}
+func TestCLICheckAuthorizationAndCanonicalWorkspace(t *testing.T) {
+	root := t.TempDir()
+	link := root + "-link"
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(link) })
+	router := &readinessFixture{}
+	run := agentCommands("/other", nil, router)
+	params, _ := json.Marshal(map[string]any{"agent": "antigravity", "workspace": link})
+	if _, err := run(context.Background(), bridge.Command{ID: 1, Method: "cli/agents/check", Params: params}, nil); err == nil || router.called {
+		t.Fatal("public client reached probe")
+	}
+	result, err := run(context.Background(), bridge.Command{ID: 2000000000, Method: "cli/agents/check", Params: params}, nil)
+	if err != nil || router.workspace != root || !strings.Contains(string(mustJSON(result)), `"ready":true`) {
+		t.Fatalf("result=%s cwd=%s err=%v", mustJSON(result), router.workspace, err)
+	}
+}
+
+func TestExplicitCodexListCanonicalWorkspace(t *testing.T) {
+	root := t.TempDir()
+	link := root + "-link"
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(link) })
+	params, _ := json.Marshal(map[string]any{"agent": "codex", "workspace": link})
+	codex := func(_ context.Context, method string, params any, _ func(string, json.RawMessage)) (json.RawMessage, error) {
+		if method != "thread/list" || params.(map[string]any)["cwd"] != root {
+			t.Fatalf("wrong request %s %v", method, params)
+		}
+		return json.Marshal(map[string]any{"data": []any{map[string]any{"id": "one", "cwd": root}}, "nextCursor": nil})
+	}
+	result, err := agentCommands("/other", codex, &fixtureAgentRouter{})(context.Background(), bridge.Command{Method: "threads/list", Params: params}, nil)
+	if err != nil || !strings.Contains(string(mustJSON(result)), `"id":"one"`) {
+		t.Fatalf("result=%s err=%v", mustJSON(result), err)
+	}
+}
+
+func TestExplicitOpenCodeListCanonicalWorkspace(t *testing.T) {
+	root := t.TempDir()
+	link := root + "-link"
+	if err := os.Symlink(root, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(link) })
+	state := t.TempDir()
+	dir := filepath.Join(state, "opencode")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	records, _ := json.Marshal([]map[string]string{{"id": "oc:in", "native_id": "one", "workspace": root}, {"id": "oc:out", "native_id": "two", "workspace": "/other"}})
+	if err := os.WriteFile(filepath.Join(dir, "opencode-threads.json"), records, 0600); err != nil {
+		t.Fatal(err)
+	}
+	oc := opencode.NewRouter(context.Background(), "", "/other", state)
+	defer oc.Close()
+	params, _ := json.Marshal(map[string]any{"agent": "opencode", "workspace": link})
+	result, err := agentCommandsWithOpenCode("/other", nil, &fixtureAgentRouter{}, oc)(context.Background(), bridge.Command{Method: "threads/list", Params: params}, nil)
+	if err != nil || !strings.Contains(string(mustJSON(result)), "oc:in") || strings.Contains(string(mustJSON(result)), "oc:out") {
+		t.Fatalf("result=%s err=%v", mustJSON(result), err)
+	}
+}
+
+func TestCombinedListUsesExplicitWorkspaceForAgentChats(t *testing.T) {
+	root := t.TempDir()
+	router := &fixtureAgentRouter{listed: []map[string]any{{"id": "agy:in", "cwd": root}, {"id": "agy:out", "cwd": "/other"}}}
+	codex := func(context.Context, string, any, func(string, json.RawMessage)) (json.RawMessage, error) {
+		return json.RawMessage(`{"data":[],"nextCursor":null}`), nil
+	}
+	params, _ := json.Marshal(map[string]any{"workspace": root})
+	result, err := agentCommands("/other", codex, router)(context.Background(), bridge.Command{Method: "threads/list", Params: params}, nil)
+	if err != nil || !strings.Contains(string(mustJSON(result)), "agy:in") || strings.Contains(string(mustJSON(result)), "agy:out") {
+		t.Fatalf("result=%s err=%v", mustJSON(result), err)
 	}
 }

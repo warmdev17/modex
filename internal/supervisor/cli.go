@@ -207,7 +207,7 @@ func (s *Server) handleCLI(ctx context.Context, cancel context.CancelFunc, conn 
 
 func cliAllowed(method string) bool {
 	switch method {
-	case "cli/native", "cli/native/end", "agents/list", "models/list", "threads/list", "threads/start", "threads/resume", "threads/read", "threads/status", "threads/options", "threads/options/set", "turn/start", "turn/interrupt", "decision/respond":
+	case "cli/native", "cli/native/end", "cli/agents/check", "agents/list", "models/list", "threads/list", "threads/start", "threads/resume", "threads/read", "threads/status", "threads/options", "threads/options/set", "turn/start", "turn/interrupt", "decision/respond":
 		return true
 	}
 	return false

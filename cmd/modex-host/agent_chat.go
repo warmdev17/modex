@@ -96,6 +96,48 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 
 func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agentChatRouter, oc *opencode.Router) bridge.CommandHandler {
 	return func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if cmd.Method == "cli/agents/check" {
+			if !supervisor.CLIRequest(cmd.ID) {
+				return nil, errors.New("agent check requires the local CLI")
+			}
+			var p map[string]json.RawMessage
+			if json.Unmarshal(cmd.Params, &p) != nil || len(p) != 2 {
+				return nil, errors.New("invalid agent check")
+			}
+			var workspace, agent string
+			if json.Unmarshal(p["workspace"], &workspace) != nil || !validCLIWorkspace(workspace) || json.Unmarshal(p["agent"], &agent) != nil {
+				return nil, errors.New("invalid agent check")
+			}
+			workspace, err := filepath.EvalSymlinks(workspace)
+			if err != nil {
+				return nil, errors.New("workspace is unavailable")
+			}
+			info, err := os.Stat(workspace)
+			if err != nil || !info.IsDir() {
+				return nil, errors.New("workspace is unavailable")
+			}
+			var entry map[string]any
+			switch agent {
+			case "codex":
+				entry = map[string]any{"id": "codex", "label": "Codex", "ready": true}
+			case "antigravity":
+				probe, ok := router.(interface {
+					Readiness(context.Context, string) map[string]any
+				})
+				if !ok {
+					return nil, errors.New("Antigravity runtime is unavailable")
+				}
+				entry = probe.Readiness(ctx, workspace)
+			case "opencode":
+				if oc == nil {
+					return nil, errors.New("OpenCode runtime is unavailable")
+				}
+				entry = oc.Readiness(ctx, workspace)
+			default:
+				return nil, errors.New("unknown agent")
+			}
+			return map[string]any{"data": []any{entry}}, nil
+		}
 		if cmd.Method == "cli/native" || cmd.Method == "cli/native/end" {
 			if !supervisor.CLIRequest(cmd.ID) {
 				return nil, errors.New("native terminal access requires the local CLI")
@@ -301,12 +343,20 @@ func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agen
 
 func appendAgentChats(value any, params json.RawMessage, cwd string, router agentChatRouter) (any, error) {
 	var options struct {
-		Cursor   string `json:"cursor"`
-		All      bool   `json:"all_workspaces"`
-		Archived bool   `json:"archived"`
+		Cursor    string `json:"cursor"`
+		Workspace string `json:"workspace"`
+		All       bool   `json:"all_workspaces"`
+		Archived  bool   `json:"archived"`
 	}
 	if len(params) > 0 && json.Unmarshal(params, &options) != nil {
 		return value, nil
+	}
+	if options.Workspace != "" {
+		var err error
+		cwd, err = filepath.EvalSymlinks(options.Workspace)
+		if err != nil {
+			return nil, errors.New("workspace is unavailable")
+		}
 	}
 	if options.Cursor != "" || options.Archived {
 		return value, nil
@@ -337,6 +387,20 @@ func agentChatPage(p map[string]json.RawMessage, cwd string, router agentChatRou
 	for key, raw := range p {
 		switch key {
 		case "agent":
+		case "workspace":
+			var path string
+			if json.Unmarshal(raw, &path) != nil || !validCLIWorkspace(path) {
+				return nil, errors.New("invalid workspace")
+			}
+			var err error
+			cwd, err = filepath.EvalSymlinks(path)
+			if err != nil {
+				return nil, errors.New("workspace is unavailable")
+			}
+			info, err := os.Stat(cwd)
+			if err != nil || !info.IsDir() {
+				return nil, errors.New("workspace is unavailable")
+			}
 		case "limit":
 			if json.Unmarshal(raw, &limit) != nil || limit < 1 || limit > 100 {
 				return nil, errors.New("limit must be 1..100")

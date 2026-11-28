@@ -733,7 +733,7 @@ func TestReadinessRejectsEmptyModelList(t *testing.T) {
 	}
 	r := New(context.Background(), bin, t.TempDir(), t.TempDir())
 	defer r.Close()
-	if entry := r.readiness(); entry["ready"] != false || entry["reason"] != "Antigravity returned no models" {
+	if entry := r.Readiness(context.Background(), ""); entry["ready"] != false || entry["reason"] != "Antigravity returned no models" {
 		t.Fatalf("empty model list readiness: %v", entry)
 	}
 }
@@ -749,7 +749,7 @@ func TestReadinessReportsMissingSSHLoginWithoutOpeningIt(t *testing.T) {
 	}
 	r := New(context.Background(), bin, t.TempDir(), t.TempDir())
 	defer r.Close()
-	entry := r.readiness()
+	entry := r.Readiness(context.Background(), "")
 	if entry["ready"] != false || entry["reason"] != "Run AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login on the host" {
 		t.Fatalf("sign-in readiness: %v", entry)
 	}
@@ -1198,7 +1198,7 @@ func TestAttachmentContextAppliesOnlyToFutureProcesses(t *testing.T) {
 	if _, err := r.client(other); err != nil {
 		t.Fatal(err)
 	}
-	if got := r.readiness()["ready"]; got != true {
+	if got := r.Readiness(context.Background(), "")["ready"]; got != true {
 		t.Fatalf("readiness: %v", got)
 	}
 	r.SetSSHConnection("")
@@ -1211,5 +1211,43 @@ func TestAttachmentContextAppliesOnlyToFutureProcesses(t *testing.T) {
 	}
 	if got, want := string(data), "first\nsecond\nsecond\nsecond\ninherited\n"; got != want {
 		t.Fatalf("child contexts: %q, want %q", got, want)
+	}
+}
+
+func TestReadinessUsesRequestedWorkspaceAndCancellation(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "marker")
+	bin := filepath.Join(t.TempDir(), "agy")
+	script := "#!/bin/sh\npwd > \"$MODEX_TEST_MARKER\"\nexec sleep 30\n"
+	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MODEX_TEST_MARKER", marker)
+	r := New(context.Background(), bin, t.TempDir(), t.TempDir())
+	defer r.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); r.Readiness(ctx, root) }()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(marker); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatal("probe did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe ignored cancellation")
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil || strings.TrimSpace(string(data)) != root {
+		t.Fatalf("workspace=%q error=%v", data, err)
 	}
 }
