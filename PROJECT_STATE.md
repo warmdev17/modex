@@ -1,5 +1,28 @@
 # Modex project state
 
+## Antigravity option restore
+
+Updated 2026-11-28 on `feat/modex-shared-cli`. Host source `76e15c7`.
+AGY can echo the acknowledged model configuration while Modex restores
+the saved thinking level. Identical ACP updates now leave the option
+revision unchanged. A genuinely different update still goes through
+the existing conflict check.
+
+- `TestSessionOptionsRestoreAcknowledgedSettings` reproduced the
+  exact error before the fix and passed 15 repetitions afterward.
+  `GOMAXPROCS=4 go test -race -p 2 ./... -count=1 -timeout=150s`
+  with umask 022, `go vet ./...` and `git diff --check` passed.
+- With real AGY 1.5.17 and OpenSSH, three isolated session reopens
+  failed on `cdd19ba` and all three opened on the stamped
+  `76e15c7` host. The regular SSH transport smoke passed.
+  No inference or physical Android test was part of this fix.
+- Verified host SHA-256
+  `ecea6b474b6db486284eb912c0cd56e5d5b6909919f1730647d77e7c6896007c`.
+  Previous host backed up at
+  `/tmp/modex-agy-restore.kucDV2/modex-host.previous`.
+  Delayed activation requires a live check. Android can keep preview 55.
+  Reset the Android session cursor and reconnect after restart.
+
 ## Shared Modex CLI
 
 Updated 2026-11-28T08:20:35+07:00 on `feat/modex-shared-cli`.
