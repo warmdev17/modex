@@ -281,6 +281,7 @@ class SharedAgentSupervisorTests(unittest.TestCase):
                 enter("accept")
                 wait_for("Antigravity permission answered from the terminal.")
                 phone_completed()
+                wait_for("Turn completed.")
             cli_prompt = "sync-terminal-" + agent
             enter(cli_prompt)
             wait_for(label + " reply: " + cli_prompt)
@@ -310,6 +311,85 @@ class SharedAgentSupervisorTests(unittest.TestCase):
             cli.stdin.close()
             reader.join(timeout=2)
             cli.stdout.close()
+
+    def exercise_fullscreen(self, control, workspace, phone, agent, thread_id):
+        import errno
+        import fcntl
+        import pty
+        import select
+        import signal
+        import struct
+        import termios
+
+        master, slave = pty.openpty()
+        saved_terminal = termios.tcgetattr(slave)
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 84, 0, 0))
+        label = "OpenCode" if agent == "opencode" else "Antigravity"
+        env = dict(os.environ, TERM="xterm-256color", COLORFGBG="15;0")
+        env.pop("NO_COLOR", None)
+        env.pop("TERM_BACKGROUND", None)
+        if agent == "antigravity":
+            env["NO_COLOR"] = "1"
+        cli = subprocess.Popen(control + ["--cli", "--workspace", str(workspace)], cwd=workspace,
+                               stdin=slave, stdout=slave, stderr=slave, env=env)
+        output = bytearray()
+        consumed = 0
+
+        def expect(marker):
+            nonlocal consumed
+            needle = marker.encode()
+            deadline = time.monotonic() + 15
+            while needle not in output[consumed:]:
+                delay = max(0, deadline - time.monotonic())
+                self.assertTrue(select.select([master], [], [], delay)[0],
+                                f"fullscreen terminal did not show {marker!r}: {output[-1600:]!r}")
+                try:
+                    chunk = os.read(master, 8192)
+                except OSError as err:
+                    if err.errno != errno.EIO:
+                        raise
+                    chunk = b""
+                self.assertTrue(chunk, f"fullscreen terminal exited before {marker!r}")
+                output.extend(chunk)
+            consumed = output.index(needle, consumed) + len(needle)
+
+        try:
+            expect("\x1b[?1049h")
+            expect("Choose an agent")
+            expect("OpenCode")
+            os.write(master, b"\x1b[B" * (2 if agent == "opencode" else 1) + b"\r")
+            expect("New conversation")
+            os.write(master, b"\x1b[B\r")
+            expect("Message " + label)
+            os.write(master, b"sync-fullscreen-prompt\r")
+            expect(label + " reply: sync-fullscreen-prompt")
+            expect("Turn completed.")
+            target = {"thread_id": thread_id, "workspace": str(workspace)}
+            history = phone.call("threads/read", dict(target, include_turns=True, limit=20))
+            self.assertTrue(any(row.get("role") == "user" and row.get("text") == "sync-fullscreen-prompt"
+                                for row in history["messages"]))
+            phone.call("turn/start", dict(target, text="sync-fullscreen-from-phone"))
+            expect(label + " reply: sync-fullscreen-from-phone")
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 15, 68, 0, 0))
+            cli.send_signal(signal.SIGWINCH)
+            expect("┌" + "─" * 66 + "┐")
+            os.write(master, b"/quit\r")
+            self.assertEqual(cli.wait(timeout=5), 0)
+            while select.select([master], [], [], 0)[0]:
+                output.extend(os.read(master, 8192))
+            self.assertGreaterEqual(output.count(b"\x1b[?1049l"), 2)
+            if agent == "antigravity":
+                self.assertNotIn(b"48;2;", output)
+            else:
+                self.assertIn(b"48;2;137;180;250", output)
+            self.assertEqual(termios.tcgetattr(slave), saved_terminal)
+            self.assertIn("config", phone.call("status"))
+        finally:
+            if cli.poll() is None:
+                cli.terminate()
+                cli.wait(timeout=5)
+            os.close(slave)
+            os.close(master)
 
     def test_chat_identity_and_restart(self):
         with tempfile.TemporaryDirectory(prefix="modex-shared-agent-smoke-") as directory:
@@ -432,6 +512,8 @@ class SharedAgentSupervisorTests(unittest.TestCase):
                     client.call("threads/read", dict(target, workspace=str(outside)))
                 self.exercise_cli(control, workspace, client, "antigravity", chats["antigravity"])
                 self.exercise_cli(control, workspace, client, "opencode", chats["opencode"])
+                for agent in ("antigravity", "opencode"):
+                    self.exercise_fullscreen(control, workspace, client, agent, chats[agent])
             finally:
                 if client is not None:
                     client.close()

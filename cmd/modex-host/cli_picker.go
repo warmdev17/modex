@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,9 @@ import (
 )
 
 var (
-	errCLICancelled  = errors.New("CLI selection cancelled")
-	errCLIPickerBack = errors.New("back to agent selection")
+	errCLICancelled    = errors.New("CLI selection cancelled")
+	errCLIPickerBack   = errors.New("back to agent selection")
+	errCLIPickerCursor = errors.New("repeated session list cursor")
 )
 
 type cliAgent struct {
@@ -43,19 +45,7 @@ func (p *cliPicker) chooseAgent(agents []cliAgent) (cliAgent, error) {
 	}
 	lines := make([]string, 0, len(agents))
 	for i, agent := range agents {
-		label := cliLabel(agent.Label)
-		if label == "" {
-			label = cliLabel(agent.ID)
-		}
-		line := fmt.Sprintf("%d  %s", i+1, label)
-		if !agent.Ready {
-			reason := cliLabel(agent.Reason)
-			if reason == "" {
-				reason = "Unavailable"
-			}
-			line += " — " + reason
-		}
-		lines = append(lines, line)
+		lines = append(lines, fmt.Sprintf("%d  %s", i+1, agent.menuLabel()))
 	}
 	cliRenderFrame(p.out, "Modex", "Choose an agent", lines, "q quit")
 	for {
@@ -84,47 +74,22 @@ func (p *cliPicker) chooseSession(ctx context.Context, agent cliAgent, cwd strin
 		if err != nil {
 			return cliChoice{}, err
 		}
-		var page struct {
-			Data []struct{ ID, Name, Preview, CWD, Workspace string } `json:"data"`
-			Next *string                                              `json:"next_cursor"`
-		}
-		if json.Unmarshal(raw, &page) != nil || page.Data == nil {
-			return cliChoice{}, errors.New("invalid session list")
+		page, err := parseCLISessionPage(agent, raw)
+		if err != nil {
+			return cliChoice{}, err
 		}
 		lines := []string{"0  New conversation"}
 		for i, session := range page.Data {
-			if !validCLISessionID(agent.ID, session.ID) {
-				return cliChoice{}, errors.New("invalid session ID in list")
-			}
-			title := cliLabel(session.Name)
-			if title == "" {
-				title = cliLabel(session.Preview)
-			}
-			if title == "" {
-				title = "Untitled conversation"
-			}
-			summary := fmt.Sprintf("%d  %s · %s", i+1, title, shortCLIID(session.ID))
-			workspace := session.Workspace
-			if workspace == "" {
-				workspace = session.CWD
-			}
-			if workspace != "" && workspace != cwd {
-				summary += " · " + cliLabel(filepath.Base(workspace))
-			}
-			lines = append(lines, summary)
+			lines = append(lines, fmt.Sprintf("%d  %s", i+1, session.menuLabel(cwd)))
 		}
 		footer := "b back · q quit"
-		if page.Next != nil && *page.Next != "" {
+		if page.Next != "" {
 			footer = "n next · " + footer
 		}
 		if len(cursors) > 1 {
 			footer = "p previous · " + footer
 		}
-		detail := cliLabel(agent.Label)
-		if detail == "" {
-			detail = cliLabel(agent.ID)
-		}
-		cliRenderFrame(p.out, "Sessions", detail+" · "+cliLabel(cwd), lines, footer)
+		cliRenderFrame(p.out, "Sessions", agent.displayName()+" · "+cliLabel(cwd), lines, footer)
 		for {
 			choice, err := p.readChoice()
 			if err != nil || choice == "q" {
@@ -136,13 +101,11 @@ func (p *cliPicker) chooseSession(ctx context.Context, agent cliAgent, cwd strin
 			if choice == "b" {
 				return cliChoice{}, errCLIPickerBack
 			}
-			if choice == "n" && page.Next != nil && *page.Next != "" {
-				for _, cursor := range cursors {
-					if cursor == *page.Next {
-						return cliChoice{}, errors.New("repeated session list cursor")
-					}
+			if choice == "n" && page.Next != "" {
+				if slices.Contains(cursors, page.Next) {
+					return cliChoice{}, errCLIPickerCursor
 				}
-				cursors = append(cursors, *page.Next)
+				cursors = append(cursors, page.Next)
 				break
 			}
 			if choice == "p" && len(cursors) > 1 {
@@ -154,22 +117,83 @@ func (p *cliPicker) chooseSession(ctx context.Context, agent cliAgent, cwd strin
 				if n == 0 {
 					return cliChoice{Workspace: cwd}, nil
 				}
-				session := page.Data[n-1]
-				workspace := session.Workspace
-				if workspace == "" {
-					workspace = session.CWD
-				}
-				if workspace == "" {
-					workspace = cwd
-				}
-				if !validCLIWorkspace(workspace) {
-					return cliChoice{}, errors.New("invalid session workspace")
-				}
-				return cliChoice{ID: session.ID, Workspace: workspace}, nil
+				return page.Data[n-1].choice(cwd)
 			}
 			fmt.Fprintln(p.out, "Invalid choice; select one of the displayed options.")
 		}
 	}
+}
+
+func (a cliAgent) displayName() string {
+	if label := cliLabel(a.Label); label != "" {
+		return label
+	}
+	return cliLabel(a.ID)
+}
+
+func (a cliAgent) menuLabel() string {
+	label := a.displayName()
+	if a.Ready {
+		return label
+	}
+	reason := cliLabel(a.Reason)
+	if reason == "" {
+		reason = "Unavailable"
+	}
+	return label + " — " + reason
+}
+
+type cliSession struct{ ID, Name, Preview, CWD, Workspace string }
+
+type cliSessionPage struct {
+	Data []cliSession `json:"data"`
+	Next string       `json:"next_cursor"`
+}
+
+func parseCLISessionPage(agent cliAgent, raw json.RawMessage) (cliSessionPage, error) {
+	var page cliSessionPage
+	if json.Unmarshal(raw, &page) != nil || page.Data == nil {
+		return cliSessionPage{}, errors.New("invalid session list")
+	}
+	for _, session := range page.Data {
+		if !validCLISessionID(agent.ID, session.ID) {
+			return cliSessionPage{}, errors.New("invalid session ID in list")
+		}
+	}
+	return page, nil
+}
+
+func (s cliSession) workspace(cwd string) string {
+	if s.Workspace != "" {
+		return s.Workspace
+	}
+	if s.CWD != "" {
+		return s.CWD
+	}
+	return cwd
+}
+
+func (s cliSession) menuLabel(cwd string) string {
+	title := cliLabel(s.Name)
+	if title == "" {
+		title = cliLabel(s.Preview)
+	}
+	if title == "" {
+		title = "Untitled conversation"
+	}
+	summary := title + " · " + cliLabel(shortCLIID(s.ID))
+	if workspace := s.workspace(cwd); workspace != cwd {
+		summary += " · " + cliLabel(filepath.Base(workspace))
+	}
+	return summary
+}
+
+func (s cliSession) choice(cwd string) (cliChoice, error) {
+	workspace := s.workspace(cwd)
+	if !validCLIWorkspace(workspace) {
+		return cliChoice{}, errors.New("invalid session workspace")
+	}
+	return cliChoice{ID: s.ID, Workspace: workspace}, nil
 }
 
 func (p *cliPicker) readChoice() (string, error) {

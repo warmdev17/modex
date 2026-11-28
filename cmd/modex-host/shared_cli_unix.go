@@ -30,7 +30,13 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 	if !endpoint.CLIRelay {
 		return errors.New("the running supervisor needs an update to open Antigravity or OpenCode in the CLI")
 	}
+	fullscreen := interactiveCLI(os.Stdin, os.Stdout)
 	ctx := context.Background()
+	stop := func() {}
+	if fullscreen {
+		ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	}
+	defer stop()
 	client, err := dialLocalCLI(ctx, endpoint)
 	if err != nil {
 		return err
@@ -38,9 +44,12 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 	defer client.Close()
 	input := bufio.NewReader(os.Stdin)
 	openChat := func(agent cliAgent, choice cliChoice) error {
-		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-		defer stop()
-		return runAgentCLIChat(ctx, input, os.Stdout, client, agent.ID, agent.Label, choice.Workspace, choice.ID)
+		if fullscreen {
+			return runCLIChatFullscreen(ctx, os.Stdin, os.Stdout, client, agent.ID, agent.Label, choice.Workspace, choice.ID)
+		}
+		chatCtx, stopChat := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer stopChat()
+		return runAgentCLIChat(chatCtx, input, os.Stdout, client, agent.ID, agent.Label, choice.Workspace, choice.ID)
 	}
 	if id != "" {
 		var agent cliAgent
@@ -54,33 +63,58 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 		}
 		return openChat(agent, cliChoice{ID: id, Workspace: cwd})
 	}
-	discover, cancel := context.WithTimeout(ctx, 30*time.Second)
+	loadAgents := func(ctx context.Context) ([]cliAgent, error) {
+		discover, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		raw, err := client.Call(discover, "agents/list", map[string]string{"workspace": cwd})
+		if err != nil {
+			return nil, err
+		}
+		var catalogue struct {
+			Data []cliAgent `json:"data"`
+		}
+		if json.Unmarshal(raw, &catalogue) != nil || len(catalogue.Data) == 0 {
+			return nil, errors.New("the host returned no agent runtimes")
+		}
+		return catalogue.Data, nil
+	}
+	list := func(ctx context.Context, agent cliAgent, cursor string) (json.RawMessage, error) {
+		ctx, done := context.WithTimeout(ctx, 20*time.Second)
+		defer done()
+		params := map[string]any{"agent": agent.ID, "limit": 20, "all_workspaces": true}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		return client.Call(ctx, "threads/list", params)
+	}
+	launch := func(agent cliAgent, choice cliChoice) error {
+		if agent.ID == "codex" {
+			client.Close()
+			stop()
+			return runNativeCodex(choice.Workspace, binary, home, choice.ID, endpoint)
+		}
+		return openChat(agent, choice)
+	}
+	if fullscreen {
+		agent, choice, err := pickCLIFullscreen(ctx, os.Stdin, os.Stdout, loadAgents, cwd, list)
+		if err != nil {
+			return err
+		}
+		return launch(agent, choice)
+	}
 	fmt.Fprintln(os.Stdout, "Discovering agent runtimes…")
-	raw, err := client.Call(discover, "agents/list", map[string]string{"workspace": cwd})
-	cancel()
+	agents, err := loadAgents(ctx)
 	if err != nil {
 		return err
 	}
-	var catalogue struct {
-		Data []cliAgent `json:"data"`
-	}
-	if json.Unmarshal(raw, &catalogue) != nil || len(catalogue.Data) == 0 {
-		return errors.New("the host returned no agent runtimes")
-	}
 	picker := newCLIPicker(input, os.Stdout)
 	for {
-		agent, err := picker.chooseAgent(catalogue.Data)
+		agent, err := picker.chooseAgent(agents)
 		if err != nil {
 			return err
 		}
 		choice, err := picker.chooseSession(ctx, agent, cwd, func(ctx context.Context, cursor string) (json.RawMessage, error) {
-			ctx, done := context.WithTimeout(ctx, 20*time.Second)
-			defer done()
-			params := map[string]any{"agent": agent.ID, "limit": 20, "all_workspaces": true}
-			if cursor != "" {
-				params["cursor"] = cursor
-			}
-			return client.Call(ctx, "threads/list", params)
+			return list(ctx, agent, cursor)
 		})
 		if errors.Is(err, errCLIPickerBack) {
 			continue
@@ -88,11 +122,7 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 		if err != nil {
 			return err
 		}
-		if agent.ID == "codex" {
-			client.Close()
-			return runNativeCodex(choice.Workspace, binary, home, choice.ID, endpoint)
-		}
-		return openChat(agent, choice)
+		return launch(agent, choice)
 	}
 }
 

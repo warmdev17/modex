@@ -51,16 +51,20 @@ Làm mới danh sách agent sau khi đăng nhập.
 
 ## Dùng chung phiên trên terminal
 
-Chạy `modex cli`, chọn agent đã sẵn sàng rồi mở chat cũ hoặc tạo chat
-trong workspace hiện tại. Codex mở giao diện terminal riêng. OpenCode
-và Antigravity mở chat trong terminal của Modex. Mở cùng chat trên
-Android để theo dõi câu trả lời hoặc xử lý yêu cầu đang chờ từ hai đầu.
-Dùng `/older` để xem tin cũ hơn, `/stop` để dừng lượt và `/quit` để
-thoát terminal khi supervisor vẫn chạy.
+Chạy `modex cli` trong terminal. Dùng ↑/↓ để chọn agent và phiên, Enter
+để mở, Esc để quay lại. Chat mới dùng workspace hiện tại. Codex mở giao
+diện terminal riêng.
 
-Bộ chọn dùng màu RGB theo theme terminal và hỗ trợ `NO_COLOR`. Có thể
-mở thẳng phiên bằng `modex cli --thread <id>`. Với OpenCode hoặc
-Antigravity, chạy từ workspace của phiên hoặc chỉ định `--workspace`.
+OpenCode và Antigravity mở màn chat toàn màn hình của Modex. Dùng
+Page Up hoặc Page Down để cuộn và Enter để gửi từ ô nhập. Dùng `/older`
+để tải tin cũ hơn, `/stop` để dừng lượt, Esc hoặc `/quit` để thoát chat
+khi supervisor vẫn chạy. Mở cùng chat trên Android để theo dõi câu trả
+lời và xử lý yêu cầu đang chờ từ cả hai thiết bị.
+
+Giao diện dùng màu RGB theo nền terminal và hỗ trợ `NO_COLOR`. Khi đọc
+từ pipe, CLI giữ giao diện theo dòng. Mở thẳng phiên đã lưu bằng
+`modex cli --thread <id>`. Với OpenCode hoặc Antigravity, chạy từ
+workspace của phiên hoặc chỉ định `--workspace`.
 
 ## Antigravity trong bản phát triển
 

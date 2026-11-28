@@ -78,7 +78,39 @@ type cliChatLine struct {
 	err  error
 }
 
+type cliChatEntry struct {
+	label string
+	text  string
+}
+
+type cliChatOutput struct {
+	start func()
+	line  func(cliChatEntry)
+	delta func(text string, begin bool)
+}
+
 func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, client *localCLIClient, agentID, agentLabel, workspace, threadID string) error {
+	return runAgentCLIChatWithOutput(ctx, input, client, agentID, workspace, threadID, cliChatOutput{
+		start: func() {
+			cliRenderFrame(out, cliSafeText(agentLabel), cliSafeText(workspace), nil, "Type a message · /older · /stop · /quit")
+		},
+		line: func(entry cliChatEntry) {
+			if entry.label != "" {
+				fmt.Fprintln(out, entry.label+": "+entry.text)
+			} else {
+				fmt.Fprintln(out, entry.text)
+			}
+		},
+		delta: func(text string, begin bool) {
+			if begin {
+				fmt.Fprint(out, "assistant: ")
+			}
+			fmt.Fprint(out, text)
+		},
+	})
+}
+
+func runAgentCLIChatWithOutput(ctx context.Context, input *bufio.Reader, client *localCLIClient, agentID, workspace, threadID string, out cliChatOutput) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	client.watchEvents()
@@ -121,9 +153,9 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 	if json.Unmarshal(result, &history) != nil {
 		return errors.New("invalid history response")
 	}
-	heading := cliSafeText(agentLabel)
-	detail := cliSafeText(workspace)
-	var lines []string
+	var lines []cliChatEntry
+	addLine := func(text string) { lines = append(lines, cliChatEntry{text: text}) }
+	addMessage := func(label, text string) { lines = append(lines, cliChatEntry{label, cliSafeText(text)}) }
 	historyUsers := map[string]bool{}
 	historyAssistant := map[string]string{}
 	for _, m := range history.Messages {
@@ -136,29 +168,34 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 			}
 		}
 		if (m.Role == "user" || m.Role == "assistant") && m.Text != "" {
-			lines = append(lines, cliSafeText(m.Role+": "+m.Text))
+			addMessage(m.Role, m.Text)
 		}
 	}
 	if history.Next != nil && *history.Next != "" {
-		lines = append(lines, "Use /older to load earlier messages.")
+		addLine("Use /older to load earlier messages.")
 	}
 	busy := history.ActiveID
 	activeUnknown := history.Active && busy == ""
 	completedSinceStart := false
 	if history.Active && busy == "" {
-		lines = append(lines, "A turn is active; wait for its status.")
+		addLine("A turn is active; wait for its status.")
 	}
-	cliRenderFrame(out, heading, detail, nil, "Type a message · /older · /stop · /quit")
-	printed := 0
+	out.start()
 	streamOpen := false
 	draw := func() {
-		if printed < len(lines) && streamOpen {
-			fmt.Fprintln(out)
+		if len(lines) != 0 && streamOpen {
+			out.line(cliChatEntry{})
 			streamOpen = false
 		}
-		for ; printed < len(lines); printed++ {
-			fmt.Fprintln(out, lines[printed])
+		for _, line := range lines {
+			out.line(line)
 		}
+		clear(lines)
+		lines = lines[:0]
+	}
+	writeDelta := func(text string) {
+		out.delta(cliSafeText(text), !streamOpen)
+		streamOpen = true
 	}
 	draw()
 	inputs := make(chan cliChatLine)
@@ -206,18 +243,20 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 		d := decision
 		question = 0
 		answers = map[string]any{}
-		lines = append(lines, "Permission/input required: "+cliSafeText(d.Context.Reason))
+		addLine("Permission/input required: " + cliSafeText(d.Context.Reason))
 		if d.Context.Command != "" {
-			lines = append(lines, cliSafeText(d.Context.Command))
+			addLine(cliSafeText(d.Context.Command))
 		}
-		lines = append(lines, cliDecisionExtra(contexts[d.ID])...)
+		for _, line := range cliDecisionExtra(contexts[d.ID]) {
+			addLine(line)
+		}
 		if d.Method == "item/fileChange/requestApproval" && len(d.Context.Choices) == 0 {
 			d.Context.Choices = []string{"decline", "cancel"}
 		}
 		if len(d.Context.Questions) > 0 {
-			lines = append(lines, cliSafeText(d.Context.Questions[0].Question))
+			addLine(cliSafeText(d.Context.Questions[0].Question))
 			for _, o := range d.Context.Questions[0].Options {
-				lines = append(lines, cliSafeText("  "+o.Label+" "+o.Description))
+				addLine(cliSafeText("  " + o.Label + " " + o.Description))
 			}
 		} else {
 			var choices []string
@@ -226,7 +265,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 					choices = append(choices, choice)
 				}
 			}
-			lines = append(lines, "Choose: "+cliSafeText(strings.Join(choices, ", ")))
+			addLine("Choose: " + cliSafeText(strings.Join(choices, ", ")))
 		}
 	}
 	pending := false
@@ -260,7 +299,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 				if r.kind == "history" && olderCursor != "" {
 					history.Next = &olderCursor
 				}
-				lines = append(lines, "Error: "+cliSafeText(r.err.Error()))
+				addLine("Error: " + cliSafeText(r.err.Error()))
 				draw()
 				continue
 			}
@@ -273,14 +312,14 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 					Next *string `json:"next_cursor"`
 				}
 				if json.Unmarshal(r.data, &page) != nil {
-					lines = append(lines, "Invalid history response.")
+					addLine("Invalid history response.")
 				} else {
 					history.Next = page.Next
 					olderCursor = ""
-					lines = append(lines, "Earlier messages:")
+					addLine("Earlier messages:")
 					for _, m := range page.Messages {
 						if (m.Role == "user" || m.Role == "assistant") && m.Text != "" {
-							lines = append(lines, cliSafeText(m.Role+": "+m.Text))
+							addMessage(m.Role, m.Text)
 						}
 					}
 				}
@@ -336,7 +375,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 				if busy == "" {
 					busy = p.TurnID
 				}
-				lines = append(lines, "Turn started. Use /stop to interrupt.")
+				addLine("Turn started. Use /stop to interrupt.")
 			case "turn/completed":
 				activeUnknown = false
 				completedSinceStart = true
@@ -345,11 +384,11 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 				status := p.Turn.Status
 				switch status {
 				case "failed":
-					lines = append(lines, "Turn failed.")
+					addLine("Turn failed.")
 				case "interrupted":
-					lines = append(lines, "Turn interrupted.")
+					addLine("Turn interrupted.")
 				default:
-					lines = append(lines, "Turn completed.")
+					addLine("Turn completed.")
 				}
 				clear(streamed)
 			case "item/agentMessage/delta":
@@ -368,11 +407,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 					}
 				}
 				if delta != "" {
-					if !streamOpen {
-						fmt.Fprint(out, "assistant: ")
-						streamOpen = true
-					}
-					fmt.Fprint(out, cliSafeText(delta))
+					writeDelta(delta)
 					if streamed[p.ItemID] == nil {
 						streamed[p.ItemID] = new(strings.Builder)
 					}
@@ -388,20 +423,16 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 					if strings.HasPrefix(p.Item.Text, previous) {
 						suffix := p.Item.Text[len(previous):]
 						if suffix != "" {
-							if !streamOpen {
-								fmt.Fprint(out, "assistant: ")
-								streamOpen = true
-							}
-							fmt.Fprint(out, cliSafeText(suffix))
+							writeDelta(suffix)
 						}
 					} else {
-						lines = append(lines, "assistant (updated): "+cliSafeText(p.Item.Text))
+						addMessage("assistant (updated)", p.Item.Text)
 					}
 				}
 				if p.Item.Type == "userMessage" && !(ev.seq <= historySequence && p.Item.ID != "" && historyUsers[p.Item.ID]) {
 					for _, v := range p.Item.Content {
 						if v.Text != "" {
-							lines = append(lines, "user: "+cliSafeText(v.Text))
+							addMessage("user", v.Text)
 						}
 					}
 				}
@@ -423,7 +454,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 				delete(contexts, p.DecisionID)
 				if decision != nil && decision.ID == p.DecisionID {
 					decision = nil
-					lines = append(lines, "Decision resolved.")
+					addLine("Decision resolved.")
 				}
 				for i := 0; i < len(queue); i++ {
 					if queue[i].ID == p.DecisionID {
@@ -437,10 +468,10 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 				queue = nil
 				clear(known)
 				clear(contexts)
-				lines = append(lines, "Pending decisions cleared.")
+				addLine("Pending decisions cleared.")
 
 			case "error":
-				lines = append(lines, "Agent reported an error; check the session history.")
+				addLine("Agent reported an error; check the session history.")
 			default:
 				continue
 			}
@@ -459,7 +490,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 			}
 			if text == "/older" {
 				if history.Next == nil || *history.Next == "" {
-					lines = append(lines, "No earlier messages.")
+					addLine("No earlier messages.")
 					draw()
 				} else {
 					cursor := *history.Next
@@ -473,7 +504,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 				if busy != "" {
 					call("stop", "turn/interrupt", map[string]any{"thread_id": threadID, "turn_id": busy})
 				} else {
-					lines = append(lines, "No active turn to stop.")
+					addLine("No active turn to stop.")
 					draw()
 				}
 				continue
@@ -485,7 +516,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 					answers[q.ID] = map[string]any{"answers": []string{text}}
 					question++
 					if question < len(d.Context.Questions) {
-						lines = append(lines, cliSafeText(d.Context.Questions[question].Question))
+						addLine(cliSafeText(d.Context.Questions[question].Question))
 						draw()
 						continue
 					}
@@ -504,7 +535,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 						}
 					}
 					if !valid {
-						lines = append(lines, "Choose one of the offered decisions.")
+						addLine("Choose one of the offered decisions.")
 						draw()
 						continue
 					}
@@ -519,7 +550,7 @@ func runAgentCLIChat(ctx context.Context, input *bufio.Reader, out io.Writer, cl
 			}
 			if text != "" {
 				if busy != "" || pending || activeUnknown {
-					lines = append(lines, "Wait for the active turn or use /stop.")
+					addLine("Wait for the active turn or use /stop.")
 					draw()
 				} else {
 					pending = true

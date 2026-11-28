@@ -52,18 +52,21 @@ Refresh the agent list after signing in.
 
 ## Shared terminal sessions
 
-Run `modex cli`, choose a ready agent, then open a conversation or start
-a new one in the current workspace. Codex opens its native terminal UI.
-OpenCode and Antigravity open the Modex terminal chat. Keep Android
-connected and open the same conversation to watch replies and handle
-waiting input from either device. Use `/older` to load earlier messages,
-`/stop` to interrupt a turn, and `/quit` to leave the terminal while
-the supervisor keeps running.
+Run `modex cli` in a terminal. Use ↑/↓ to choose an agent and a session,
+Enter to open it, and Esc to go back. A new conversation uses the current
+workspace. Codex opens its native terminal UI.
 
-The picker uses RGB accents for the terminal theme and respects
-`NO_COLOR`. Existing sessions can also be opened with
-`modex cli --thread <id>`. For an OpenCode or Antigravity session, run
-from that workspace or pass its directory with `--workspace`.
+OpenCode and Antigravity open the fullscreen Modex chat. Use Page Up or
+Page Down to scroll, and Enter to send from the composer. Use `/older`
+to load earlier messages, `/stop` to interrupt a turn, or Esc or `/quit`
+to leave the chat while the supervisor keeps running. Open the same
+conversation on Android to watch replies and handle requests on either
+device.
+
+The UI uses RGB accents for the terminal theme and respects `NO_COLOR`.
+Piped input keeps the line-oriented interface. Open a saved session
+directly with `modex cli --thread <id>`. For OpenCode or Antigravity, run
+from the session's workspace or pass its directory with `--workspace`.
 
 ## Antigravity in development builds
 
