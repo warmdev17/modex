@@ -36,6 +36,9 @@ token budget and shows the objective, status, tokens used and elapsed time.
 Pause disables goal continuation; use Stop separately to interrupt the
 current turn. Resume explicitly allows Codex to continue working. Goal
 state follows native CLI updates and is refreshed when reopening the modal.
+Edit an existing goal to change its objective or budget. A budget-limited
+goal requires a budget above its recorded usage before **Update & resume**.
+Opening an Active goal can continue it, matching Codex CLI behavior.
 
 The first goal integration targets Codex 0.169.0. OpenCode 2.4.1 has native
 goals, including pause/resume/clear, but its goal API is not yet connected

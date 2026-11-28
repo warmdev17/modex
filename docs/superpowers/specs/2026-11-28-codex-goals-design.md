@@ -13,6 +13,9 @@ Paused goals remain paused until explicit Resume. The modal explains this.
 The user explicitly approved native Active-goal continuation on chat open.
 Pause changes goal continuation, not the currently executing turn; Stop
 remains separate. Resume is an explicit user action and may run inference.
+Allow editing an existing objective/budget. Blocked and usage-limited goals
+can be resumed explicitly. Budget-limited goals require a larger budget
+and explicit Update & resume; preserve accumulated native usage.
 
 Approaches: native API preserves CLI behavior and budgets. A Modex-owned
 continuation loop would duplicate scheduling and is outside this milestone.

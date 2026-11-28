@@ -32,11 +32,11 @@ Owner backend. Files internal/bridge goal command/projection/event tests,
 cmd/modex-host routing/capabilities and native lifecycle test as needed.
 Produces the Global Constraints contract for Android.
 
-- [ ] Add failing tests for get/set/clear mapping, `origin:user`, validation,
+- [x] Add failing tests for get/set/clear mapping, `origin:user`, validation,
   wrong workspace, unknown keys/status/budget and unsupported agent.
-- [ ] Implement goal projection and workspace-scoped command mapping.
-- [ ] Relay native update/clear events and advertise Codex-only `goals`.
-- [ ] Run focused tests, full Go race suite/vet and commit explicit paths.
+- [x] Implement goal projection and workspace-scoped command mapping.
+- [x] Relay native update/clear events and advertise Codex-only `goals`.
+- [x] Run focused tests, full Go race suite/vet and commit explicit paths.
 
 ### Task 2: Android goal management
 
@@ -44,20 +44,20 @@ Owner frontend, all Android production and test files. Consumes Task 1
 contract. Use existing capability model, request tracking, session switching
 and chat menu/dialog patterns. Add a focused Goal model/UI file as needed.
 
-- [ ] Add failing tests for goal parsing, budget validation, capability gating
+- [x] Add failing tests for goal parsing, budget validation, capability gating
   and lifecycle updates including clear, stale responses and reconnect.
-- [ ] Add Goal menu/dialog with create/objective/budget form, usage/status,
+- [x] Add Goal menu/dialog with create/objective/budget form, usage/status,
   Pause/Resume and clear. Disable action while pending/disconnected, refresh
   after uncertain failure without retrying mutation. Explain Pause vs Stop.
-- [ ] Wire ViewModel state/actions/events and MainActivity callbacks.
-- [ ] Run Android unit tests, lint and build including affected UI smoke.
+- [x] Wire ViewModel state/actions/events and MainActivity callbacks.
+- [x] Run Android unit tests, lint and build including affected UI smoke.
 
 ### Task 3: Integration and compatibility
 
 Owner primary. Read actual diff, independent reviewer of whole feature.
 
-- [ ] Exercise real installed Codex goal get/set paused/clear in isolated
+- [x] Exercise real installed Codex goal get/set paused/clear in isolated
   supervisor without provider inference, test shared-runtime rejection.
-- [ ] Inspect AGY/OpenCode installed API support and document actual limits.
-- [ ] Verify APK identity/signature/upgrade and stage project preview if built.
-- [ ] Update PROJECT_STATE with commands/results and any delivery gaps.
+- [x] Inspect AGY/OpenCode installed API support and document actual limits.
+- [x] Verify APK identity/signature/upgrade and stage project preview if built.
+- [x] Update PROJECT_STATE with commands/results and any delivery gaps.

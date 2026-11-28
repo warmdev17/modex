@@ -1,5 +1,48 @@
 # Modex project state
 
+## Codex goal management
+
+Updated 2026-11-28 on `feat/codex-goals`, source `77a0e40`.
+Approved scope: chat-menu Goal modal for create, optional token budget,
+status/usage, Pause and Resume. See the
+[plan](docs/superpowers/plans/2026-11-28-codex-goals.md).
+
+- Host get/set/clear, native events and Codex-only capability implemented
+  at `a5c6d97`. Primary reran full `go test -race -p 2 ./... -count=1
+  -timeout=150s` and `go vet ./...` on unchanged Go source with umask 022.
+  Primary's real Codex 0.169.0 paused CRUD test and isolated supervisor
+  event/reconnect test passed, with no inference. Evidence committed in
+  `3337f1b` and `bbb5360`. Shared AGY/OpenCode supervisor smoke passed,
+  including goal rejection for both runtimes through the supervisor.
+- Android modal/state integration completed at `77a0e40`. Create/edit,
+  budget recovery, Pause/Resume, clear, uncertain-read and mutation guards,
+  live native updates and chat/disconnect isolation are implemented.
+  Android 197 unit tests passed; lint reported 0 errors, 19 warnings and
+  1 hint. Preview 56 app/test APKs built offline. Primary took over after
+  FE usage limit and fixed only Compose label lookup in the UI fixture.
+- On emulator-5554 API 33, `preview=codex-goal`, `shared-agent-chats` and
+  `native-session-controls` instrumentation passed. Upgrade fixture was
+  seeded at 55, upgraded in place to 56 and verified by the FE owner.
+  No uninstall/data clear. Independent review found no remaining confirmed
+  defects after stale-response, failed-GET and budget-recovery corrections.
+- Review confirmed native chat resume can continue an idle Active goal.
+  User explicitly approved native continuation on chat open. The modal
+  explains this. Paused goals stay paused
+  across real native thread resume (tested without inference).
+- OpenCode 2.4.1 changelog documents native goals but its Modex adapter
+  is not connected. AGY 1.5.17 ACP initialization advertises no goal
+  capability. Both reject goal commands in this first milestone.
+- Preview APK staged in main checkout at
+  `.modex/previews/modex-0.1.0-preview.56-codex-goals.apk`, code 56,
+  SHA-256 `5d11547f0fdc98f88385d0cf6497c6c88ee2a5866241b74011bde9d7a756214a`.
+  Package/signature verification passed against the established signer.
+  Stamped host `77a0e40` passed isolated real Codex goal reconnect and
+  mixed-runtime supervisor smokes. Host activation is the final operation.
+  Branch remains local, no PR/merge or public release published.
+- Physical Android, large-font/TalkBack and provider-backed active goal
+  completion were not tested. Native paused goal tests send no inference.
+  The unrelated Codex completion/duration bug below remains deferred.
+
 ## Deferred Codex completion-state mismatch
 
 Reported 2026-11-28 on `feat/native-agent-tui`, source `f413e63`.

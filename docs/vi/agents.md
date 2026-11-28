@@ -35,6 +35,9 @@ thái, token đã dùng và thời gian. Pause dừng việc tự tiếp tục g
 muốn ngắt lượt đang chạy thì dùng Stop. Resume cho phép Codex tiếp tục
 làm việc. Thay đổi goal từ CLI được đồng bộ, mở lại modal sẽ đọc trạng
 thái mới từ host.
+Có thể sửa mục tiêu hoặc ngân sách của goal hiện tại. Khi hết ngân sách,
+nhập mức mới cao hơn lượng đã dùng rồi chọn **Update & resume**.
+Mở lại goal Active có thể tiếp tục chạy như Codex CLI.
 
 Mốc đầu dùng API goal của Codex 0.169.0. OpenCode 2.4.1 có goal gốc với
 pause/resume/clear nhưng Modex chưa nối API đó. Antigravity 1.5.17 chưa
