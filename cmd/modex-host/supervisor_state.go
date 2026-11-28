@@ -17,6 +17,7 @@ type supervisorEndpoint struct {
 	Instance     string `json:"instance"`
 	Workspace    string `json:"workspace"`
 	NativeSocket string `json:"native_socket,omitempty"`
+	CLIRelay     bool   `json:"cli_relay,omitempty"`
 }
 
 func claimSupervisorState(dir string) (func(), error) {

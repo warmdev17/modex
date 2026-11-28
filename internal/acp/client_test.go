@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestACPChild(t *testing.T) {
@@ -49,7 +51,7 @@ func TestACPChild(t *testing.T) {
 		}
 		switch request.Method {
 		case "initialize":
-			reply(request.ID, json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.17"},"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"list":{}}}}`))
+			reply(request.ID, json.RawMessage(`{"protocolVersion":1,"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.17"},"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"embeddedContext":true},"sessionCapabilities":{"list":{}}}}`))
 		case "session/list":
 			reply(request.ID, map[string]any{"sessions": []map[string]string{
 				{"sessionId": "saved", "cwd": cwd, "title": "Saved"},
@@ -215,7 +217,7 @@ func TestAntigravitySessionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Close()
-	if client.Info().Version != "1.5.17" || !client.Info().ListSessions || !client.Info().LoadSession {
+	if client.Info().Version != "1.5.17" || !client.Info().ListSessions || !client.Info().LoadSession || !client.Info().Image || !client.Info().EmbeddedContext {
 		t.Fatalf("handshake: %+v", client.Info())
 	}
 	page, err := client.List(ctx, "")
@@ -595,7 +597,11 @@ func TestOptionUpdatesAndBusySession(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() { _, err := c.Prompt(ctx, id, "busy", "cancel"); done <- err }()
-	<-events
+	for event := range events {
+		if event.TurnID == "busy" {
+			break
+		}
+	}
 	if err := c.SetOption(ctx, id, "model", "b"); err == nil {
 		t.Fatal("accepted change during prompt")
 	}
@@ -666,4 +672,210 @@ func TestMalformedConfigurationAcknowledgementRequiresReload(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNativeReplyOverflowClosesClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	defer close(release)
+	c.queueReply(func() { close(started); <-release })
+	<-started
+	for i := 0; i < 129; i++ {
+		c.queueReply(func() {})
+	}
+	deadline := time.After(3 * time.Second)
+	for c.SessionLoaded(id) {
+		select {
+		case <-deadline:
+			t.Fatal("reply overflow left client usable")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func TestStalledNativeReplyClosesClient(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	defer close(release)
+	go c.runReply(func() { <-release }, 10*time.Millisecond)
+	select {
+	case <-c.done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("stalled reply did not close client")
+	}
+	deadline := time.After(3 * time.Second)
+	for c.SessionLoaded(id) {
+		select {
+		case <-deadline:
+			t.Fatal("stalled reply left client usable")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func TestSteerRejectsUntestedVersion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c, err := start(ctx, os.Args[0], []string{"-test.run=^TestACPChild$"}, t.TempDir(), append(os.Environ(), "MODEX_ACP_FIXTURE=1"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	id, err := c.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.info.Version = "1.5.18"
+	sent := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { _, e := c.PromptWithSent(ctx, id, "turn", "cancel", func() { close(sent) }); done <- e }()
+	<-sent
+	if err := c.SteerWithSent(ctx, id, "turn", "follow", nil); err == nil {
+		t.Fatal("untested version accepted steering")
+	}
+	if err := c.Cancel(ctx, id, "turn"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSessionTitleUpdateForKnownIdleSession(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"known": {loaded: true}}}
+	var updates []Update
+	emit := func(u Update) { updates = append(updates, u) }
+	c.handleUpdate(json.RawMessage(`{"sessionId":"known","update":{"sessionUpdate":"session_info_update","title":"  Native title  "}}`), emit)
+	c.handleUpdate(json.RawMessage(`{"sessionId":"unknown","update":{"sessionUpdate":"session_info_update","title":"Other"}}`), emit)
+	c.handleUpdate(json.RawMessage(`{"sessionId":"known","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"idle"}}}`), emit)
+	if len(updates) != 1 || updates[0].Text != "  Native title  " {
+		t.Fatalf("updates: %#v", updates)
+	}
+}
+
+func TestUsageUpdatesValidateAndScopeNativeSamples(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"known": {loaded: true, options: []Option{{ID: "model", CurrentValue: "initial"}}}}}
+	var updates []Update
+	emit := func(u Update) { updates = append(updates, u) }
+	for _, raw := range []string{
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":0,"size":1048576}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":15709,"size":1048576}}`,
+		`{"sessionId":"other","update":{"sessionUpdate":"usage_update","used":1,"size":10}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":-1,"size":10}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":1,"size":0}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","used":1.5,"size":10}}`,
+		`{"sessionId":"known","update":{"sessionUpdate":"usage_update","size":10}}`,
+	} {
+		c.handleUpdate(json.RawMessage(raw), emit)
+	}
+	if len(updates) != 2 || updates[0].Used != 0 || updates[1].Used != 15709 || updates[1].Size != 1048576 || updates[0].Model != "initial" {
+		t.Fatalf("updates: %#v", updates)
+	}
+}
+
+func TestCommandToolFramesDecodeArrayWithoutPrivateMetadata(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	var updates []Update
+	for _, raw := range []string{
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"c","name":"run_command","kind":"execute","status":"in_progress","rawInput":{"CommandLine":"printf hello","secret":"PRIVATE"}}}`,
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"c","status":"completed","rawOutput":{"output":"hello","exit_code":0,"secret":"PRIVATE"},"content":[{"type":"content","content":{"type":"text","text":"hello"}}]}}`,
+	} {
+		c.handleUpdate(json.RawMessage(raw), func(u Update) { updates = append(updates, u) })
+	}
+	if len(updates) != 2 {
+		t.Fatalf("got %d updates, want both frames", len(updates))
+	}
+	b, _ := json.Marshal(updates)
+	if strings.Contains(string(b), "PRIVATE") || !strings.Contains(string(b), "printf hello") || !strings.Contains(string(b), "hello") {
+		t.Fatalf("decoded updates: %s", b)
+	}
+}
+
+func TestCommandOutputBoundsAndForeignPayload(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	var got []Update
+	emit := func(u Update) { got = append(got, u) }
+	c.handleUpdate(json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"x","name":"other","kind":"read","rawOutput":{"output":"PRIVATE"}}}`), emit)
+	raw, _ := json.Marshal(map[string]any{"sessionId": "s", "update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "c", "name": "run_command", "kind": "execute", "rawInput": map[string]any{"CommandLine": strings.Repeat("界", 2000)}, "rawOutput": map[string]any{"output": strings.Repeat("界", 30000)}}})
+	c.handleUpdate(raw, emit)
+	if len(got) != 2 || got[0].Output != "" || len(got[1].Command) > 4096 || len(got[1].Output) > 65536 || !utf8.ValidString(got[1].Command) || !utf8.ValidString(got[1].Output) || !strings.Contains(got[1].Output, "truncated") {
+		t.Fatalf("updates: %#v", got)
+	}
+}
+
+func TestCompletedDiffFramesAreDecoded(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	var updates []Update
+	for _, raw := range []string{
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"a","status":"completed","content":[{"type":"diff","path":"/tmp/a","oldText":"old\n","newText":"new\n"}]}}`,
+		`{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"b","status":"completed","content":[{"type":"diff","path":"/tmp/b","oldText":null,"newText":"new"}]}}`,
+	} {
+		c.handleUpdate(json.RawMessage(raw), func(u Update) { updates = append(updates, u) })
+	}
+	b, _ := json.Marshal(updates)
+	if len(updates) != 2 || !strings.Contains(string(b), `"/tmp/a"`) || !strings.Contains(string(b), `"/tmp/b"`) {
+		t.Fatalf("missing diffs: %s", b)
+	}
+}
+
+func TestDiffRejectsInvalidContentAndNoncompleted(t *testing.T) {
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	for _, tc := range []struct{ status, content string }{
+		{"failed", `[{"type":"diff","path":"/ok","oldText":"a","newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"/a/../secret","oldText":"a","newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"relative","oldText":null,"newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"/ok","oldText":null,"newText":null}]`},
+		{"completed", `[{"type":"diff","path":"/ok","newText":"b"}]`},
+		{"completed", `[{"type":"diff","path":"/ok","oldText":"a","newText":"bad\u0000"}]`},
+	} {
+		raw := json.RawMessage(`{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"x","status":"` + tc.status + `","content":` + tc.content + `}}`)
+		c.handleUpdate(raw, func(u Update) {
+			if len(u.Diffs) != 0 {
+				t.Errorf("accepted %s: %+v", raw, u.Diffs)
+			}
+		})
+	}
+	huge, _ := json.Marshal(map[string]any{"sessionId": "s", "update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "x", "status": "completed", "content": []any{map[string]any{"type": "diff", "path": "/ok", "oldText": nil, "newText": strings.Repeat("x", 65537)}}}})
+	c.handleUpdate(huge, func(u Update) {
+		if len(u.Diffs) != 0 {
+			t.Error("accepted oversized text")
+		}
+	})
+}
+
+func TestDiffAggregateLimitReportsOmissions(t *testing.T) {
+	blocks := make([]any, 17)
+	for i := range blocks {
+		blocks[i] = map[string]any{"type": "diff", "path": fmt.Sprintf("/file%d", i), "oldText": nil, "newText": "x"}
+	}
+	raw, _ := json.Marshal(map[string]any{"sessionId": "s", "update": map[string]any{"sessionUpdate": "tool_call", "toolCallId": "x", "status": "completed", "content": blocks}})
+	c := &Client{sessions: map[string]*sessionState{"s": {loading: true}}}
+	c.handleUpdate(raw, func(u Update) {
+		b, _ := json.Marshal(u)
+		if !strings.Contains(string(b), `"DiffsTruncated":true`) {
+			t.Fatalf("missing truncation: %s", b)
+		}
+	})
 }

@@ -48,6 +48,59 @@ class ProtocolTest {
         assertTrue(discovery.supports("agents/list"))
     }
 
+    @Test fun antigravityAttachmentsRequireTheExplicitCodexHostCapability() {
+        val legacy = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"legacy"}"""))
+        val oldHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery"]}"""))
+        val newHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","antigravity_attachments"]}"""))
+
+        assertFalse(legacy.agyAttachments)
+        assertFalse(runtimeCapabilities(oldHost, emptyList(), ANTIGRAVITY_AGENT).agyAttachments)
+        assertTrue(runtimeCapabilities(newHost, emptyList(), ANTIGRAVITY_AGENT).agyAttachments)
+        assertTrue(newHost.agyAttachments)
+    }
+
+    @Test fun antigravitySteeringRequiresTheExplicitCodexHostCapability() {
+        val legacy = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"legacy"}"""))
+        val oldHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery"]}"""))
+        val newHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","antigravity_steer"]}"""))
+
+        assertFalse(legacy.agySteer)
+        assertFalse(runtimeCapabilities(oldHost, emptyList(), ANTIGRAVITY_AGENT).agySteer)
+        assertTrue(runtimeCapabilities(newHost, emptyList(), ANTIGRAVITY_AGENT).agySteer)
+        assertFalse(runtimeCapabilities(newHost, emptyList(), OPENCODE_AGENT).agySteer)
+        assertTrue(newHost.agySteer)
+    }
+
+    @Test fun antigravityContextUsageRequiresTheExplicitCodexHostCapability() {
+        val legacy = BackendCapabilities.fromReady(JSONObject("""{"ready":true,"instance":"legacy"}"""))
+        val oldHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","session_status"]}"""))
+        val newHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","session_status","antigravity_context_usage"]}"""))
+
+        assertFalse(legacy.agyContextUsage)
+        assertFalse(runtimeCapabilities(oldHost, emptyList(), ANTIGRAVITY_AGENT).sessionStatus)
+        assertTrue(newHost.agyContextUsage)
+        assertTrue(runtimeCapabilities(newHost, emptyList(), ANTIGRAVITY_AGENT).sessionStatus)
+        assertFalse(runtimeCapabilities(newHost, emptyList(), OPENCODE_AGENT).sessionStatus)
+        assertTrue(newHost.supports("threads/status"))
+    }
+
+    @Test fun goalsRequireTheExplicitCodexRuntimeCapability() {
+        val oldHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery"]}"""))
+        val host = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","goals"]}"""))
+        val agents = listOf(
+            ChatAgent(OPENCODE_AGENT, "OpenCode", true, capabilities = setOf("goals")),
+            ChatAgent(ANTIGRAVITY_AGENT, "Antigravity", true, capabilities = setOf("goals")),
+        )
+
+        assertFalse(oldHost.goals)
+        assertTrue(host.goals)
+        for (method in listOf("threads/goal/get", "threads/goal/set", "threads/goal/clear")) {
+            assertTrue(method, host.supports(method))
+            assertFalse(method, runtimeCapabilities(host, agents, OPENCODE_AGENT).supports(method))
+            assertFalse(method, runtimeCapabilities(host, agents, ANTIGRAVITY_AGENT).supports(method))
+        }
+    }
+
     @Test fun explicitBackendDisablesMalformedOrMissingOptionalCapabilitiesAndReplacementDoesNotLeak() {
         val journal = JournalState()
         journal.hello(JSONObject("""{"ready":true,"instance":"one","backend":"codex","capabilities":["references","takeover"]}"""))
@@ -153,6 +206,21 @@ class ProtocolTest {
             "Host rejected threads/list (request_rejected). Review session state before retrying.",
             explainHostRejection("threads/list", "request_rejected")
         )
+    }
+
+    @Test fun antigravityAttachmentRejectionsAreActionableWithoutEchoingUnknownDetails() {
+        assertEquals(
+            "Antigravity accepts PNG or JPEG images and UTF-8 text files only.",
+            explainHostRejection("turn/start", "select a PNG or JPEG image", ANTIGRAVITY_AGENT)
+        )
+        assertEquals(
+            "Antigravity attachments must be non-empty, with text files up to 256 KiB and all files up to 8 MiB total.",
+            explainHostRejection("turn/start", "attachment is empty or exceeds the size limit", ANTIGRAVITY_AGENT)
+        )
+        assertTrue(explainHostRejection("turn/start", "attachment is not readable", CODEX_AGENT).contains("20 MiB"))
+        val unknown = explainHostRejection("turn/start", "private upstream URL with token=secret", ANTIGRAVITY_AGENT)
+        assertFalse(unknown.contains("private upstream"))
+        assertFalse(unknown.contains("secret"))
     }
 
     @Test fun quotesRemotePaths() {

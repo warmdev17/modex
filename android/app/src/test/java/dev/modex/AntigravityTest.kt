@@ -39,7 +39,7 @@ class AntigravityTest {
         assertTrue(params.getBoolean("standalone"))
     }
 
-    @Test fun antigravityTurnsArePlainTextOnly() {
+    @Test fun antigravityAttachmentTurnsOmitCodexOnlyFields() {
         val reference = PromptReference("skill", "review", "/work/SKILL.md", "Review", "", "review", true, "@review")
         val params = turnStartParams(
             "agy:thread",
@@ -51,7 +51,28 @@ class AntigravityTest {
             agent = "antigravity",
         )
 
-        assertEquals(setOf("thread_id", "text"), params.keysSet())
+        assertEquals(setOf("thread_id", "text", "attachments"), params.keysSet())
+        assertEquals("/tmp/a.txt", params.getJSONArray("attachments").getJSONObject(0).getString("path"))
+        assertFalse(params.has("model"))
+        assertFalse(params.has("effort"))
+        assertFalse(params.has("references"))
+    }
+
+    @Test fun antigravityFollowUpContainsOnlyTheExactTurnTextAndWorkspace() {
+        val params = turnSteerParams("agy:thread", "exact-turn", "continue", "/work/project")
+
+        assertEquals(setOf("thread_id", "turn_id", "text", "workspace"), params.keysSet())
+        assertEquals("agy:thread", params.getString("thread_id"))
+        assertEquals("exact-turn", params.getString("turn_id"))
+        assertEquals("continue", params.getString("text"))
+        assertEquals("/work/project", params.getString("workspace"))
+    }
+
+    @Test fun antigravityFollowUpAcknowledgementRequiresTheCapturedTurn() {
+        assertTrue(validSteerAcknowledgement(JSONObject("""{"turnId":"exact-turn"}"""), "exact-turn"))
+        assertFalse(validSteerAcknowledgement(JSONObject("""{"turnId":"other-turn"}"""), "exact-turn"))
+        assertFalse(validSteerAcknowledgement(JSONObject("""{"turn":{"id":"exact-turn"}}"""), "exact-turn"))
+        assertFalse(validSteerAcknowledgement(JSONObject(), "exact-turn"))
     }
 
     @Test fun threadMetadataWinsBeforeAntigravityPrefixFallback() {

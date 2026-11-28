@@ -13,6 +13,7 @@ import (
 	"github.com/warmdev/modex/internal/antigravity"
 	"github.com/warmdev/modex/internal/bridge"
 	"github.com/warmdev/modex/internal/opencode"
+	"github.com/warmdev/modex/internal/supervisor"
 )
 
 type agentChatRouter interface {
@@ -35,7 +36,58 @@ func serveAgentChats(ctx context.Context, in io.Reader, out io.Writer, cwd, agy,
 	defer router.Close()
 	oc := opencode.NewRouter(ctx, opencodeBinary, cwd, stateDir)
 	defer oc.Close()
-	return bridge.ServeCommands(ctx, in, out, agentCommandsWithOpenCode(cwd, codex, router, oc))
+	handler := agentCommandsWithOpenCode(cwd, codex, router, oc)
+	handler = attachmentContext(router.SetSSHConnection, handler)
+	return bridge.ServeCommands(ctx, in, out, func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if cmd.ID == supervisor.AttachmentCommandID && cmd.Method == "client/attached" {
+			var p struct {
+				CLISSH bool `json:"cli_ssh"`
+			}
+			if json.Unmarshal(cmd.Params, &p) == nil && p.CLISSH {
+				oc.ReleaseNativeCLIs()
+				router.ReleaseNativeCLIs()
+			}
+		}
+		return handler(ctx, cmd, emit)
+	})
+}
+
+func attachmentContext(set func(string), next bridge.CommandHandler) bridge.CommandHandler {
+	// The bridge serializes lifecycle commands before normal client requests.
+	var phone, terminal string
+	return func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if cmd.ID == supervisor.AttachmentCommandID && cmd.Method == "client/attached" {
+			var p struct {
+				Attached      bool   `json:"attached"`
+				SSHConnection string `json:"ssh_connection"`
+				CLISSH        bool   `json:"cli_ssh"`
+			}
+			if json.Unmarshal(cmd.Params, &p) != nil {
+				set("")
+				return nil, errors.New("invalid attachment context")
+			}
+			if p.CLISSH {
+				terminal = p.SSHConnection
+			} else {
+				phone = ""
+				if p.Attached {
+					phone = p.SSHConnection
+				}
+			}
+			selected := phone
+			if selected == "" {
+				selected = terminal
+			}
+			set(selected)
+			if p.CLISSH {
+				return map[string]bool{"updated": true}, nil
+			}
+			cmd.Params, _ = json.Marshal(struct {
+				Attached bool `json:"attached"`
+			}{p.Attached})
+		}
+		return next(ctx, cmd, emit)
+	}
 }
 
 func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter) bridge.CommandHandler {
@@ -44,6 +96,82 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 
 func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agentChatRouter, oc *opencode.Router) bridge.CommandHandler {
 	return func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if cmd.Method == "cli/agents/check" {
+			if !supervisor.CLIRequest(cmd.ID) {
+				return nil, errors.New("agent check requires the local CLI")
+			}
+			var p map[string]json.RawMessage
+			if json.Unmarshal(cmd.Params, &p) != nil || len(p) != 2 {
+				return nil, errors.New("invalid agent check")
+			}
+			var workspace, agent string
+			if json.Unmarshal(p["workspace"], &workspace) != nil || !validCLIWorkspace(workspace) || json.Unmarshal(p["agent"], &agent) != nil {
+				return nil, errors.New("invalid agent check")
+			}
+			workspace, err := filepath.EvalSymlinks(workspace)
+			if err != nil {
+				return nil, errors.New("workspace is unavailable")
+			}
+			info, err := os.Stat(workspace)
+			if err != nil || !info.IsDir() {
+				return nil, errors.New("workspace is unavailable")
+			}
+			var entry map[string]any
+			switch agent {
+			case "codex":
+				entry = map[string]any{"id": "codex", "label": "Codex", "ready": true}
+			case "antigravity":
+				probe, ok := router.(interface {
+					Readiness(context.Context, string) map[string]any
+				})
+				if !ok {
+					return nil, errors.New("Antigravity runtime is unavailable")
+				}
+				entry = probe.Readiness(ctx, workspace)
+			case "opencode":
+				if oc == nil {
+					return nil, errors.New("OpenCode runtime is unavailable")
+				}
+				entry = oc.Readiness(ctx, workspace)
+			default:
+				return nil, errors.New("unknown agent")
+			}
+			return map[string]any{"data": []any{entry}}, nil
+		}
+		if cmd.Method == "cli/native" || cmd.Method == "cli/native/end" {
+			if !supervisor.CLIRequest(cmd.ID) {
+				return nil, errors.New("native terminal access requires the local CLI")
+			}
+			var p struct {
+				ThreadID  string `json:"thread_id"`
+				Workspace string `json:"workspace"`
+			}
+			if json.Unmarshal(cmd.Params, &p) != nil || !validCLIWorkspace(p.Workspace) {
+				return nil, errors.New("invalid native terminal request")
+			}
+			if strings.HasPrefix(p.ThreadID, "oc:") && oc != nil {
+				if cmd.Method == "cli/native/end" {
+					oc.ReleaseNativeCLI(p.ThreadID)
+					return map[string]bool{"released": true}, nil
+				}
+				return oc.NativeCLI(ctx, p.Workspace, p.ThreadID)
+			}
+			if strings.HasPrefix(p.ThreadID, "agy:") {
+				if cmd.Method == "cli/native/end" {
+					if native, ok := router.(interface{ ReleaseNativeCLI(string, string) }); ok {
+						native.ReleaseNativeCLI(p.Workspace, p.ThreadID)
+					}
+					return map[string]bool{"released": true}, nil
+				}
+				native, ok := router.(interface {
+					NativeCLI(context.Context, string, string) (map[string]string, error)
+				})
+				if ok {
+					return native.NativeCLI(ctx, p.Workspace, p.ThreadID)
+				}
+			}
+			return nil, errors.New("native terminal runtime is unavailable")
+		}
 		if oc != nil && cmd.Method == "agents/list" {
 			var p struct {
 				Workspace string `json:"workspace"`
@@ -63,6 +191,14 @@ func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agen
 			}
 			result.Data = append(result.Data, oc.Readiness(ctx, p.Workspace))
 			return result, nil
+		}
+		if strings.HasPrefix(cmd.Method, "threads/goal/") {
+			var p struct {
+				ThreadID string `json:"thread_id"`
+			}
+			if json.Unmarshal(cmd.Params, &p) == nil && (strings.HasPrefix(p.ThreadID, "agy:") || strings.HasPrefix(p.ThreadID, "oc:")) {
+				return nil, errors.New("goals are unsupported by this agent")
+			}
 		}
 		explicitCodexStart := false
 		if cmd.Method == "threads/start" {
@@ -207,12 +343,20 @@ func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agen
 
 func appendAgentChats(value any, params json.RawMessage, cwd string, router agentChatRouter) (any, error) {
 	var options struct {
-		Cursor   string `json:"cursor"`
-		All      bool   `json:"all_workspaces"`
-		Archived bool   `json:"archived"`
+		Cursor    string `json:"cursor"`
+		Workspace string `json:"workspace"`
+		All       bool   `json:"all_workspaces"`
+		Archived  bool   `json:"archived"`
 	}
 	if len(params) > 0 && json.Unmarshal(params, &options) != nil {
 		return value, nil
+	}
+	if options.Workspace != "" {
+		var err error
+		cwd, err = filepath.EvalSymlinks(options.Workspace)
+		if err != nil {
+			return nil, errors.New("workspace is unavailable")
+		}
 	}
 	if options.Cursor != "" || options.Archived {
 		return value, nil
@@ -243,6 +387,20 @@ func agentChatPage(p map[string]json.RawMessage, cwd string, router agentChatRou
 	for key, raw := range p {
 		switch key {
 		case "agent":
+		case "workspace":
+			var path string
+			if json.Unmarshal(raw, &path) != nil || !validCLIWorkspace(path) {
+				return nil, errors.New("invalid workspace")
+			}
+			var err error
+			cwd, err = filepath.EvalSymlinks(path)
+			if err != nil {
+				return nil, errors.New("workspace is unavailable")
+			}
+			info, err := os.Stat(cwd)
+			if err != nil || !info.IsDir() {
+				return nil, errors.New("workspace is unavailable")
+			}
 		case "limit":
 			if json.Unmarshal(raw, &limit) != nil || limit < 1 || limit > 100 {
 				return nil, errors.New("limit must be 1..100")

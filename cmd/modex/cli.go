@@ -32,7 +32,7 @@ func launchCLI(args []string) error {
 	workspace := flags.String("workspace", cwd, "Workspace directory (defaults to current directory)")
 	codex := flags.String("codex", defaultCodex, "Codex executable")
 	home := flags.String("codex-home", "", "Override CODEX_HOME")
-	thread := flags.String("thread", "", "Optional existing session UUID; omit for the picker")
+	thread := flags.String("thread", "", "Existing session ID; omit to choose an agent and conversation")
 	state := flags.String("state-dir", "", "Supervisor state directory (defaults to ~/.local/state/modex-phone)")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {

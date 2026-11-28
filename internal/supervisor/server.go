@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/netip"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,28 +18,39 @@ import (
 )
 
 const MaxFrame = 4 * 1024 * 1024
+const AttachmentCommandID = 2147483646
+const cliIDStart = 2000000000
+const cliIDEnd = 2147483644
 
 type Hello struct {
-	Token     string `json:"token"`
-	Instance  string `json:"instance,omitempty"`
-	Cursor    uint64 `json:"cursor"`
-	Stop      bool   `json:"stop,omitempty"`
-	Heartbeat bool   `json:"heartbeat,omitempty"`
+	Token         string `json:"token"`
+	Instance      string `json:"instance,omitempty"`
+	Cursor        uint64 `json:"cursor"`
+	Stop          bool   `json:"stop,omitempty"`
+	Heartbeat     bool   `json:"heartbeat,omitempty"`
+	CLI           bool   `json:"cli,omitempty"`
+	SSHConnection string `json:"ssh_connection,omitempty"`
 }
 
 type Server struct {
-	Journal         *Journal
-	Backend         string
-	Capabilities    []string
-	ctx             context.Context
-	token, instance string
-	child           io.Writer
-	stop            context.CancelFunc
-	mu              sync.Mutex
-	attached        bool
-	OnAttachment    func(bool) error
-	childMu         sync.Mutex
-	leaseTimeout    time.Duration
+	Journal          *Journal
+	Backend          string
+	Capabilities     []string
+	ctx              context.Context
+	token, instance  string
+	child            io.Writer
+	stop             context.CancelFunc
+	mu               sync.Mutex
+	attached         bool
+	OnAttachment     func(bool, string) error
+	OnCLIContext     func(string) error
+	cli              *cliLease
+	nextCLIID        int
+	decisions        map[string]json.RawMessage
+	decisionBytes    int
+	decisionOverflow bool
+	childMu          sync.Mutex
+	leaseTimeout     time.Duration
 }
 
 type leaseReader struct {
@@ -58,6 +72,30 @@ func NewServer(ctx context.Context, token, instance string, child io.Writer, sto
 }
 
 func (s *Server) Attached() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.attached }
+
+func validSSHConnection(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) != 4 {
+		return ""
+	}
+	for _, i := range []int{0, 2} {
+		if _, err := netip.ParseAddr(fields[i]); err != nil {
+			return ""
+		}
+	}
+	for _, i := range []int{1, 3} {
+		for _, c := range fields[i] {
+			if c < '0' || c > '9' {
+				return ""
+			}
+		}
+		port, err := strconv.ParseUint(fields[i], 10, 16)
+		if err != nil || port == 0 {
+			return ""
+		}
+	}
+	return strings.Join(fields, " ")
+}
 
 func (s *Server) Handle(conn net.Conn) {
 	defer conn.Close()
@@ -84,6 +122,10 @@ func (s *Server) Handle(conn net.Conn) {
 	if hello.Stop {
 		_ = send(map[string]bool{"stopping": true})
 		s.stop()
+		return
+	}
+	if hello.CLI {
+		s.handleCLI(ctx, cancel, conn, scanner, hello, send)
 		return
 	}
 	if (hello.Cursor > 0 && hello.Instance != s.instance) || (hello.Instance != "" && hello.Instance != s.instance) {
@@ -115,16 +157,20 @@ func (s *Server) Handle(conn net.Conn) {
 		}
 		s.childMu.Lock()
 		defer s.childMu.Unlock()
-		return s.OnAttachment(value)
+		ssh := ""
+		if value {
+			ssh = validSSHConnection(hello.SSHConnection)
+		}
+		return s.OnAttachment(value, ssh)
 	}
 	defer func() {
 		cancel()
-		s.mu.Lock()
-		defer s.mu.Unlock()
 		if attachment(false) != nil {
 			s.stop()
 		}
+		s.mu.Lock()
 		s.attached = false
+		s.mu.Unlock()
 	}()
 	if attachment(true) != nil {
 		s.stop()
@@ -156,7 +202,8 @@ func (s *Server) Handle(conn net.Conn) {
 					continue
 				}
 			}
-			if _, err := bridge.DecodeCommand(scanner.Bytes()); err != nil {
+			command, err := bridge.DecodeCommand(scanner.Bytes())
+			if err != nil || command.Method == "client/attached" || (command.ID >= cliIDStart && command.ID <= cliIDEnd) || command.ID == AttachmentCommandID {
 				return
 			}
 			s.childMu.Lock()
@@ -164,7 +211,7 @@ func (s *Server) Handle(conn net.Conn) {
 				s.childMu.Unlock()
 				return
 			}
-			_, err := s.child.Write(append(append([]byte(nil), scanner.Bytes()...), '\n'))
+			_, err = s.child.Write(append(append([]byte(nil), scanner.Bytes()...), '\n'))
 			s.childMu.Unlock()
 			if err != nil {
 				s.stop()

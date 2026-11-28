@@ -51,8 +51,16 @@ func (r *Router) handleOptions(ctx context.Context, c *chat, method string, para
 		return nil, true, err
 	}
 	if set {
+		before := client.Options(c.Native)
 		r.mu.Lock()
-		if c.active != "" || c.setting || c.optionsDirty || !c.loaded {
+		if c.usageModel == "" {
+			for _, option := range before {
+				if option.ID == modelOption {
+					c.usageModel = option.CurrentValue
+				}
+			}
+		}
+		if c.active != "" || c.setting || c.nativeTerminal || c.optionsDirty || !c.loaded {
 			r.mu.Unlock()
 			return nil, true, errors.New("Antigravity session is unavailable for changing options")
 		}
@@ -67,6 +75,8 @@ func (r *Router) handleOptions(ctx context.Context, c *chat, method string, para
 			if !client.SessionLoaded(c.Native) {
 				r.mu.Lock()
 				c.loaded = false
+				r.clearUsageLocked(c)
+				c.usageModel = ""
 				r.mu.Unlock()
 			}
 			return nil, true, err
@@ -87,6 +97,12 @@ func (r *Router) handleOptions(ctx context.Context, c *chat, method string, para
 	if set {
 		r.mu.Lock()
 		for _, option := range native {
+			if option.ID == modelOption && c.usageModel != "" && c.usageModel != option.CurrentValue {
+				r.clearUsageLocked(c)
+			}
+			if option.ID == modelOption {
+				c.usageModel = option.CurrentValue
+			}
 			switch option.ID {
 			case modelOption:
 				c.Model = option.CurrentValue

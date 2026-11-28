@@ -6,6 +6,33 @@ List items include `{id,cwd,modelProvider,name?,preview?}`; `name` (the actual C
 
 Upstream Codex frames are bounded to 16MiB because stored turns also contain tool output before projection. Downstream response frames support up to 32 MiB, including the journal envelope; commands remain limited to 4 MiB. Results reserve 1 KiB for framing and return `response_too_large` before writing if over budget, so an oversized history cannot terminate the supervisor. The replay journal retains at most 1024 entries or 64 MiB. Paged reads bound the number of turns per request; a single oversized turn can still exceed the transfer budget and must be opened on the computer. Command output uses the separately documented projection limits. Both Android and modex-host must be updated together. Provider credentials remain target-owned. History is sensitive task content intentionally requested by the authenticated user.
 
+## Native Codex goals
+
+The host advertises `goals` for Codex-backed connections. Goal commands
+use `thread_id` and an optional absolute `workspace`, with native thread
+identity and workspace checked before every request:
+
+- `threads/goal/get` returns `{goal:null}` or the goal below.
+- `threads/goal/set` accepts optional `objective`, `status` (`active` or
+  `paused`), and positive integer `token_budget`, with at least one field
+  supplied. Omitted fields preserve native state. Mutations use native
+  `origin:user` and return the acknowledged goal.
+- `threads/goal/clear` returns `{cleared:boolean}`.
+
+A projected goal contains `thread_id`, `objective`, `status`, nullable
+`token_budget`, `tokens_used`, `time_used_seconds`, `created_at`, and
+`updated_at`. Native statuses are `active`, `paused`, `blocked`,
+`usageLimited`, `budgetLimited`, and `complete`. Goal reads do not resume
+threads. Native `thread/goal/updated` and `thread/goal/cleared` events keep
+camelCase payload fields for the mobile journal. Reconnect reads current
+state and never replays a goal mutation. Opening a native active goal may
+continue work through Codex's normal thread-resume behavior. A paused goal
+stays paused. Goal Pause and turn Stop have separate meanings.
+
+OpenCode and Antigravity goal commands return an unsupported error in this
+milestone, including OpenCode-only connections. They do not receive Codex
+goal methods.
+
 ## Session model and reasoning
 
 Host status exposes only the allowlisted configured provider/model and optional `effort` from `model_reasoning_effort`. Thread metadata may include `model` and `reasoningEffort`; start/resume results also expose optional top-level `effort`. Missing values remain absent rather than being guessed. Android stores a separate model/effort choice per thread in its encrypted host snapshot, persists it at selection, and gives it precedence over later host defaults or resume responses. New chats resolve host defaults and advertised default effort, while explicit turn overrides leave global Codex configuration unchanged. Forget clears the stored choices; cursor reset preserves them. No prompt is replayed automatically.

@@ -22,7 +22,15 @@ internal fun takeoverTarget(method: String, detail: String, target: String): Str
 
 private const val CHOOSE_OPENCODE_PROVIDER = "Multiple OpenCode providers offer this model. Choose the provider in the model picker."
 
-internal fun explainHostRejection(method: String, detail: String): String {
+internal fun validTurnAcknowledgement(result: JSONObject): Boolean =
+    (result.optJSONObject("turn")?.opt("id") as? String)?.isNotBlank() == true
+
+internal fun validSteerAcknowledgement(result: JSONObject, expectedTurn: String): Boolean =
+    expectedTurn.isNotBlank() && result.opt("turnId") == expectedTurn
+
+private data class SteeringDraft(val thread: String, val draft: PromptDraft?, val expectedTurn: String = "")
+
+internal fun explainHostRejection(method: String, detail: String, agent: String = CODEX_AGENT): String {
     return when {
         method == "projects/create" -> "Project creation was not confirmed. Check the folder and update modex-host/Codex if needed. Refresh projects before retrying."
         detail.contains("thread_has_dependents") -> "This conversation is needed by a fork. Delete dependent conversations first; nothing was deleted."
@@ -35,6 +43,11 @@ internal fun explainHostRejection(method: String, detail: String): String {
         detail == "model is offered by multiple OpenCode providers; select a provider-qualified model" -> CHOOSE_OPENCODE_PROVIDER
         method == "turn/start" && detail.contains("reference", true) -> "A selected skill or plugin is unavailable. Refresh references and review the prompt before sending a new turn."
         method == "turn/start" && detail.contains("usage_limit_exceeded") -> "Codex usage limit reached. Open Session Status to check reset times."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && (detail.contains("select a PNG or JPEG image") || detail.contains("select a UTF-8 text file")) -> "Antigravity accepts PNG or JPEG images and UTF-8 text files only."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && detail.contains("attachment is empty or exceeds the size limit") -> "Antigravity attachments must be non-empty, with text files up to 256 KiB and all files up to 8 MiB total."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && detail.contains("select up to 8 attachments") -> "Attach up to 8 files per message."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && detail.contains("Antigravity does not support", true) -> "This Antigravity session cannot accept that attachment type. Update Antigravity or choose a supported file."
+        agent == ANTIGRAVITY_AGENT && method == "turn/start" && (detail.contains("attachment is unavailable") || detail.contains("attachment is not readable")) -> "Antigravity could not read an attachment. Check that it still exists and the host account can read it."
         method == "turn/start" && (detail.contains("attachment", true) || detail.contains("select PNG")) -> "An attachment could not be read. Check the file still exists, is at most 20 MiB, and images are PNG, JPEG, GIF or WebP."
         detail.contains("active_writer", ignoreCase = true) -> "This session is active in Codex Desktop or another client. Close it there, then reconnect and retry."
         detail.contains("thread_not_found", ignoreCase = true) -> "This session is no longer available in the target Codex history. Refresh sessions."
@@ -54,15 +67,19 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private data class HistoryRequest(val thread: String, val cursor: String, val activity: Long, val before: List<ChatEntry>)
     private val historyRequests = mutableMapOf<Long, HistoryRequest>()
     private data class LifecycleRequest(val target: String, val generation: Long, val selection: Long, val activity: Long)
-    private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long, val quotaRevision: Long = 0)
+    private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long, val quotaRevision: Long = 0, val contextRevision: Long = 0)
+    private data class GoalRequest(val thread: String, val generation: Long, val revision: Long, val mutation: Boolean)
     private var listGeneration = 0L
     private var selectionGeneration = 0L
     private val listRequests = mutableMapOf<Long, Long>()
     private val sharedThreadPages = RuntimeThreadPages(CHAT_AGENT_IDS)
     private val lifecycleRequests = mutableMapOf<Long, LifecycleRequest>()
     private val sessionRequests = mutableMapOf<Long, SessionRequest>()
+    private val goalRequests = mutableMapOf<Long, GoalRequest>()
     private var settingsRevision = 0L
     private var quotaRevision = 0L
+    private var contextRevision = 0L
+    private var goalRevision = 0L
     private var quotaSnapshot by mutableStateOf<JSONObject?>(null)
     private var quotaFailure by mutableStateOf("")
     val usageWarning: String get() = usageLimitWarning(quotaSnapshot).ifBlank { quotaFailure }
@@ -90,6 +107,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var threadListLoading by mutableStateOf(false); private set
     var threadListStatus by mutableStateOf(""); private set
     var titles by mutableStateOf(mapOf<String, String>()); private set
+    private val antigravityTitleEventRequests = mutableMapOf<String, Long>()
     var historyLoading by mutableStateOf(false); private set
     var takeoverThread by mutableStateOf(""); private set
     private var saveJob: kotlinx.coroutines.Job? = null
@@ -110,8 +128,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     val stopping: Boolean get() = sessions.stopping
     val busy: Boolean get() = sessions.busy
     val activeTurnId: String get() = sessions.activeTurnId
-    val steerSending: Boolean get() = steeringDrafts.values.any { it.first == selected }
-    private val steeringDrafts = androidx.compose.runtime.mutableStateMapOf<Long, Pair<String, PromptDraft?>>()
+    val steerSending: Boolean get() = steeringDrafts.values.any { it.thread == selected }
+    private val steeringDrafts = androidx.compose.runtime.mutableStateMapOf<Long, SteeringDraft>()
     var nextCursor by mutableStateOf<String?>(null); private set
     var sessionSettings by mutableStateOf(""); private set
     internal var sessionStatus by mutableStateOf<SessionStatus?>(null); private set
@@ -122,6 +140,11 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var permissionsWorking by mutableStateOf(false); private set
     var permissionsMessage by mutableStateOf(""); private set
     var modeUncertain by mutableStateOf(false); private set
+    internal var goal by mutableStateOf<Goal?>(null); private set
+    var goalLoading by mutableStateOf(false); private set
+    var goalWorking by mutableStateOf(false); private set
+    var goalUncertain by mutableStateOf(false); private set
+    var goalError by mutableStateOf(""); private set
     internal var hostChoice by mutableStateOf(ModelChoice()); private set
     internal var modelChoices by mutableStateOf(emptyMap<String,ModelChoice>()); private set
     internal var chatAgents by mutableStateOf(listOf(ChatAgent(CODEX_AGENT, "Codex", true))); private set
@@ -150,6 +173,14 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private fun rememberChoice(id: String, reported: ModelChoice? = null) {
         val choice = resolveModelChoice(modelChoices[id], reported, runtimeDefaultModel(threadAgents[id] ?: sessionAgent), models)
         if (choice.model.isNotBlank()) modelChoices = modelChoices + (id to choice)
+    }
+    private fun rememberAntigravityTitle(id: String, value: Any?, requestId: Long? = null) {
+        val name = sessionTitle(value) ?: return
+        if (threadAgents[id] != ANTIGRAVITY_AGENT) return
+        val eventRequest = antigravityTitleEventRequests[id]
+        if (requestId != null && eventRequest != null && requestId <= eventRequest) return
+        titles = titles + (id to name)
+        if (requestId == null) antigravityTitleEventRequests[id] = sequence - 1
     }
     internal val references = ReferenceCatalogState()
     fun refreshReferences(force: Boolean = true) {
@@ -244,11 +275,12 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     val storedDraft = r.optJSONObject("steering_draft")
                     if (r.getString("method") == "turn/steer" || (r.getString("method") == "turn/start" && storedDraft != null)) {
                         val draft = storedDraft?.let { PromptDraft(it.getString("text"), readReferenceDraft(it.optString("references"))) }
-                        steeringDrafts[r.getLong("id")] = r.getString("tag") to draft
+                        steeringDrafts[r.getLong("id")] = SteeringDraft(r.getString("tag"), draft, r.optString("expected_turn_id"))
                     }
                     if (r.getString("method") == "plans/respond") handledPlans += r.getString("tag")
                     if (r.getString("method") == "decision/respond") answeringDecisionIds += r.getString("tag")
                     if (r.getString("method") == "threads/mode") modeChanging = true
+                    if (r.getString("method") in setOf("threads/goal/set", "threads/goal/clear")) goalUncertain = true
                 }
             }
         } catch (_: Exception) { error = "Saved host could not be unlocked. Open Edit host to enter the details and import the SSH key again." }
@@ -273,9 +305,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 .put("pending", JSONArray().apply {
                     pending.forEach { (id, op) ->
                         val entry = JSONObject().put("id", id).put("method", op.first).put("tag", op.second)
-                        steeringDrafts[id]?.second?.let { draft ->
+                        steeringDrafts[id]?.draft?.let { draft ->
                             entry.put("steering_draft", JSONObject().put("text", draft.text).put("references", referenceDraftJson(draft.references)))
                         }
+                        steeringDrafts[id]?.expectedTurn?.takeIf(String::isNotBlank)?.let { entry.put("expected_turn_id", it) }
                         put(entry)
                     }
                 })
@@ -321,7 +354,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         disconnect(); transport = null; connected = false; connecting = false; projectCreating = false; reconnectAllowed = false; saveJob?.cancel()
         historyCache.clear(); lastThread = ""; ownedThread = ""
         saved.clear(); key?.fill(0); key = null; keyLoaded = false; savedConnection = null
-        threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
+        threadWorkspaces = emptyMap(); selectedWorkspace = ""; titles = emptyMap(); antigravityTitleEventRequests.clear(); projects = emptyList(); projectMembership = emptyMap(); projectStatus = ""
         journal = JournalState(); config = null; savedConnection = null; pending.clear(); handledPlans = emptySet(); planSending = false; sessions.reset(); decisions = emptyList(); answeringDecisionIds = emptySet(); threads = emptyList()
     }
     private fun loadHistory(older: Boolean = false) {
@@ -367,6 +400,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         sessions.clearSelection()
         sessionSettings = ""; sessionStatus = null; sessionStatusLoading = false; sessionStatusError = ""; modeChanging = false; modeUncertain = false; takeoverThread = ""
         sessionRequests.clear()
+        goal = null; goalLoading = false; goalWorking = false; goalUncertain = false; goalError = ""; goalRevision++
+        goalRequests.clear()
         agyOptions = emptyList(); agyOptionRequest = null; agyOptionsError = ""; agyOptionsUncertain = false
         permissionProfiles = emptyList()
         permissionsWorking = false
@@ -443,7 +478,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         backendCapabilities = capabilities
                         if (!capabilities.sessionLifecycle) archived = false
                         if (recovering) {
-                            val uncertain = pending.values.any { it.first in setOf("turn/start", "turn/steer", "turn/interrupt", "decision/respond", "plans/respond", "threads/permissions") }
+                            val uncertain = pending.values.any { it.first in setOf("turn/start", "turn/steer", "turn/interrupt", "decision/respond", "plans/respond", "threads/permissions", "threads/goal/set", "threads/goal/clear") }
                             invalidateSessionRequests()
                             clearJournalState(targetJournal)
                             if (uncertain) error = "Session reconnected. Review the conversation before repeating any action whose result was unclear."
@@ -614,18 +649,20 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (selectedReferences.size > 8) return false
         val files = attachments.drafts[selected].orEmpty()
         val choice = resolveModelChoice(ModelChoice(model.ifBlank { sessionModel }, effort.ifBlank { if (model.isBlank() || model == sessionModel) sessionEffort else "" }), null, runtimeDefaultModel(agent), models)
-        if (!connected || steerSending || (busy && (agent == ANTIGRAVITY_AGENT || activeTurnId.isBlank() || stopping)) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && (text.isBlank() || files.isNotEmpty() || agyOptionsUncertain)) || !validModelId(model) || !validEffort(effort)) return false
         val target = activeTurnId
+        if (!connected || steerSending || (busy && (activeTurnId.isBlank() || stopping || (agent == ANTIGRAVITY_AGENT && !capabilities.agySteer))) || modeChanging || permissionsWorking || planResponding || attachments.working || historyLoading || switching() || selected.isEmpty() || ownedThread != selected || (text.isBlank() && files.isEmpty()) || (agent == ANTIGRAVITY_AGENT && agyOptionsUncertain) || !validModelId(model) || !validEffort(effort)) return false
+        if (agent == ANTIGRAVITY_AGENT &&
+            ((busy && files.isNotEmpty()) || antigravityAttachmentError(files, capabilities.agyAttachments).isNotEmpty())) return false
         if (target.isEmpty() && agent == OPENCODE_AGENT && ambiguousOpenCodeModel(choice.model, models)) {
             error = CHOOSE_OPENCODE_PROVIDER
             return false
         }
-        val params = withWorkspace(if (agent == ANTIGRAVITY_AGENT) {
+        val params = if (agent == ANTIGRAVITY_AGENT && busy) turnSteerParams(selected, target, text, selectedWorkspace) else withWorkspace(if (agent == ANTIGRAVITY_AGENT) {
             turnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences, agent)
         } else capabilities.supportedTurnStartParams(selected, text, choice.model, choice.effort, files, selectedReferences), selectedWorkspace)
         if (target.isNotEmpty()) {
-            val id = request("turn/steer", params.put("turn_id", target), selected) ?: return false
-            steeringDrafts[id] = selected to promptDrafts[selected]
+            val id = request("turn/steer", if (agent == ANTIGRAVITY_AGENT) params else params.put("turn_id", target), selected) ?: return false
+            steeringDrafts[id] = SteeringDraft(selected, promptDrafts[selected], target)
             sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
             return false // Clear the draft only after Codex confirms receipt.
         }
@@ -633,7 +670,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         sessions.sent(ChatEntry(role = "You", text = text, attachments = files))
         sentAttachmentPaths[id] = selected to files.map { it.path }.toSet()
         if (agent == ANTIGRAVITY_AGENT) {
-            steeringDrafts[id] = selected to promptDrafts[selected]
+            steeringDrafts[id] = SteeringDraft(selected, promptDrafts[selected])
             return false
         }
         return true
@@ -647,8 +684,79 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         if (!sessionCapabilities.sessionStatus || !connected || selected.isBlank() || ownedThread != selected || sessionStatusLoading || modeChanging) return
         sessionStatusLoading = true; sessionStatusError = ""
         request("threads/status", withWorkspace(JSONObject().put("thread_id", selected), selectedWorkspace), selected)?.let {
-            sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision, quotaRevision)
+            sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision, quotaRevision, contextRevision)
         } ?: run { sessionStatusLoading = false }
+    }
+    fun refreshGoal() {
+        if (!sessionCapabilities.goals || sessionAgent != CODEX_AGENT || !connected || selected.isBlank() ||
+            ownedThread != selected || goalLoading || goalWorking || switching()) return
+        goalLoading = true; goalError = ""
+        request("threads/goal/get", goalThreadParams(selected, selectedWorkspace), selected)?.let {
+            goalRequests[it] = GoalRequest(selected, selectionGeneration, goalRevision, mutation = false)
+        } ?: run { goalLoading = false }
+    }
+
+    fun setGoal(objective: String = "", budget: String = "", status: String = "") {
+        if (!sessionCapabilities.goals || sessionAgent != CODEX_AGENT || !connected || selected.isBlank() ||
+            ownedThread != selected || goalLoading || goalWorking || goalUncertain || historyLoading || switching()) return
+        val params = runCatching { goalSetParams(selected, selectedWorkspace, objective, budget, status) }.getOrNull() ?: return
+        goalWorking = true; goalError = ""
+        request("threads/goal/set", params, selected)?.let {
+            goalRequests[it] = GoalRequest(selected, selectionGeneration, goalRevision, mutation = true)
+        } ?: run { goalWorking = false }
+    }
+
+    fun clearGoal() {
+        if (!sessionCapabilities.goals || sessionAgent != CODEX_AGENT || !connected || selected.isBlank() ||
+            ownedThread != selected || goal == null || goalLoading || goalWorking || goalUncertain || historyLoading || switching()) return
+        goalWorking = true; goalError = ""
+        request("threads/goal/clear", goalThreadParams(selected, selectedWorkspace), selected)?.let {
+            goalRequests[it] = GoalRequest(selected, selectionGeneration, goalRevision, mutation = true)
+        } ?: run { goalWorking = false }
+    }
+
+    private fun applyGoalResponse(id: Long, method: String, request: GoalRequest?, frame: JSONObject) {
+        if (request == null || !connected || request.thread != selected || request.generation != selectionGeneration || ownedThread != selected) {
+            goalLoading = goalRequests.values.any { !it.mutation && it.thread == selected && it.generation == selectionGeneration }
+            goalWorking = goalRequests.values.any { it.mutation && it.thread == selected && it.generation == selectionGeneration }
+            return
+        }
+        if (request.mutation) goalWorking = false else goalLoading = false
+        if (frame.has("error")) {
+            goalError = if (request.mutation) "Goal change was not confirmed. Refresh before trying another change."
+                else "Goal status is unavailable. Check the connection and update modex-host if needed."
+            goalUncertain = true
+            return
+        }
+        val result = frame.optJSONObject("result")
+        if (result == null) {
+            goalError = if (request.mutation) "Goal change was not confirmed. Refresh before trying another change."
+                else "Goal status is unavailable. Refresh to try again."
+            goalUncertain = true
+            return
+        }
+        try {
+            when (method) {
+                "threads/goal/get", "threads/goal/set" -> {
+                    val reported = readGoalResult(result, request.thread)
+                    if (method == "threads/goal/set" && reported == null) throw IllegalArgumentException("Missing goal")
+                    if (request.revision == goalRevision) {
+                        goal = reported
+                        goalRevision++
+                    }
+                }
+                "threads/goal/clear" -> {
+                    require(result.opt("cleared") is Boolean)
+                    if (request.revision == goalRevision) { goal = null; goalRevision++ }
+                }
+            }
+            goalUncertain = false
+            goalError = ""
+        } catch (_: Exception) {
+            goalError = if (request.mutation) "Goal change was not confirmed. Refresh before trying another change."
+                else "Goal status is unavailable. Refresh to try again."
+            goalUncertain = true
+        }
     }
     fun refreshAntigravityOptions() = requestAntigravityOptions()
 
@@ -735,8 +843,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         request("decision/respond", JSONObject().put("decision_id", id).put("result", result), id)
     }
     private fun switching() = selectionRequests.isNotEmpty()
-    private fun clearAcknowledgedDraft(draft: Pair<String, PromptDraft?>?) {
-        val (thread, submitted) = draft ?: return
+    private fun clearAcknowledgedDraft(steering: SteeringDraft?) {
+        val (thread, submitted) = steering ?: return
         if (submitted != null && promptDrafts[thread] == submitted) {
             promptDrafts.update(thread, PromptDraft())
             promptDrafts.flush()
@@ -760,6 +868,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         } else if (method == "threads/options" || method == "threads/options/set") {
                             pending.remove(id)
                             applyAntigravityOptions(id, tag, null)
+                        } else if (method in setOf("threads/goal/get", "threads/goal/set", "threads/goal/clear")) {
+                            pending.remove(id)
+                            applyGoalResponse(id, method, goalRequests.remove(id), JSONObject())
                         } else error = "Delivery uncertain. Reconnect and observe before retrying."
                     }
                 }
@@ -774,8 +885,13 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             val sentAttachments = sentAttachmentPaths.remove(id)
             val steeringDraft = steeringDrafts.remove(id)
             val operation = pending.remove(id) ?: return
+            val operationAgent = threadAgents[operation.second] ?: if (operation.second == selected) sessionAgent else threadAgent(JSONObject().put("id", operation.second))
             if (operation.first == "threads/options" || operation.first == "threads/options/set") {
                 applyAntigravityOptions(id, operation.second, frame.optJSONObject("result"))
+                return
+            }
+            if (operation.first in setOf("threads/goal/get", "threads/goal/set", "threads/goal/clear")) {
+                applyGoalResponse(id, operation.first, goalRequests.remove(id), frame)
                 return
             }
             val catalogueRequest = if (operation.first in listOf("agents/list", "models/list")) catalogueRequests.take(id) else null
@@ -905,9 +1021,16 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 }
                 if (operation.first == "threads/resume" || operation.first == "threads/takeover")
                     takeoverThread = takeoverTarget(operation.first, detail, operation.second)
-                error = explainHostRejection(operation.first, detail); return
+                error = explainHostRejection(operation.first, detail, operationAgent); return
             }
-            val result = frame.optJSONObject("result") ?: return
+            val result = frame.optJSONObject("result")
+            if (operation.first == "turn/start" && operationAgent == ANTIGRAVITY_AGENT &&
+                (result == null || !validTurnAcknowledgement(result))) {
+                sessions.rejectTurn(operation.second)
+                if (operation.second == selected) error = "Antigravity did not confirm this turn. Your draft and selected files are still here. Review the conversation before retrying."
+                return
+            }
+            if (result == null) return
             when (operation.first) {
                 "threads/archive", "threads/unarchive", "threads/delete" -> {
                     val target = lifecycle?.target ?: return
@@ -917,7 +1040,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         historyCache.remove(target); sessions.remove(target)
                         promptDrafts.update(target, PromptDraft())
                         decisions = decisions.filterNot { it.optString("thread_id") == target }
-                        modelChoices -= target; threadWorkspaces -= target; threadAgents -= target; titles -= target; projectMembership -= target
+                        modelChoices -= target; threadWorkspaces -= target; threadAgents -= target; titles -= target; antigravityTitleEventRequests.remove(target); projectMembership -= target
                     }
                     threadListLoading = false; listGeneration++
                     refreshThreads()
@@ -933,15 +1056,19 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 }
                 "threads/status" -> {
                     sessionStatusLoading = false; sessionStatusError = ""; modeUncertain = false
+                    if (sessionAgent == ANTIGRAVITY_AGENT &&
+                        result.optJSONObject("session")?.optJSONObject("thread")?.optString("id") != selected) return
                     if (sessionRequest?.quotaRevision == quotaRevision) {
                         result.optJSONObject("rate_limits")?.let { quotaSnapshot = it }
                     }
                     val reported = readSessionStatus(result)
                     val current = sessionStatus
-                    sessionStatus = if (sessionRequest?.settingsRevision == settingsRevision || current == null) reported
+                    val settingsMerged = if (sessionRequest?.settingsRevision == settingsRevision || current == null) reported
                     else reported.copy(mode = current.mode, model = current.model, effort = current.effort,
                         permissionProfile = current.permissionProfile, sandbox = current.sandbox,
                         approvalPolicy = current.approvalPolicy, approvalsReviewer = current.approvalsReviewer)
+                    sessionStatus = if (sessionRequest?.contextRevision == contextRevision || current == null) settingsMerged
+                    else settingsMerged.copy(contextTokens = current.contextTokens, contextWindow = current.contextWindow)
                 }
                 "threads/mode" -> {
                     modeChanging = false; modeUncertain = false; sessionStatusError = ""
@@ -976,9 +1103,19 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 "threads/list" -> {
                     if (error.startsWith("Host rejected threads/list")) error = ""
                     val list = result.optJSONArray("data") ?: JSONArray()
-                    titles = titles + (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to sessionLabel(t) }
-                    val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
                     val runtimes = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to connectionThreadAgent(backendCapabilities, t) }
+                    titles = titles + (0 until list.length()).associate { i ->
+                        val thread = list.getJSONObject(i)
+                        val threadId = thread.getString("id")
+                        val name = sessionTitle(thread.opt("name"))
+                        val eventRequest = antigravityTitleEventRequests[threadId]
+                        threadId to if (runtimes[threadId] == ANTIGRAVITY_AGENT && (name == null || eventRequest != null && id <= eventRequest)) {
+                            titles[threadId] ?: sessionLabel(thread, "")
+                        } else {
+                            name ?: sessionLabel(thread)
+                        }
+                    }
+                    val paths = (0 until list.length()).associate { i -> val t = list.getJSONObject(i); t.getString("id") to t.optString("cwd") }
                     val membership = readProjectMembership(list)
                     projectMembership = projectMembership + membership
                     threadWorkspaces = threadWorkspaces + paths
@@ -1017,6 +1154,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     sessions.open(openedThread.getString("id"))
                     ownedThread = selected; lastThread = selected
                     threadAgents = threadAgents + (selected to connectionThreadAgent(backendCapabilities, openedThread))
+                    rememberAntigravityTitle(openedThread.optString("id"), openedThread.opt("name"), id)
                     visibleHistory = historyCache.get(selected)
                     visibleHistory?.let { sessions.loadHistory(selected, it.entries, selected in runningThreads); hasOlderHistory = it.cursor.isNotBlank() }
                     val reported = ModelChoice(result.optString("model"), result.optString("effort"))
@@ -1029,6 +1167,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     loadSessionCatalogue(sessionAgent, selectedWorkspace)
                     refreshAntigravityOptions()
                     refreshReferences(false)
+                    refreshGoal()
                     projectMembership = projectMembership + readProjectMembership(JSONArray().put(openedThread))
                     threadWorkspaces = threadWorkspaces + (selected to selectedWorkspace)
                     threads = (listOf(selected) + threads).distinct()
@@ -1047,6 +1186,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     }
                     val thread = result.optJSONObject("thread")
                     rememberChoice(selected, thread?.let { ModelChoice(it.optString("model"), it.optString("reasoningEffort")) })
+                    if (thread?.opt("id") == selected) rememberAntigravityTitle(selected, thread.opt("name"), id)
                     // Do not replace newer streamed items with an older history snapshot.
                     val changed = request.activity != sessions.activityVersion(selected)
                     val entries = readChat(result.getJSONArray("messages"))
@@ -1085,7 +1225,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     decisions = decisions.filterNot { it.optString("decision_id") == operation.second }
                 }
                 "turn/steer" -> {
-                    if (result.optString("turnId").isBlank() && result.optJSONObject("turn")?.optString("id").isNullOrBlank()) {
+                    val acknowledged = if (operationAgent == ANTIGRAVITY_AGENT) validSteerAcknowledgement(result, steeringDraft?.expectedTurn.orEmpty())
+                        else result.optString("turnId").isNotBlank() || !result.optJSONObject("turn")?.optString("id").isNullOrBlank()
+                    if (!acknowledged) {
                         if (operation.second == selected) error = "Follow-up was not confirmed. Check the conversation before sending it again."
                         return
                     }
@@ -1095,7 +1237,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                 "turn/start" -> {
                     result.optJSONObject("turn")?.let {
                         sessions.acknowledgeTurn(operation.second, it)
-                        if (it.optString("id").isNotBlank()) clearAcknowledgedDraft(steeringDraft)
+                        if (operationAgent == ANTIGRAVITY_AGENT) clearAcknowledgedDraft(steeringDraft)
                     }
                     sentAttachments?.let { attachments.sent(it.first, it.second) }
                 }
@@ -1108,6 +1250,35 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             params.optString("plan_key").takeIf { it.isNotBlank() }?.let { handledPlans += it }
         }
         val event = frame.optString("event")
+        if (event == "thread/name/updated") {
+            rememberAntigravityTitle(params.optString("threadId"), params.opt("threadName"))
+        }
+        if (sessionCapabilities.goals && sessionAgent == CODEX_AGENT && params.optString("threadId") == selected && ownedThread == selected) {
+            when (event) {
+                "thread/goal/updated" -> runCatching { readNativeGoal(params) }.getOrNull()?.let {
+                    goal = it; goalRevision++; goalUncertain = false; goalError = ""
+                }
+                "thread/goal/cleared" -> {
+                    goal = null; goalRevision++; goalUncertain = false; goalError = ""
+                }
+            }
+        }
+        if (event == "thread/tokenUsage/updated" && backendCapabilities.agyContextUsage &&
+            sessionAgent == ANTIGRAVITY_AGENT && params.optString("threadId") == selected && ownedThread == selected &&
+            params.has("tokenUsage")) {
+            val previous = sessionStatus ?: SessionStatus(workspace = selectedWorkspace)
+            if (params.isNull("tokenUsage")) {
+                sessionStatus = previous.copy(contextTokens = null, contextWindow = null)
+                contextRevision++
+            } else params.optJSONObject("tokenUsage")?.let { usage ->
+                val used = (usage.optJSONObject("last")?.opt("totalTokens") as? Number)?.toLong()
+                val window = (usage.opt("modelContextWindow") as? Number)?.toLong()
+                if (used != null && used >= 0 && window != null && window > 0) {
+                    sessionStatus = previous.copy(contextTokens = used, contextWindow = window)
+                    contextRevision++
+                }
+            }
+        }
         if (params.optString("threadId") == agentConversation.agent?.id) {
             agentConversation.event(event, params)
             if ((event == "turn/started" || event == "turn/completed") &&

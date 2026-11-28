@@ -443,6 +443,7 @@ func TestUnsupportedMethods(t *testing.T) {
 	})
 	client := NewClient(server.URL, server.Client(), "/work")
 	methods := []string{
+		"threads/goal/get", "threads/goal/set", "threads/goal/clear",
 		"threads/archive", "threads/unarchive", "threads/delete", "threads/fork",
 		"threads/takeover", "threads/mode", "threads/status", "threads/permissions",
 		"plans/respond", "projects/create", "references/list",

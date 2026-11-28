@@ -16,6 +16,10 @@ func TestSharedCLILaunchesOnlyTUIOnPublishedBackend(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	state := filepath.Join(root, "state")
 	if err = os.Mkdir(state, 0700); err != nil {
 		t.Fatal(err)
@@ -45,7 +49,7 @@ func TestSharedCLILaunchesOnlyTUIOnPublishedBackend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(args) != "--remote\nunix://"+socket+"\n--cd\n"+root+"\nresume\n"+id+"\n" {
+	if string(args) != "--remote\nunix://"+socket+"\n--cd\n"+canonicalRoot+"\nresume\n"+id+"\n" {
 		t.Fatalf("args=%s", args)
 	}
 	if _, err = os.Stat(socket); err != nil {

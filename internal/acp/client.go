@@ -12,12 +12,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/warmdev/modex/internal/bridge"
 	"github.com/warmdev/modex/internal/diagnostic"
 )
 
-var ErrAuthenticationRequired = errors.New("Antigravity requires sign-in on the host with agy acp --login")
+var ErrRequestRejected = errors.New("Antigravity rejected the ACP request")
+
+var ErrAuthenticationRequired = errors.New("Antigravity requires sign-in on the host with AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login")
 
 type Info struct {
 	Name            string `json:"name"`
@@ -25,6 +28,8 @@ type Info struct {
 	ProtocolVersion int    `json:"protocolVersion"`
 	ListSessions    bool   `json:"listSessions"`
 	LoadSession     bool   `json:"loadSession"`
+	Image           bool   `json:"image"`
+	EmbeddedContext bool   `json:"embeddedContext"`
 }
 
 type Session struct {
@@ -59,15 +64,28 @@ type configResult struct {
 	ConfigOptions []nativeOption `json:"configOptions"`
 }
 
+type Diff struct{ Path, OldText, NewText string }
+
 type Update struct {
-	SessionID  string
-	TurnID     string
-	Kind       string
-	Text       string
-	ToolCallID string
-	Status     string
-	Subagent   bool
-	Role       string
+	Used, Size     int64
+	Model          string
+	SessionID      string
+	TurnID         string
+	Kind           string
+	Text           string
+	ToolCallID     string
+	Status         string
+	Subagent       bool
+	Role           string
+	CommandTool    bool
+	ForeignTool    bool
+	Command        string
+	Output         string
+	ExitCode       *int
+	URI            string
+	MIME           string
+	Diffs          []Diff
+	DiffsTruncated bool
 }
 
 type PermissionRequest struct {
@@ -90,6 +108,10 @@ type Client struct {
 	permissions    map[string]pendingPermission
 	nextPermission uint64
 	closed         bool
+	replyQueue     chan func()
+	done           chan struct{}
+	stopOnce       sync.Once
+	overflowOnce   sync.Once
 }
 
 type sessionState struct {
@@ -106,6 +128,11 @@ type promptTurn struct {
 	done          chan struct{}
 	cancelling    bool
 	stopRequested bool
+	active        int
+	steering      bool
+	steerSent     chan struct{}
+	result        string
+	err           error
 }
 
 // Start launches Antigravity using the host user's credentials. onUpdate runs on
@@ -116,7 +143,11 @@ func Start(ctx context.Context, binary, cwd string, onUpdate func(Update)) (*Cli
 
 // StartWithPermissions delivers permission requests on the RPC reader; callbacks must return promptly and must not call the client.
 func StartWithPermissions(ctx context.Context, binary, cwd string, onUpdate func(Update), onPermission func(PermissionRequest) bool) (*Client, error) {
-	return startWithPermissions(ctx, binary, []string{"acp", "--disable-telemetry"}, cwd, os.Environ(), onUpdate, onPermission)
+	return StartWithEnvironment(ctx, binary, cwd, os.Environ(), onUpdate, onPermission)
+}
+
+func StartWithEnvironment(ctx context.Context, binary, cwd string, env []string, onUpdate func(Update), onPermission func(PermissionRequest) bool) (*Client, error) {
+	return startWithPermissions(ctx, binary, []string{"acp", "--disable-telemetry"}, cwd, Environment(env), onUpdate, onPermission)
 }
 
 func start(ctx context.Context, binary string, args []string, cwd string, env []string, onUpdate func(Update)) (*Client, error) {
@@ -132,13 +163,23 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 	if err != nil {
 		return nil, errors.New("cannot start Antigravity CLI; check the agy executable on the host")
 	}
-	c := &Client{process: process, cwd: canonical, sessions: map[string]*sessionState{}, permissions: map[string]pendingPermission{}}
+	c := &Client{process: process, cwd: canonical, sessions: map[string]*sessionState{}, permissions: map[string]pendingPermission{}, replyQueue: make(chan func(), 128), done: make(chan struct{})}
+	go func() {
+		for {
+			select {
+			case reply := <-c.replyQueue:
+				c.runReply(reply, 20*time.Second)
+			case <-c.done:
+				return
+			}
+		}
+	}()
 	process.SetRequestHandler(func(id json.RawMessage, method string, params json.RawMessage) {
 		if method == "session/request_permission" {
 			c.handlePermission(ctx, id, params, onPermission)
 			return
 		}
-		_ = process.Reject(id)
+		c.queueReply(func() { _ = process.Reject(id) })
 	})
 	process.SetNotificationHandler(func(method string, raw json.RawMessage) {
 		if method == "session/update" {
@@ -155,7 +196,11 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 		} `json:"agentInfo"`
 		Capabilities struct {
 			LoadSession bool `json:"loadSession"`
-			Sessions    struct {
+			Prompt      struct {
+				Image           bool `json:"image"`
+				EmbeddedContext bool `json:"embeddedContext"`
+			} `json:"promptCapabilities"`
+			Sessions struct {
 				List *struct{} `json:"list"`
 			} `json:"sessionCapabilities"`
 		} `json:"agentCapabilities"`
@@ -172,11 +217,13 @@ func startWithPermissions(ctx context.Context, binary string, args []string, cwd
 		Name: initialized.Agent.Name, Version: initialized.Agent.Version, ProtocolVersion: initialized.Version,
 		ListSessions: initialized.Capabilities.Sessions.List != nil,
 		LoadSession:  initialized.Capabilities.LoadSession,
+		Image:        initialized.Capabilities.Prompt.Image, EmbeddedContext: initialized.Capabilities.Prompt.EmbeddedContext,
 	}
 	return c, nil
 }
 
 func (c *Client) Close() {
+	c.stopOnce.Do(func() { close(c.done) })
 	c.mu.Lock()
 	c.closed = true
 	clear(c.permissions)
@@ -184,6 +231,21 @@ func (c *Client) Close() {
 	c.process.CloseIdle()
 }
 func (c *Client) Info() Info { return c.info }
+
+func (c *Client) runReply(reply func(), timeout time.Duration) {
+	timer := time.AfterFunc(timeout, c.Close)
+	defer timer.Stop()
+	reply()
+}
+
+func (c *Client) queueReply(reply func()) {
+	select {
+	case <-c.done:
+	case c.replyQueue <- reply:
+	default:
+		c.overflowOnce.Do(func() { go c.Close() })
+	}
+}
 
 func (c *Client) List(ctx context.Context, cursor string) (Page, error) {
 	if !c.info.ListSessions {
@@ -368,12 +430,48 @@ func (c *Client) Prompt(ctx context.Context, sessionID, turnID, text string) (st
 	return c.PromptWithSent(ctx, sessionID, turnID, text, nil)
 }
 
+type PromptBlock struct {
+	Type     string          `json:"type"`
+	Text     string          `json:"text,omitempty"`
+	Data     string          `json:"data,omitempty"`
+	MimeType string          `json:"mimeType,omitempty"`
+	URI      string          `json:"uri,omitempty"`
+	Resource *PromptResource `json:"resource,omitempty"`
+}
+type PromptResource struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType"`
+	Text     string `json:"text"`
+}
+
 func (c *Client) PromptWithSent(ctx context.Context, sessionID, turnID, text string, sent func()) (string, error) {
+	return c.PromptBlocksWithSent(ctx, sessionID, turnID, []PromptBlock{{Type: "text", Text: text}}, sent)
+}
+
+func (c *Client) PromptBlocksWithSent(ctx context.Context, sessionID, turnID string, blocks []PromptBlock, sent func()) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if !validID(turnID) || strings.TrimSpace(text) == "" || len(text) > 1024*1024 {
+	if !validID(turnID) || len(blocks) == 0 {
 		return "", errors.New("invalid Antigravity turn or text prompt")
+	}
+	for _, b := range blocks {
+		switch b.Type {
+		case "text":
+			if strings.TrimSpace(b.Text) == "" || len(b.Text) > 1024*1024 {
+				return "", errors.New("invalid Antigravity turn or text prompt")
+			}
+		case "image":
+			if !c.info.Image {
+				return "", errors.New("Antigravity does not support image attachments")
+			}
+		case "resource":
+			if !c.info.EmbeddedContext {
+				return "", errors.New("Antigravity does not support text attachments")
+			}
+		default:
+			return "", errors.New("invalid Antigravity prompt block")
+		}
 	}
 	c.mu.Lock()
 	session := c.sessions[sessionID]
@@ -381,25 +479,64 @@ func (c *Client) PromptWithSent(ctx context.Context, sessionID, turnID, text str
 		c.mu.Unlock()
 		return "", errors.New("Antigravity session is unavailable for a new prompt")
 	}
-	turn := &promptTurn{id: turnID, sent: make(chan struct{}), done: make(chan struct{})}
+	turn := &promptTurn{id: turnID, sent: make(chan struct{}), done: make(chan struct{}), active: 1}
 	session.turn = turn
 	c.mu.Unlock()
-	defer func() {
-		c.mu.Lock()
-		c.clearTurnPermissions(turn)
-		if !turn.cancelling {
-			session.turn = nil
-		}
-		close(turn.done)
-		c.mu.Unlock()
-	}()
-	params := map[string]any{"sessionId": sessionID, "prompt": []map[string]string{{"type": "text", "text": text}}}
-	raw, err := c.request(ctx, "session/prompt", params, func() {
+	stop, err := c.promptRequest(ctx, sessionID, blocks, func() {
 		close(turn.sent)
 		if sent != nil {
 			sent()
 		}
 	})
+	c.finishPrompt(session, turn, stop, err, false)
+	<-turn.done
+	c.mu.Lock()
+	result, finalErr := turn.result, turn.err
+	c.mu.Unlock()
+	return result, finalErr
+}
+
+// SteerWithSent submits a single additional prompt under an existing local turn.
+func (c *Client) SteerWithSent(ctx context.Context, sessionID, turnID, text string, sent func()) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.info.Version != "1.5.17" || strings.TrimSpace(text) == "" || len(text) > 1024*1024 {
+		return errors.New("Antigravity steering is unavailable")
+	}
+	c.mu.Lock()
+	session := c.sessions[sessionID]
+	if c.closed || session == nil || session.turn == nil || session.turn.id != turnID || session.turn.steering || session.turn.stopRequested || session.turn.active == 0 {
+		c.mu.Unlock()
+		return errors.New("Antigravity turn is unavailable for steering")
+	}
+	turn := session.turn
+	select {
+	case <-turn.sent:
+	default:
+		c.mu.Unlock()
+		return errors.New("Antigravity turn is not yet sent")
+	}
+	turn.active++
+	turn.steering = true
+	turn.steerSent = make(chan struct{})
+	steerSent := turn.steerSent
+	c.mu.Unlock()
+	var once sync.Once
+	written := func() {
+		once.Do(func() { close(steerSent) })
+		if sent != nil {
+			sent()
+		}
+	}
+	stop, err := c.promptRequest(ctx, sessionID, []PromptBlock{{Type: "text", Text: text}}, written)
+	once.Do(func() { close(steerSent) })
+	c.finishPrompt(session, turn, stop, err, true)
+	return err
+}
+
+func (c *Client) promptRequest(ctx context.Context, sessionID string, blocks []PromptBlock, sent func()) (string, error) {
+	raw, err := c.request(ctx, "session/prompt", map[string]any{"sessionId": sessionID, "prompt": blocks}, sent)
 	if err != nil {
 		return "", err
 	}
@@ -411,6 +548,28 @@ func (c *Client) PromptWithSent(ctx context.Context, sessionID, turnID, text str
 		return "", errors.New("invalid Antigravity turn result")
 	}
 	return result.Stop, nil
+}
+
+func (c *Client) finishPrompt(session *sessionState, turn *promptTurn, stop string, err error, steering bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if steering {
+		turn.steering = false
+	}
+	if err != nil {
+		turn.err = err
+	}
+	if stop == "cancelled" || turn.result == "" || (turn.result == "end_turn" && stop != "") {
+		turn.result = stop
+	}
+	turn.active--
+	if turn.active == 0 {
+		c.clearTurnPermissions(turn)
+		if !turn.cancelling {
+			session.turn = nil
+		}
+		close(turn.done)
+	}
 }
 
 func (c *Client) Cancel(ctx context.Context, sessionID, turnID string) error {
@@ -441,8 +600,17 @@ func (c *Client) Cancel(ctx context.Context, sessionID, turnID string) error {
 	// Keep the session reserved until cancel is written, even if prompt finishes.
 	turn.cancelling = true
 	turn.stopRequested = true
+	steerSent := turn.steerSent
 	c.clearTurnPermissions(turn)
 	c.mu.Unlock()
+	if steerSent != nil {
+		select {
+		case <-steerSent:
+		case <-ctx.Done():
+			c.process.Close()
+			return errors.New("Antigravity cancellation delivery could not be confirmed")
+		}
+	}
 	stop := context.AfterFunc(ctx, c.process.Close)
 	err := c.process.Notify("session/cancel", map[string]string{"sessionId": sessionID})
 	stop()
@@ -467,15 +635,18 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	var event struct {
 		ID     string `json:"sessionId"`
 		Update struct {
-			Kind          string                      `json:"sessionUpdate"`
-			Content       struct{ Type, Text string } `json:"content"`
-			ConfigOptions []nativeOption              `json:"configOptions"`
-			Name          string                      `json:"name"`
-			ToolCallID    string                      `json:"toolCallId"`
-			Status        string                      `json:"status"`
-			RawInput      struct {
-				Role string `json:"Role"`
-			} `json:"rawInput"`
+			Kind          string          `json:"sessionUpdate"`
+			Content       json.RawMessage `json:"content"`
+			ConfigOptions []nativeOption  `json:"configOptions"`
+			Used          json.RawMessage `json:"used"`
+			Size          json.RawMessage `json:"size"`
+			Name          string          `json:"name"`
+			Title         string          `json:"title"`
+			ToolCallID    string          `json:"toolCallId"`
+			Status        string          `json:"status"`
+			ToolKind      string          `json:"kind"`
+			RawInput      json.RawMessage `json:"rawInput"`
+			RawOutput     json.RawMessage `json:"rawOutput"`
 		} `json:"update"`
 	}
 	if json.Unmarshal(raw, &event) != nil {
@@ -485,40 +656,112 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 		c.mu.Lock()
 		session := c.sessions[event.ID]
 		if session != nil && event.Update.ConfigOptions != nil {
-			session.options = parseOptions(event.Update.ConfigOptions)
-			session.optionsVersion++
+			options := parseOptions(event.Update.ConfigOptions)
+			// AGY can echo the previous acknowledgement during the next change.
+			if !reflect.DeepEqual(session.options, options) {
+				session.options = options
+				session.optionsVersion++
+			}
+		}
+		var model string
+		if session != nil {
+			for _, option := range session.options {
+				if option.ID == "model" {
+					model = option.CurrentValue
+				}
+			}
 		}
 		c.mu.Unlock()
+		if model != "" && emit != nil {
+			emit(Update{SessionID: event.ID, Kind: "model_update", Model: model})
+		}
 		return
 	}
 	update := Update{SessionID: event.ID, Kind: event.Update.Kind}
 	switch event.Update.Kind {
-	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
-		if event.Update.Content.Type != "text" {
+	case "usage_update":
+		if len(event.Update.Used) == 0 || len(event.Update.Size) == 0 || json.Unmarshal(event.Update.Used, &update.Used) != nil || json.Unmarshal(event.Update.Size, &update.Size) != nil || string(event.Update.Used) == "null" || string(event.Update.Size) == "null" || update.Used < 0 || update.Size <= 0 {
 			return
 		}
-		update.Text = event.Update.Content.Text
+	case "session_info_update":
+		update.Text = event.Update.Title
+	case "agent_message_chunk", "agent_thought_chunk", "user_message_chunk":
+		var content struct {
+			Type, Text, URI, MimeType string
+			Resource                  struct{ URI, MimeType string }
+		}
+		if json.Unmarshal(event.Update.Content, &content) != nil {
+			return
+		}
+		switch content.Type {
+		case "text":
+			update.Text = content.Text
+		case "image", "resource_link":
+			if event.Update.Kind != "user_message_chunk" {
+				return
+			}
+			update.URI = content.URI
+			update.MIME = content.MimeType
+		case "resource":
+			if event.Update.Kind != "user_message_chunk" {
+				return
+			}
+			update.URI = content.Resource.URI
+			update.MIME = content.Resource.MimeType
+		default:
+			return
+		}
+		if content.Type != "text" && update.URI == "" {
+			return
+		}
 	case "tool_call", "tool_call_update":
 		if !safeScalar(event.Update.ToolCallID, 256) {
 			return
 		}
 		update.ToolCallID = event.Update.ToolCallID
+		if event.Update.Status == "completed" {
+			update.Diffs, update.DiffsTruncated = decodeDiffs(event.Update.Content)
+		}
 		switch event.Update.Status {
-		case "pending", "in_progress", "completed", "failed":
+		case "pending", "in_progress", "completed", "failed", "cancelled":
 			update.Status = event.Update.Status
 		}
 		update.Subagent = event.Update.Name == "invoke_subagent"
-		if update.Subagent && safeScalar(event.Update.RawInput.Role, 64) {
-			update.Role = event.Update.RawInput.Role
+		var input struct{ Role, CommandLine string }
+		_ = json.Unmarshal(event.Update.RawInput, &input)
+		if update.Subagent && safeScalar(input.Role, 64) {
+			update.Role = input.Role
+		}
+		update.CommandTool = event.Update.Name == "run_command" && event.Update.ToolKind == "execute"
+		update.ForeignTool = (event.Update.Name != "" && event.Update.Name != "run_command") || (event.Update.ToolKind != "" && event.Update.ToolKind != "execute")
+		if update.CommandTool {
+			update.Command = boundedUTF8(input.CommandLine, 4<<10)
+		}
+		if !update.ForeignTool {
+			var output struct {
+				Output   string `json:"output"`
+				ExitCode *int   `json:"exit_code"`
+			}
+			if json.Unmarshal(event.Update.RawOutput, &output) == nil {
+				update.Output = boundedOutput(output.Output)
+				update.ExitCode = output.ExitCode
+			}
 		}
 	default:
 		return
 	}
 	c.mu.Lock()
 	session := c.sessions[event.ID]
-	if session == nil || (!session.loading && session.turn == nil) {
+	if session == nil || (event.Update.Kind != "session_info_update" && event.Update.Kind != "usage_update" && !session.loading && session.turn == nil) {
 		c.mu.Unlock()
 		return
+	}
+	if update.Kind == "usage_update" {
+		for _, option := range session.options {
+			if option.ID == "model" {
+				update.Model = option.CurrentValue
+			}
+		}
 	}
 	if session.turn != nil {
 		update.TurnID = session.turn.id
@@ -527,6 +770,73 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 	if emit != nil {
 		emit(update)
 	}
+}
+
+// decodeDiffs accepts only ACP diff blocks and bounds data before it reaches the router queue.
+func decodeDiffs(raw json.RawMessage) ([]Diff, bool) {
+	var blocks []json.RawMessage
+	if json.Unmarshal(raw, &blocks) != nil || len(blocks) > 128 {
+		return nil, false
+	}
+	var result []Diff
+	total := 0
+	for _, block := range blocks {
+		var d struct {
+			Type    string          `json:"type"`
+			Path    string          `json:"path"`
+			OldText json.RawMessage `json:"oldText"`
+			NewText json.RawMessage `json:"newText"`
+		}
+		if json.Unmarshal(block, &d) != nil || d.Type != "diff" || !filepath.IsAbs(d.Path) || len(d.Path) > 4096 || filepath.Clean(d.Path) != d.Path || !safeDiffText(d.Path, false) {
+			continue
+		}
+		var old, newText string
+		if len(d.OldText) == 0 || (string(d.OldText) != "null" && json.Unmarshal(d.OldText, &old) != nil) || len(d.NewText) == 0 || string(d.NewText) == "null" || json.Unmarshal(d.NewText, &newText) != nil || !safeDiffText(old, true) || !safeDiffText(newText, true) {
+			continue
+		}
+		total += len(d.Path) + len(old) + len(newText)
+		if total > 128<<10 || len(result) >= 16 {
+			return result, true
+		}
+		result = append(result, Diff{Path: d.Path, OldText: old, NewText: newText})
+	}
+	return result, false
+}
+
+func safeDiffText(s string, multiline bool) bool {
+	if !utf8.ValidString(s) || len(s) > 64<<10 {
+		return false
+	}
+	for _, r := range s {
+		if r < 32 || r == 127 {
+			if !multiline || (r != '\n' && r != '\r' && r != '\t') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func boundedUTF8(s string, max int) string {
+	s = strings.ToValidUTF8(s, "�")
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max]
+	for !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+func boundedOutput(s string) string {
+	const limit = 64 << 10
+	const marker = "\n[Output truncated at 64 KiB]"
+	s = strings.ToValidUTF8(s, "�")
+	if len(s) <= limit {
+		return s
+	}
+	return boundedUTF8(s, limit-len(marker)) + marker
 }
 
 func safeScalar(value string, max int) bool {
@@ -572,15 +882,12 @@ func (c *Client) exchangeError(err error) error {
 		if rejected.Code() == -32000 {
 			return ErrAuthenticationRequired
 		}
-		return errors.New("Antigravity rejected the ACP request")
+		return ErrRequestRejected
 	}
 	// The native request may still be running. Retire this connection before
 	// admitting another request that could receive the first request's updates.
 	c.process.Close()
-	c.mu.Lock()
-	c.closed = true
-	clear(c.permissions)
-	c.mu.Unlock()
+	c.Close()
 	return errors.New("Antigravity ACP exchange failed; refresh the session before retrying")
 }
 
@@ -660,12 +967,12 @@ func (c *Client) handlePermission(ctx context.Context, nativeID, raw json.RawMes
 			if !pending {
 				return
 			}
-			_ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`))
+			c.queueReply(func() { _ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`)) })
 			return
 		}
 		c.mu.Unlock()
 	}
-	_ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`))
+	c.queueReply(func() { _ = c.process.Respond(ctx, nativeID, json.RawMessage(`{"outcome":{"outcome":"cancelled"}}`)) })
 }
 
 // ReplyPermission sends at most one response for an active native request.
@@ -674,12 +981,13 @@ func (c *Client) ReplyPermission(ctx context.Context, requestID, optionID string
 		return err
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	p, ok := c.permissions[requestID]
 	if !ok || p.turn.stopRequested || (optionID != "" && optionID != p.request.AllowOption && optionID != p.request.DenyOption) {
+		c.mu.Unlock()
 		return errors.New("Antigravity permission is unavailable or option is invalid")
 	}
 	delete(c.permissions, requestID)
+	c.mu.Unlock()
 	outcome := map[string]string{"outcome": "cancelled"}
 	if optionID != "" {
 		outcome = map[string]string{"outcome": "selected", "optionId": optionID}
@@ -690,7 +998,9 @@ func (c *Client) ReplyPermission(ctx context.Context, requestID, optionID string
 	stop()
 	if err != nil {
 		c.process.Close()
+		c.mu.Lock()
 		clear(c.permissions)
+		c.mu.Unlock()
 		return errors.New("Antigravity permission delivery could not be confirmed")
 	}
 	return nil

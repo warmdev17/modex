@@ -7,6 +7,16 @@ import org.json.JSONObject
 
 internal const val MAX_ATTACHMENT_BYTES = 20L * 1024 * 1024
 internal const val MAX_ATTACHMENTS = 8
+internal const val MAX_ANTIGRAVITY_ATTACHMENT_BYTES = 8L * 1024 * 1024
+internal const val MAX_ANTIGRAVITY_TEXT_BYTES = 256L * 1024
+internal const val ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE = "Update modex-host before sending attachments to Antigravity. Your selected files are still here."
+
+internal fun antigravityAttachmentError(files: List<Attachment>, supported: Boolean = true): String = when {
+    files.isNotEmpty() && !supported -> ANTIGRAVITY_ATTACHMENTS_UNAVAILABLE
+    files.any { it.kind == "file" && it.size > MAX_ANTIGRAVITY_TEXT_BYTES } -> "Text files for Antigravity must be at most 256 KiB."
+    files.sumOf { it.size.coerceAtLeast(0) } > MAX_ANTIGRAVITY_ATTACHMENT_BYTES -> "Antigravity attachments must be at most 8 MiB total."
+    else -> ""
+}
 
 internal data class Attachment(val path: String, val name: String, val kind: String, val size: Long = 0) {
     fun toJson() = JSONObject().put("path", path).put("kind", kind)

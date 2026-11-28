@@ -1,5 +1,551 @@
 # Modex project state
 
+## Clear goal resets modal drafts
+
+Updated 2026-11-28 on `fix/goal-clear-draft`, source `897d3d2`.
+User clarified the bug: successful Clear left Objective text in the modal,
+requiring manual deletion. Native clear itself does not require objective.
+
+- Draft objective/budget and edit/confirmation state now use the displayed
+  goal's thread identity as `rememberSaveable` input. A confirmed transition
+  to no goal resets them; unchanged goal and usage updates preserve edits.
+- Emulator regression failed before the fix with `Confirmed clear retained
+  objective draft`. It now passes Android Clear, external Clear while editing,
+  budget reset, usage-update draft preservation and unconfirmed-clear checks.
+  The test waits for edited accessibility text before testing usage refresh.
+- Android 197 unit tests passed, lint has 0 errors (19 existing warnings,
+  1 hint), and app/test builds passed offline. In-place 56 to 57 upgrade
+  retained encrypted synthetic state. Signature/package/version verified.
+- Preview `.modex/previews/modex-0.1.0-preview.57-goal-clear.apk` is staged
+  in the main checkout. SHA-256
+  `cf0e69b52ed83e16add0c1bffbb45c00c5d31b24b2ac264182a2ca27613b4e0e`.
+  Android-only change: no host rebuild/restart, source tag, public release,
+  push or merge. Worktree clean after this state commit.
+- Physical Android and provider inference were not tested for this UI fix.
+
+## Responsive project CLI picker
+
+Updated 2026-11-28 on `feat/cli-project-picker`, source `dfdb049`
+with backend `52b2b5c` and initial UI `9c20781`. See the
+[plan](docs/superpowers/plans/2026-11-28-cli-project-picker.md).
+
+- Initial Codex choice is available without waiting for optional runtime
+  discovery. Private per-agent readiness checks run in a bounded lane,
+  preserving ordinary action serialization and Android discovery behavior.
+  Checking agents allow browsing saved chats but cannot open/start one
+  before readiness has been verified.
+- Session lists explicitly scope the canonical invocation directory for
+  all three runtimes. Picker also filters foreign roots and caches pages
+  within the invocation. `r` refreshes cached lists/checks; errors stay
+  retryable. Native vendor TUI launch is unchanged.
+- Agent icons, aligned readiness states, runtime descriptions and project
+  path use existing terminal palette. ASCII fallback honors locale priority.
+  Independent review's cached-page rapid-key race and LANG fallback findings
+  were reproduced and fixed with permanent regressions.
+- Final `go test -race -p 2 ./... -count=1 -timeout=150s`, `go vet ./...`
+  and diff check passed with umask 022. Probe-lane limit and retry recovery
+  regressions passed. Native Codex paused goal regression passed too.
+- Stamped `dfdb049` binary passed `scripts/test_shared_agent_supervisor.py`
+  (real PTY vendor fixture launch, resize/restore, RGB and NO_COLOR) and
+  `scripts/test_cli_picker_performance.py` against baseline `77a0e40`.
+  Same 2s AGY delay: old roster 2.3743s/session 2.3906s, new roster
+  0.0240s/session 0.0398s. Primary reviewed the captured terminal output at
+  `/tmp/modex-cli-project-picker-final.txt`. Independent review passed.
+- Primary took over the bounded benchmark fixture after the devops
+  assignment made no file progress. All implementation and evidence are
+  committed. No Android/APK change or public publishing.
+- Installed binary SHA-256
+  `2658ae0b7fb0142ab87e677a29a7ddc742302fb86ca41aff68ab0d6fb4e59dfb`.
+  Previous binary `/tmp/modex-cli-picker-backup.oQBweL/modex-host.previous`.
+  External restart succeeded. On 2026-11-28 at 12:51:03 +07 the active
+  service started PID 1467841; `/proc/1467841/exe --version` reports
+  `dfdb04901a81b71e437c83020a2ca2c3ac59b335` and its checksum matches
+  the installed, isolated-tested binary above. Android must reset session
+  cursor and reconnect. No uncertain prompts/decisions are replayed.
+- Native provider inference, physical Android and non-Linux runtime were
+  outside this host/CLI check. Cold optional-runtime authentication still
+  takes its genuine discovery time, independently of the picker.
+
+## Codex goal management
+
+Updated 2026-11-28 on `feat/codex-goals`, source `77a0e40`.
+Approved scope: chat-menu Goal modal for create, optional token budget,
+status/usage, Pause and Resume. See the
+[plan](docs/superpowers/plans/2026-11-28-codex-goals.md).
+
+- Host get/set/clear, native events and Codex-only capability implemented
+  at `a5c6d97`. Primary reran full `go test -race -p 2 ./... -count=1
+  -timeout=150s` and `go vet ./...` on unchanged Go source with umask 022.
+  Primary's real Codex 0.169.0 paused CRUD test and isolated supervisor
+  event/reconnect test passed, with no inference. Evidence committed in
+  `3337f1b` and `bbb5360`. Shared AGY/OpenCode supervisor smoke passed,
+  including goal rejection for both runtimes through the supervisor.
+- Android modal/state integration completed at `77a0e40`. Create/edit,
+  budget recovery, Pause/Resume, clear, uncertain-read and mutation guards,
+  live native updates and chat/disconnect isolation are implemented.
+  Android 197 unit tests passed; lint reported 0 errors, 19 warnings and
+  1 hint. Preview 56 app/test APKs built offline. Primary took over after
+  FE usage limit and fixed only Compose label lookup in the UI fixture.
+- On emulator-5554 API 33, `preview=codex-goal`, `shared-agent-chats` and
+  `native-session-controls` instrumentation passed. Upgrade fixture was
+  seeded at 55, upgraded in place to 56 and verified by the FE owner.
+  No uninstall/data clear. Independent review found no remaining confirmed
+  defects after stale-response, failed-GET and budget-recovery corrections.
+- Review confirmed native chat resume can continue an idle Active goal.
+  User explicitly approved native continuation on chat open. The modal
+  explains this. Paused goals stay paused
+  across real native thread resume (tested without inference).
+- OpenCode 2.4.1 changelog documents native goals but its Modex adapter
+  is not connected. AGY 1.5.17 ACP initialization advertises no goal
+  capability. Both reject goal commands in this first milestone.
+- Preview APK staged in main checkout at
+  `.modex/previews/modex-0.1.0-preview.56-codex-goals.apk`, code 56,
+  SHA-256 `5d11547f0fdc98f88385d0cf6497c6c88ee2a5866241b74011bde9d7a756214a`.
+  Package/signature verification passed against the established signer.
+  Stamped host `77a0e40` passed isolated real Codex goal reconnect and
+  mixed-runtime supervisor smokes. Installed host SHA-256
+  `fa4874b6bde9d7270c1516efa8f020cc9b3107e0a410d958252363e2ea9c75aa`.
+  Previous host is `/tmp/modex-goals-backup.YzxLUq/modex-host.previous`.
+  A 30-second external restart is the final activation operation;
+  live service adoption must be checked after it runs. Android must reset
+  its session cursor and reconnect. Delayed restart can interrupt active turns.
+  Branch remains local, no PR/merge or public release published.
+- Physical Android, large-font/TalkBack and provider-backed active goal
+  completion were not tested. Native paused goal tests send no inference.
+  The unrelated Codex completion/duration bug below remains deferred.
+
+## Deferred Codex completion-state mismatch
+
+Reported 2026-11-28 on `feat/native-agent-tui`, source `f413e63`.
+In one Codex run, the native CLI reported `Worked · 2m 32s`, while the
+same conversation on Android reported `Failed · 6m 20s`. This is recorded
+for later investigation and has not yet been independently reproduced.
+
+- Compare the native Codex completion event with the Android journal entry,
+  turn identity, terminal status, and duration timestamps for the same run.
+- Acceptance: one terminal outcome and elapsed duration are projected
+  consistently after completion, reconnect, and history replay.
+- No code change or verification has been performed for this report.
+
+## Native agent terminals and durable AGY login
+
+Updated 2026-11-28T09:35:41+07:00 on `feat/native-agent-tui`.
+Source `f413e63`.
+See the [plan](docs/superpowers/plans/2026-11-28-native-agent-tui.md).
+The fullscreen picker now opens installed AGY and OpenCode TUIs.
+OpenCode uses the existing managed server and native session through a
+private CLI-only descriptor. Missing host provider accounts are imported
+through an OS pipe using supported OpenCode export/import commands.
+AGY terminal, discovery and ACP share durable file token storage.
+
+- Go 1.23.12 full race suite, `go vet ./...`, private-descriptor
+  and credential-pipe checks, native adoption and AGY reservation tests
+  passed. Independent review's native/phone attribution race reproduced
+  before the fix and passed after reconciling native backlog before phone
+  submission. The mixed-runtime supervisor smoke passed on the stamped
+  binary including arrow selection and native launch.
+- On `f413e63`, isolated supervisor and real PTYs opened AGY 1.5.17
+  existing and new conversations, then real OpenCode 2.4.1. None asked
+  for login. Managed model discovery included the saved OpenCode OAuth
+  provider after import. Two fresh shells loaded ACP history and changed
+  model/thinking without login. No provider inference was submitted.
+- AGY reserves the conversation while its native TUI is attached.
+  Close it before reopening on Android to reload native history.
+  OpenCode adopts watched native turns for Android. Unseen native
+  backlog recovery is bounded to 100 messages. Physical Android,
+  expired-token refresh and long-running OAuth rotation were outside
+  these checks. OpenCode import preserves existing account IDs.
+- Installed host SHA-256
+  `6b4760d0981fc31a3e357d427ceec2c9aec5d5c70bd93bd7a04afee1568da4cc`.
+  Previous binary backed up at
+  `/tmp/modex-native-tui.7PBGh9/modex-host.previous`.
+  The running service restarted at 09:32:12 +07 and matched `f413e63`
+  by version and checksum. Installed binary checks reopened both vendor
+  TUIs in fresh shells, with real vendor controls present and no login
+  screens. A separate supervisor was used because the user's existing
+  CLI occupied the production CLI lease. Android keeps preview 55.
+  Reset its session cursor and reconnect after restart. Branch is local.
+
+## Fullscreen Modex CLI
+
+Updated 2026-11-28 on `feat/fullscreen-cli`. Source `49c3a32`.
+See the [plan](docs/superpowers/plans/2026-11-28-fullscreen-cli.md).
+`modex cli` opens the alternate screen for discovery, agent and session
+selection, and shared Antigravity and OpenCode conversations. Use arrow
+keys and Enter for selection, Page Up and Page Down to read the
+transcript, and the fixed composer for prompts. Codex opens its native
+TUI. Pipes retain the line-oriented interface.
+
+- Go 1.23.12 race suite, `go vet ./...`, Darwin arm64 build, focused
+  keyboard and rendering tests, and `git diff --check` passed.
+- On the stamped binary, the shared supervisor and SSH transport tests
+  passed. The real PTY path covered both agents, arrow selection, RGB
+  and monochrome, bidirectional prompts through the phone protocol with
+  fixture runtimes, resizing, and restoration of terminal attributes.
+- The installed binary opened an existing real Antigravity conversation
+  in a 100 × 26 terminal through the live supervisor. Escape returned
+  to the shell. This live check used existing history and sent no
+  provider prompts. Physical Android was outside these checks.
+- Installed host SHA-256
+  `0b123375487357efcc5ee741453adb3bd1ca11193275aa011a83fa980bd14cbc`.
+  Previous host backed up at
+  `/tmp/modex-cli-fullscreen.QrhSsx/modex-host.previous`.
+  The TUI is available to new CLI invocations immediately. Service
+  restart activation requires a separate live check. Android keeps
+  preview 55. Reset its session cursor and reconnect after restart.
+
+## Antigravity option restore
+
+Updated 2026-11-28 on `feat/modex-shared-cli`. Host source `76e15c7`.
+AGY can echo the acknowledged model configuration while Modex restores
+the saved thinking level. Identical ACP updates now leave the option
+revision unchanged. A genuinely different update still goes through
+the existing conflict check.
+
+- `TestSessionOptionsRestoreAcknowledgedSettings` reproduced the
+  exact error before the fix and passed 15 repetitions afterward.
+  `GOMAXPROCS=4 go test -race -p 2 ./... -count=1 -timeout=150s`
+  with umask 022, `go vet ./...` and `git diff --check` passed.
+- With real AGY 1.5.17 and OpenSSH, three isolated session reopens
+  failed on `cdd19ba` and all three opened on the stamped
+  `76e15c7` host. The regular SSH transport smoke passed.
+  No inference or physical Android test was part of this fix.
+- Verified host SHA-256
+  `ecea6b474b6db486284eb912c0cd56e5d5b6909919f1730647d77e7c6896007c`.
+  Previous host backed up at
+  `/tmp/modex-agy-restore.kucDV2/modex-host.previous`.
+  The running service at `76e15c7` matched the verified version and
+  checksum before the fullscreen CLI rollout.
+
+## Shared Modex CLI
+
+Updated 2026-11-28T08:20:35+07:00 on `feat/modex-shared-cli`.
+CLI source `e452df6` and host source `cdd19ba`.
+See the [plan](docs/superpowers/plans/2026-11-28-shared-cli.md).
+`modex cli` selects an agent, then an existing or new session. The picker
+uses terminal-width frames, light/dark RGB accents and monochrome output
+for redirected output or `NO_COLOR`. Codex opens its native TUI.
+Antigravity and OpenCode use a private local supervisor connection, so the
+terminal and phone can both work in the same session.
+
+- On `cdd19ba`, `GOMAXPROCS=4 go test -race -p 2 ./... -count=1
+  -timeout=150s` with umask 022, `go vet ./...` and `git diff --check`
+  passed. Independent review was followed by regression checks for
+  attach-time stream duplication and queued forms.
+- `test_shared_agent_supervisor.py` passed phone/terminal prompts in
+  both directions, history reopen, permissions and phone lease survival
+  with fixture runtimes. `test_ssh_transport.py` with
+  fixture AGY passed real OpenSSH. At `e452df6` the genuine AGY 1.5.17
+  end-to-end test initially passed both directions. A later attempt
+  failed at native SSH sign-in before reaching any prompt. A direct
+  local Gemini 4 Hydrogen prompt returned a provider quota error.
+- `cdd19ba` uses `agy models` for readiness and reports
+  `agy acp --login` when AGY requires sign-in. The hint was verified
+  with installed AGY over an isolated real SSH connection and
+  reproduced after live host activation. Rerun the native two-way
+  smoke after the host user's SSH login is available.
+- The installed CLI at `e452df6` rendered both palettes at 54 columns
+  against the running `cdd19ba` host. Both Antigravity and OpenCode
+  showed existing and new sessions, with back and quit working. OpenCode
+  2.4.1 passed two-way prompts and history reopen on the stamped
+  `cdd19ba` host against a loopback model fixture. OpenCode Go
+  inference and a physical Android device remain unverified.
+  Android uses existing preview 55.
+- Verified host SHA-256
+  `4ccee54f3baccf011b2884060c322aba15ccf200302a23bd86b3a5c42af7105a`
+  and CLI SHA-256
+  `24ec4e1c2a13d57bec45fcb607d7949c82338a2287c6ac36bb52eb512f7bfc0d`.
+  The running host restarted at 08:19:17 +07 and matched `cdd19ba`
+  by version and checksum.
+  Previous binaries are in `/tmp/modex-shared-cli.9gUTDL/`, with the
+  previous shared CLI host backup in its `readiness/` subdirectory.
+  Reset the Android session cursor and reconnect after restart.
+  Branch is local.
+
+## Antigravity SSH authentication context
+
+Updated 2026-11-28T07:29:00+07:00 on `fix/antigravity-ssh-auth-context`.
+Host source `a4b1249`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-ssh-auth-context.md).
+A same-model A/B with AGY 1.5.17 reproduced a quota response under the
+service environment and a successful reply using a real SSH session
+context. The host-side attach helper now forwards the validated value
+over the private handshake. It is used in new AGY processes and readiness.
+An existing ACP process keeps its environment through reconnect.
+
+- The prior host failed the OpenSSH fixture at AGY readiness. The stamped
+  host passed it with both a synthetic ACP runtime and real AGY 1.5.17.
+  A text-only Gemini 4 Hydrogen Medium prompt answered through the full
+  OpenSSH attach and supervisor route. The shared-agent routing test passed.
+- `GOMAXPROCS=4 go test -race -p 2 ./... -count=1 -timeout=150s` with
+  umask 022, `go vet ./...`, independent review and `git diff --check`
+  passed. Unit tests cover private metadata, forged relay commands and
+  preserving an existing ACP client. A disconnect during a real AGY turn
+  and physical Android were outside these checks.
+- Host SHA-256
+  `5d9f96e98923acab1c22957a3a9884ae9880a7eed38f2d6a089db9e9846fae8d`.
+  Previous host backed up at
+  `/tmp/modex-agy-ssh.4uIMT2/modex-host.previous`.
+  Android continues to use preview 55. The running host at `a4b1249`
+  was confirmed by version and checksum before the shared CLI update.
+
+## Antigravity file diffs
+
+Updated 2026-11-28T06:37:50+07:00 on `feat/antigravity-file-diffs`.
+Host source `55e5b16`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-file-diffs.md).
+Completed ACP edits now appear in the existing Android file change card.
+The same projection is used when a native session replays its history.
+The host only uses before/after text provided by ACP and bounds the
+preview. Large snapshots can be omitted.
+
+- The shared-agent fixture failed on `1cda380` with a missing file card.
+  On the stamped host at `55e5b16`, it passed live completion, duplicate
+  suppression, restart recovery and routing with all three runtimes.
+  AGY 1.5.17 reported provider quota during a real edit probe, so the
+  edit acceptance used synthetic ACP frames.
+- `GOMAXPROCS=4 go test -race -p 2 ./... -count=1 -timeout=150s` with
+  umask 022, `go vet ./...`, six targeted regressions and independent
+  review passed. Signed Android preview 55 passed the command timeline
+  emulator smoke including file diff expansion, and both ToolActivity
+  unit tests. This milestone uses the existing APK.
+- Host SHA-256
+  `18461d536ac942d0db5e9476773f4dd871539e8afbac2697f11ba1107c67fffe`.
+  Previous host backed up at
+  `/tmp/modex-agy-diffs.1uMQKT/modex-host.previous`.
+  Running host `55e5b16` was confirmed by version. Physical Android
+  remains unverified. Branch is local.
+
+## Antigravity command activity
+
+Updated 2026-11-28T05:33:47+07:00 on `feat/antigravity-command-activity`.
+Host source `1cda380`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-command-activity.md).
+AGY shell calls now use the shared Android command card. Native events
+drive the lifecycle, and the final output and exit code are shown when
+reported. Native replay restores commands that the CLI includes.
+Use existing Android preview 55.
+
+- At `1cda380`, `GOMAXPROCS=4 go test -race -p 1 ./... -count=1
+  -timeout=120s` with umask 022, `go vet ./...`, focused ACP tests
+  and independent review passed.
+- The command case failed on `aca969a` and passed with the stamped
+  host and real AGY 1.5.17, including one-time permission, card
+  transitions, output, exit code and cold history. Real attachments,
+  titles/context recovery and the shared-agent routing fixture passed.
+  The real follow-up case reached an upstream quota response. Local ACP
+  fixtures verified steering, prompt reply order and permissions.
+- The existing signed preview 55 passed the command timeline emulator
+  smoke. Android `ChatEntryTest` and `SessionStateTest` passed 19 checks.
+  No Android source or APK change in this milestone.
+- Host SHA-256
+  `92d26362c18ab9cc9528ae1120e61a6c80b5e4abd329a7abb95b0cbcb2d1bb84`.
+  Previous host backed up at
+  `/tmp/modex-agy-commands.SCBuIi/modex-host.previous`.
+  Running host `1cda380` was confirmed by version and executable
+  checksum on 2026-11-28. Physical Android remains unverified.
+  Branch is local. Reset the Android session cursor after restart.
+
+## Antigravity context usage
+
+Updated 2026-11-28T02:00:49+07:00 on `feat/antigravity-context-usage`.
+Host source `aca969a`, Android source `95e66aa`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-context-usage.md).
+The Android header and Session status show the context window reported by
+AGY. The host scopes samples to the active native client and resets them
+on model changes or retirement. A reopened session can require a new
+sample. Provider quota is outside this milestone.
+
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with umask
+  022 and `go vet ./...` passed for the host source. The stamped binary
+  passed all three isolated `test_antigravity_supervisor.py` cases with
+  AGY 1.5.17 and the `test_shared_agent_supervisor.py` routing fixture.
+- Offline Gradle unit, lint and app/test APK builds passed for the Android
+  source, with 192 unit tests and zero lint errors. Emulator smoke passed
+  for AGY context, titles, attachments, shared chats, and an in-place
+  upgrade from code 54 to 55 with synthetic encrypted state.
+- Signed preview `.modex/previews/modex-0.1.0-preview.55-antigravity-context.apk`
+  in the main checkout. APK SHA-256
+  `95c5ac57e9f6cad2cc91911bd15a1c7c8a7ff27cb7471d5dc781719eff094860`.
+  Host SHA-256
+  `48d1c2e7e828373207e68a00c23521b52f38595951143cfd5eaf584d3e1d956b`.
+  Previous host binary is backed up at
+  `/tmp/modex-agy-context.chaHjZ/modex-host.previous`.
+  Running host `aca969a` was confirmed on 2026-11-28 by version and
+  executable checksum. Physical Android remains unverified.
+  The branch and preview are local. After activation, reset the Android
+  session cursor and reconnect to the new supervisor.
+
+## Antigravity turn outcomes
+
+Updated 2026-11-28T01:42:22+07:00 on `fix/antigravity-turn-outcomes`.
+Host source `28aac6b`, based on `c00f0da`. The host distinguishes
+completion, cancellation, token and request limits, refusal and failures.
+Live events and history on the same running supervisor use the Android
+turn notice already supported by preview 54. Native replay after a host
+restart does not restore the notice. RPC failures after a prompt is written
+now take the terminal event path with a consistent delivery acknowledgement.
+
+- The targeted ACP fixture failed on the previous host and passes with
+  the fix. It exercises both prompt results, cancellation, history and
+  safe handling of unknown outcomes and late RPC errors.
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with
+  umask 022, `go vet ./...` and the three isolated AGY 1.5.17 supervisor tests
+  passed. The stamped binary also passed the shared-agent supervisor
+  fixture. Android `SessionStateTest` and `ProtocolTest` passed all 35 checks.
+- Host SHA-256
+  `da3462d7e35fe9078526dd022d33a297042f6a1cf8dd2c59eb59e2214dbde2bf`.
+  Previous binary backed up at
+  `/tmp/modex-agy-outcomes.lgV5Bq/modex-host.previous`.
+  Activation uses the delayed restart. Physical Android and real provider
+  limit/refusal cases were not exercised. The branch remains local.
+
+## Antigravity session titles
+
+Updated 2026-11-28T01:34:12+07:00 on `feat/antigravity-session-titles`,
+based on `0810079`. Host source `0f7d00c`. See the
+[plan](docs/superpowers/plans/2026-11-28-antigravity-session-titles.md).
+Titles reported by AGY appear in the Android header and sidebar. The host
+persists them and recovers older native titles when reopening a chat. Android
+keeps a live title across missing and older in-flight snapshots.
+
+- At `0f7d00c`, `GOMAXPROCS=4 go test -race -p 1 ./... -count=1
+  -timeout=120s` with umask 022 and `go vet ./...` passed. The stamped
+  isolated supervisor passed all three `test_antigravity_supervisor.py`
+  cases with real AGY 1.5.17 and the shared-agent supervisor fixture.
+- Offline Android unit, lint and APK builds passed with 191 unit tests
+  and zero lint errors. The title smoke failed on preview 53 and passed on
+  54, covering live titles, stale snapshots, validation, header and drawer.
+  Shared chats, attachment composer and the signed 53-to-54 upgrade with
+  synthetic encrypted state passed. The older session-management smoke
+  missed its long-title actions control on both builds. Physical Android
+  was not tested.
+- Signed APK `.modex/previews/modex-0.1.0-preview.54-antigravity-titles.apk`
+  in the main checkout. SHA-256
+  `830660507661c22a1a921412aec19f58973449770986107b6b9aadd81a4b57c6`.
+  Verified host SHA-256
+  `670ed88c9161af2992fbf45ef3c270b226bc1d4d50e0f4b2f6100a62e0258e52`.
+  Previous host backed up at
+  `/tmp/modex-agy-titles.cG5YOk/modex-host.previous`.
+  Host activation uses a delayed restart and remains unverified at handoff.
+  Branch and preview are local.
+
+## Antigravity attachment feedback
+
+Updated 2026-11-28T00:52:24+07:00 on `fix/antigravity-attachment-feedback`
+from `dfdb4fb`. Android shows file validation warnings beside the composer.
+Valid files remain in the draft while an active turn blocks Send. The
+composer now waits silently and enables Send when the turn ends.
+
+- The `antigravity-attachments` smoke reproduced the transient warning on
+  preview 52 and passed on preview 53. The regression covers retained files,
+  blocked follow-up with files, and sending when idle. The earlier sidebar
+  fix and `chat-ui` were verified on preview 52.
+- Offline Gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+  :app:assembleDebugAndroidTest` passed on the fix, with 190 unit tests and
+  zero lint errors. Signed in-place upgrade from code 52 to 53 preserved
+  encrypted fixture state. Physical Android was not tested.
+- Signed preview in the main checkout at
+  `.modex/previews/modex-0.1.0-preview.53-quiet-attachments.apk`.
+  SHA-256 `b4a2047f3cfd524abb74b0019b2627c979ae744cd5e1ccb3bf2e40532e144164`.
+  This Android-only fix uses the running `c7ba6f7` host. Branch and preview
+  are local.
+
+## Antigravity follow-ups
+
+Updated 2026-11-28T00:10:08+07:00 on `feat/antigravity-steering`. Host
+source `c7ba6f7`, Android source `64a6ea9`. See the
+[implementation plan](docs/superpowers/plans/2026-11-27-antigravity-steering.md).
+AGY 1.5.17 supports one outstanding text follow-up under the active Modex
+turn. Stop remains available while either native prompt is running. Wait
+for an idle turn to send drafts with attachments.
+
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with
+  umask 022, `go vet ./...` and independent review passed at `c7ba6f7`.
+  Fixtures cover both reply orders, stale and incompatible requests, late
+  RPC rejection, Stop and bounded ACP fallback replies.
+- The stamped host passed the three real AGY checks in
+  `test_antigravity_supervisor.py` after an earlier run failed discovery.
+  The follow-up reached the model while streaming and appeared once in
+  live events and history. Attachments and recovery after restart passed.
+  The isolated three-runtime `test_shared_agent_supervisor.py` also passed.
+- Offline Android unit, lint and app/test APK builds passed at `64a6ea9`
+  with 190 unit tests and zero lint errors. The signed code-50-to-51
+  in-place upgrade preserved encrypted fixture state. The emulator passed
+  Antigravity attachment/ACK, model/level and shared-chat smokes.
+- Private signed APK `.modex/previews/modex-0.1.0-preview.51-antigravity-steering.apk`
+  in the main checkout. APK SHA-256
+  `13e3e85d1f9377f62a33fe8ef13c9dc5284663bfbc06bbb252c90ddc99b7d4c3`.
+  Host SHA-256
+  `aaa02853fbcffb25ccd354a85f273032f3f0d4ad824536093b741eca3c29eefd`.
+  Previous binary backed up at
+  `/tmp/modex-agy-steering.SDBsQc/modex-host.previous`.
+  Final activation uses the external delayed restart and remains
+  unverified at handoff. Physical Android and other AGY versions were
+  not tested. Branch and preview are local.
+
+## Antigravity attachments
+
+Updated 2026-11-27T22:54:14+07:00 on `feat/antigravity-attachments`. Host
+source `90a83d1`, boundary tests `8fb0591`, paired Android source `df617c9`.
+See the [implementation plan](docs/superpowers/plans/2026-11-27-antigravity-attachments.md).
+PNG/JPEG and UTF-8 files can be sent with or without text. The host checks
+ACP capabilities and enforces up to eight files, 8 MiB total, and 256 KiB
+per text file. Android retains drafts on rejected or malformed replies
+and clears submitted files on a valid acknowledgement.
+
+- `GOMAXPROCS=4 go test -race -p 1 ./... -count=1 -timeout=120s` with
+  umask 022 and `go vet ./...` passed through `8fb0591`. Two fixture
+  deadlines from an earlier parallel run passed in targeted and serialized
+  reruns. Windows amd64 and macOS arm64 cross-builds passed.
+- The isolated supervisor using the stamped `90a83d1` binary passed
+  `test_antigravity_supervisor.py` (real AGY 1.5.17 mixed image/text delivery
+  and text recovery after restart) and `test_shared_agent_supervisor.py`.
+  A direct native ACP replay returned one resource reference and omitted
+  the image, so recovery can lack previews for previously sent files.
+- Offline Android Gradle unit/lint/debug app and test builds passed
+  (187 tests, zero lint errors). Emulator checks passed for attachment-only,
+  older-host gating, ViewModel acknowledgements, AGY options, shared chats,
+  SFTP attachment regression and in-place upgrade from code 49 to code 50
+  using synthetic encrypted state. Physical Android and non-Linux
+  runtime behavior remain unverified.
+- Private signed preview in the main checkout at
+  `.modex/previews/modex-0.1.0-preview.50-antigravity-attachments.apk`.
+  APK SHA-256
+  `1f6c1754fd2f3de2d33490cb2a07c3ddd9d37ca7e6ccaf48309718bffc10f2e7`.
+  Verified host SHA-256
+  `21b392d38d1205a3c91af5cd588974ed6314eb839beb53fafbd82247d0ee188e`.
+  Previous host binary backed up at
+  `/tmp/modex-agy-attachments.QInbKP/modex-host.previous`.
+  Final activation uses the delayed service restart. Its execution is
+  unverified at handoff. Branch and preview are local.
+
+## Android model picker
+
+Updated 2026-11-27T22:05:36+07:00 on `feat/android-model-picker`, APK source
+`bcf0929` based on `884538a`. Codex, OpenCode and Antigravity share the model
+dropdown and level slider. Brand matching uses the model ID before its label.
+Antigravity retains per-option acknowledgement, commits slider gestures once,
+and offers a dropdown when the host reports an unlisted current level.
+
+- `go test ./... -timeout=120s` passed with umask 022. Android Gradle unit,
+  lint and both debug APK builds passed offline with 183 JVM tests and zero
+  lint errors. Independent review identified and the smoke covers pending
+  acknowledgement and recovery from unlisted levels.
+- API 33 emulator passed shared OpenCode chat creation and Codex native
+  controls. Antigravity passed twice at 320 dp and font scale 1.3 after
+  stabilizing the test gesture. Screenshots confirmed the final Claude and
+  Gemini vector rendering. The older OpenCode capability smoke could not
+  find its expected chat header on either dev.39 or the preview.
+- Established signer and `dev.modex` package verified for private preview
+  code 49. Upgrade from public code 48 preserved synthetic encrypted state.
+  APK staged in `.modex/previews/modex-0.1.0-preview.49-model-picker.apk`
+  under the main Modex checkout on the connected host for the in-app SFTP
+  picker. AGENTS.md and the mobile delivery guide now specify this path and
+  the phone's path-entry flow. SHA-256
+  `c37ab44329d6e152e7e28dc48ee6f922b6f6aca35999a2f9ecff4b5c8769ceb7`.
+  Physical-phone download and install remain unverified. Branch is local.
+
 ## Combined agent routing and Antigravity controls
 
 Updated 2026-11-27T20:43:10+07:00 on `main` after merge commit `79a64a6`.

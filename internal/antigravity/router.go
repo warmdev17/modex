@@ -18,9 +18,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/warmdev/modex/internal/acp"
 	"github.com/warmdev/modex/internal/bridge"
+	"github.com/warmdev/modex/internal/diagnostic"
 )
 
 const prefix = "agy:"
@@ -34,24 +37,48 @@ type record struct {
 	Projectless bool   `json:"projectless,omitempty"`
 	Model       string `json:"model,omitempty"`
 	Thinking    string `json:"thinking,omitempty"`
+	Name        string `json:"name,omitempty"`
 }
 type message struct {
-	ID       string          `json:"id"`
-	Role     string          `json:"role"`
-	Text     string          `json:"text"`
-	Turn     string          `json:"turn_id,omitempty"`
-	Activity *invocationItem `json:"activity_item,omitempty"`
+	ID          string                 `json:"id"`
+	Role        string                 `json:"role"`
+	Text        string                 `json:"text"`
+	Command     string                 `json:"command,omitempty"`
+	ExitCode    *int                   `json:"exit_code,omitempty"`
+	Turn        string                 `json:"turn_id,omitempty"`
+	Status      string                 `json:"status,omitempty"`
+	Notice      *diagnostic.TurnNotice `json:"turn_notice,omitempty"`
+	Activity    *invocationItem        `json:"activity_item,omitempty"`
+	Attachments []attachment           `json:"attachments,omitempty"`
+}
+type contextUsage struct {
+	Last struct {
+		TotalTokens int64 `json:"totalTokens"`
+	} `json:"last"`
+	ModelContextWindow int64 `json:"modelContextWindow"`
 }
 type chat struct {
+	usage      *contextUsage
+	usageModel string
 	record
 	loaded                bool
+	nativeTerminal        bool
 	loading               bool
 	active                string
 	messages              []message
 	calls                 map[string]invocationTarget
 	replayCalls           map[string]int
+	commandCalls          map[string]commandState
+	diffCalls             map[string]bool
 	setting, optionsDirty bool
+	titleDirty            bool
 	emit                  func(string, json.RawMessage)
+	admitting             bool
+	queued                []acp.Update
+	segment               int
+	finishPending         *turnOutcome
+	queuedBytes           int
+	queueOverflow         bool
 }
 type pending struct {
 	request acp.PermissionRequest
@@ -68,6 +95,22 @@ type Router struct {
 	clients                  map[string]*acp.Client
 	pending                  map[string]pending
 	loadErr                  error
+	sshConnection            string
+}
+
+func (r *Router) SetSSHConnection(value string) {
+	r.mu.Lock()
+	r.sshConnection = value
+	r.mu.Unlock()
+}
+
+// childEnvironment is called with r.mu held.
+func (r *Router) childEnvironment() []string {
+	env := acp.Environment(os.Environ())
+	if r.sshConnection != "" {
+		env = append(env, "SSH_CONNECTION="+r.sshConnection)
+	}
+	return env
 }
 
 func New(ctx context.Context, binary, defaultWorkspace, stateDir string) *Router {
@@ -105,6 +148,18 @@ func (r *Router) Close() {
 }
 func valid(s string) bool {
 	return strings.TrimSpace(s) != "" && len(s) <= 4096 && !strings.ContainsAny(s, "\r\n\x00")
+}
+func title(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 512 || !utf8.ValidString(s) {
+		return ""
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return ""
+		}
+	}
+	return s
 }
 func uid() (string, error) {
 	var b [16]byte
@@ -165,11 +220,15 @@ func (r *Router) saveLocked() error {
 	}
 	for _, c := range r.chats {
 		c.optionsDirty = false
+		c.titleDirty = false
 	}
 	return nil
 }
 func thread(c *chat) map[string]any {
 	m := map[string]any{"id": c.ID, "cwd": c.Workspace, "agent": "antigravity", "modelProvider": "antigravity", "status": map[string]any{"type": "idle"}}
+	if name := title(c.Name); name != "" {
+		m["name"] = name
+	}
 	if c.Project != "" {
 		m["projectId"] = c.Project
 	} else if c.Projectless {
@@ -208,16 +267,25 @@ func (r *Router) client(workspace string) (*acp.Client, error) {
 	if c := r.clients[workspace]; c != nil {
 		return c, nil
 	}
-	c, e := acp.StartWithPermissions(r.ctx, r.binary, workspace, func(u acp.Update) { r.update(workspace, u) }, func(p acp.PermissionRequest) bool { return r.permission(workspace, p) })
+	var c *acp.Client
+	var e error
+	c, e = acp.StartWithEnvironment(r.ctx, r.binary, workspace, r.childEnvironment(), func(u acp.Update) { r.update(workspace, &c, u) }, func(p acp.PermissionRequest) bool { return r.permission(workspace, p) })
 	if e != nil {
 		return nil, e
 	}
 	r.clients[workspace] = c
 	return c, nil
 }
-func (r *Router) update(workspace string, u acp.Update) {
+func (r *Router) update(workspace string, source **acp.Client, u acp.Update) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	var client *acp.Client
+	if source != nil {
+		client = *source
+	}
+	if r.clients[workspace] != client {
+		return
+	}
 	var c *chat
 	for _, candidate := range r.chats {
 		if candidate.Workspace == workspace && candidate.Native == u.SessionID {
@@ -228,7 +296,81 @@ func (r *Router) update(workspace string, u acp.Update) {
 	if c == nil {
 		return
 	}
+	if c.admitting {
+		for _, d := range u.Diffs {
+			c.queuedBytes += len(d.Path) + len(d.OldText) + len(d.NewText)
+		}
+		c.queuedBytes += len(u.Text) + len(u.URI) + len(u.ToolCallID) + len(u.Command) + len(u.Output) + 256
+		if c.queuedBytes > 4<<20 || len(c.queued) >= 1024 {
+			if !c.queueOverflow {
+				c.queueOverflow = true
+				if client := r.clients[workspace]; client != nil {
+					go client.Close()
+				}
+			}
+			return
+		}
+		c.queued = append(c.queued, u)
+		return
+	}
+	r.updateLocked(c, u)
+}
+
+func (r *Router) setTitleLocked(c *chat, value string) {
+	name := title(value)
+	if name == "" {
+		return
+	}
+	if name == c.Name {
+		if c.titleDirty {
+			_ = r.saveLocked()
+		}
+		return
+	}
+	c.Name = name
+	c.titleDirty = true
+	_ = r.saveLocked()
+	emitEvent(c.emit, "thread/name/updated", map[string]any{"threadId": c.ID, "threadName": name})
+}
+
+func (r *Router) updateLocked(c *chat, u acp.Update) {
+	if u.Kind == "model_update" {
+		if c.usageModel != "" && c.usageModel != u.Model {
+			r.clearUsageLocked(c)
+		}
+		c.usageModel = u.Model
+		return
+	}
+	if u.Kind == "usage_update" {
+		if u.Model != "" {
+			if c.usageModel != "" && c.usageModel != u.Model {
+				r.clearUsageLocked(c)
+			}
+			c.usageModel = u.Model
+		}
+		if u.Used < 0 || u.Size <= 0 {
+			return
+		}
+		if c.usage != nil && c.usage.Last.TotalTokens == u.Used && c.usage.ModelContextWindow == u.Size {
+			return
+		}
+		usage := &contextUsage{ModelContextWindow: u.Size}
+		usage.Last.TotalTokens = u.Used
+		c.usage = usage
+		params := map[string]any{"threadId": c.ID, "tokenUsage": usage}
+		if u.TurnID != "" {
+			params["turnId"] = u.TurnID
+		}
+		emitEvent(c.emit, "thread/tokenUsage/updated", params)
+		return
+	}
+	if u.Kind == "session_info_update" {
+		r.setTitleLocked(c, u.Text)
+		return
+	}
 	if u.ToolCallID != "" {
+		c.updateDiff(u)
+		c.updateCommand(u)
 		c.updateInvocation(u)
 		return
 	}
@@ -240,12 +382,27 @@ func (r *Router) update(workspace string, u acp.Update) {
 		case "agent_message_chunk":
 			role = "assistant"
 		}
+		if role == "user" && u.URI != "" {
+			a := replayAttachment(u.URI, u.MIME)
+			if a != nil {
+				if len(c.messages) == 0 || c.messages[len(c.messages)-1].Role != "user" {
+					clear(c.replayCalls)
+					clear(c.commandCalls)
+					clear(c.diffCalls)
+					c.messages = append(c.messages, message{ID: fmt.Sprintf("history-%d", len(c.messages)), Role: "user"})
+				}
+				c.messages[len(c.messages)-1].Attachments = append(c.messages[len(c.messages)-1].Attachments, *a)
+			}
+			return
+		}
 		if role != "" {
 			if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == role {
 				c.messages[len(c.messages)-1].Text += u.Text
 			} else {
 				if role == "user" {
 					clear(c.replayCalls)
+					clear(c.diffCalls)
+					clear(c.commandCalls)
 				}
 				c.messages = append(c.messages, message{ID: fmt.Sprintf("history-%d", len(c.messages)), Role: role, Text: u.Text})
 			}
@@ -255,7 +412,7 @@ func (r *Router) update(workspace string, u acp.Update) {
 	if c.active == "" || c.active != u.TurnID || u.Kind != "agent_message_chunk" {
 		return
 	}
-	item := "assistant-" + u.TurnID
+	item := fmt.Sprintf("assistant-%s-%d", u.TurnID, c.segment)
 	index := len(c.messages) - 1
 	for index >= 0 && c.messages[index].Role == "agent_activity" && c.messages[index].Turn == u.TurnID {
 		index--
@@ -267,6 +424,29 @@ func (r *Router) update(workspace string, u acp.Update) {
 	}
 	emitEvent(c.emit, "item/agentMessage/delta", map[string]any{"threadId": c.ID, "turnId": u.TurnID, "itemId": item, "delta": u.Text})
 }
+func (r *Router) clearUsageLocked(c *chat) {
+	if c.usage == nil {
+		return
+	}
+	c.usage = nil
+	emitEvent(c.emit, "thread/tokenUsage/updated", map[string]any{"threadId": c.ID, "tokenUsage": nil})
+}
+func (r *Router) flushUpdates(c *chat) {
+	c.admitting = false
+	queued := c.queued
+	c.queued = nil
+	c.queuedBytes = 0
+	c.queueOverflow = false
+	for _, u := range queued {
+		r.updateLocked(c, u)
+	}
+	if c.finishPending != nil {
+		outcome := *c.finishPending
+		c.finishPending = nil
+		r.finishLocked(c, c.active, outcome)
+	}
+}
+
 func (r *Router) permission(workspace string, p acp.PermissionRequest) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -301,6 +481,13 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		return nil, e
 	}
 	r.mu.Lock()
+	if c.nativeTerminal {
+		r.mu.Unlock()
+		return nil, errors.New("Antigravity native terminal is attached; close it to refresh this chat")
+	}
+	if c.titleDirty {
+		_ = r.saveLocked()
+	}
 	if c.setting {
 		r.mu.Unlock()
 		return nil, errors.New("session options are being updated")
@@ -319,9 +506,13 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		r.mu.Unlock()
 		return nil, errors.New("session is loading")
 	}
+	r.clearUsageLocked(c)
+	c.usageModel = ""
 	c.loading = true
 	c.messages = nil
 	c.calls = nil
+	c.commandCalls = nil
+	c.diffCalls = nil
 	saved := c.record
 	r.mu.Unlock()
 	defer func() {
@@ -340,6 +531,11 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		}
 		for _, s := range page.Sessions {
 			if s.ID == c.Native {
+				r.mu.Lock()
+				if c.Name == saved.Name {
+					r.setTitleLocked(c, s.Title)
+				}
+				r.mu.Unlock()
 				found = true
 				break
 			}
@@ -368,36 +564,47 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 	r.mu.Unlock()
 	return client, nil
 }
-func (r *Router) readiness() map[string]any {
+func (r *Router) Readiness(ctx context.Context, workspace string) map[string]any {
+	r.mu.Lock()
+	env := r.childEnvironment()
+	r.mu.Unlock()
 	entry := map[string]any{"id": "antigravity", "label": "Antigravity", "ready": false}
-	ctx, cancel := context.WithTimeout(r.ctx, 8*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	path, e := exec.LookPath(r.binary)
 	if e != nil {
 		entry["reason"] = "Install the agy CLI on the host"
 		return entry
 	}
-	workspace, e := canonical(r.workspace)
+	if workspace == "" {
+		workspace = r.workspace
+	}
+	workspace, e = canonical(workspace)
 	if e != nil {
 		entry["reason"] = "Host workspace is unavailable"
 		return entry
 	}
-	cmd := exec.CommandContext(ctx, path, "-p", "/model", "--output-format", "json")
+	// The models command reports a missing login without starting OAuth.
+	cmd := exec.CommandContext(ctx, path, "models")
 	cmd.Dir = workspace
-	var output bytes.Buffer
+	cmd.Env = env
+	var output, problems bytes.Buffer
 	cmd.Stdout = &limitedWriter{dst: &output, remaining: 65536}
+	cmd.Stderr = &limitedWriter{dst: &problems, remaining: 4096}
 	if e = cmd.Run(); e != nil {
-		entry["reason"] = "Antigravity is unavailable or requires sign-in on the host"
+		entry["reason"] = "Antigravity model discovery failed"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			entry["reason"] = "Antigravity model discovery timed out"
+		} else if bytes.Contains(bytes.ToLower(problems.Bytes()), []byte("sign in")) {
+			entry["reason"] = "Run AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login on the host"
+		}
 		return entry
 	}
-	var probe struct {
-		Status string `json:"status"`
-	}
-	if json.Unmarshal(output.Bytes(), &probe) != nil || probe.Status != "SUCCESS" {
-		entry["reason"] = "Antigravity is unavailable or requires sign-in on the host"
+	if len(bytes.TrimSpace(output.Bytes())) == 0 {
+		entry["reason"] = "Antigravity returned no models"
 		return entry
 	}
-	c, e := acp.Start(ctx, path, workspace, nil)
+	c, e := acp.StartWithEnvironment(ctx, path, workspace, env, nil, nil)
 	if e != nil {
 		entry["reason"] = "Antigravity ACP is unavailable"
 		return entry
@@ -423,7 +630,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 	}
 	str := func(key string) string { var s string; _ = json.Unmarshal(p[key], &s); return s }
 	if cmd.Method == "agents/list" {
-		return map[string]any{"data": []any{map[string]any{"id": "codex", "label": "Codex", "ready": true}, r.readiness()}}, true, nil
+		return map[string]any{"data": []any{map[string]any{"id": "codex", "label": "Codex", "ready": true}, r.Readiness(ctx, r.workspace)}}, true, nil
 	}
 	if cmd.Method == "client/attached" {
 		if string(p["attached"]) == "true" {
@@ -572,6 +779,11 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 	case "threads/options", "threads/options/set":
 		return r.handleOptions(ctx, c, cmd.Method, p)
 	case "threads/resume":
+		r.mu.Lock()
+		if emit != nil {
+			c.emit = emit
+		}
+		r.mu.Unlock()
 		_, err := r.load(ctx, c)
 		if err != nil {
 			return nil, true, err
@@ -582,7 +794,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		return result, true, nil
 	case "threads/status":
 		r.mu.Lock()
-		result := map[string]any{"session": session(c), "token_usage": nil, "rate_limits": nil}
+		result := map[string]any{"session": session(c), "token_usage": c.usage, "rate_limits": nil}
 		r.mu.Unlock()
 		return result, true, nil
 	case "threads/read":
@@ -634,31 +846,46 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		}
 		return result, true, nil
 	case "turn/start":
-		for _, key := range []string{"attachments", "references", "model", "effort"} {
+		for _, key := range []string{"references", "model", "effort"} {
 			if _, ok := p[key]; ok {
 				return nil, true, errors.New("unsupported Antigravity turn option")
 			}
 		}
 		text := str("text")
-		if strings.TrimSpace(text) == "" || len(text) > 1024*1024 {
+		if len(text) > 1024*1024 {
 			return nil, true, errors.New("invalid text prompt")
 		}
 		client, err := r.load(ctx, c)
 		if err != nil {
 			return nil, true, err
 		}
+		blocks, attachments, err := prepareAttachments(p["attachments"], client.Info())
+		if err != nil {
+			return nil, true, err
+		}
+		if strings.TrimSpace(text) != "" {
+			blocks = append([]acp.PromptBlock{{Type: "text", Text: text}}, blocks...)
+		}
+		if len(blocks) == 0 {
+			return nil, true, errors.New("text or attachments are required")
+		}
 		turn, err := uid()
 		if err != nil {
 			return nil, true, err
 		}
 		r.mu.Lock()
-		if c.active != "" || c.setting || c.optionsDirty || !c.loaded || !client.SessionLoaded(c.Native) {
+		if c.active != "" || c.setting || c.nativeTerminal || c.optionsDirty || !c.loaded || !client.SessionLoaded(c.Native) {
 			r.mu.Unlock()
 			return nil, true, errors.New("session busy")
 		}
 		c.active = turn
 		c.emit = emit
 		c.calls = nil
+		c.commandCalls = nil
+		c.diffCalls = nil
+		c.admitting = true
+		c.segment = 0
+		r.mu.Unlock()
 		sent := make(chan struct{})
 		done := make(chan error, 1)
 		go func() {
@@ -666,47 +893,105 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			defer cancelPrompt()
 			timer := time.AfterFunc(20*time.Second, cancelPrompt)
 			defer timer.Stop()
-			stop, e := client.PromptWithSent(promptCtx, c.Native, turn, text, func() { timer.Stop(); close(sent) })
-			if e != nil {
-				select {
-				case done <- e:
-				default:
+			stop, e := client.PromptBlocksWithSent(promptCtx, c.Native, turn, blocks, func() {
+				timer.Stop()
+				r.mu.Lock()
+				c.messages = append(c.messages, message{ID: "user-" + turn, Role: "user", Text: text, Turn: turn, Attachments: attachments})
+				emitEvent(emit, "turn/started", map[string]any{"threadId": id, "turn": map[string]any{"id": turn, "status": "inProgress"}})
+				item := map[string]any{"id": "user-" + turn, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}
+				if len(attachments) > 0 {
+					item["attachments"] = attachments
 				}
-				r.retire(c.Workspace, client)
-				r.finish(c, turn, "failed")
-				return
-			}
-			status := "completed"
-			if stop == "cancelled" {
-				status = "interrupted"
-			}
-			r.finish(c, turn, status)
-		}()
-		announce := func() {
-			c.messages = append(c.messages, message{ID: "user-" + turn, Role: "user", Text: text, Turn: turn})
-			emitEvent(emit, "turn/started", map[string]any{"threadId": id, "turn": map[string]any{"id": turn, "status": "inProgress"}})
-			emitEvent(emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": map[string]any{"id": "user-" + turn, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}})
-		}
-		select {
-		case <-sent:
-			announce()
-			r.mu.Unlock()
-			return map[string]any{"turn": map[string]any{"id": turn, "status": "inProgress"}}, true, nil
-		case e := <-done:
-			r.mu.Unlock()
-			return nil, true, e
-		case <-ctx.Done():
-			// Preserve event order if the write wins the race with the caller's deadline.
-			go func() {
-				select {
-				case <-sent:
-					announce()
-				case <-done:
+				emitEvent(emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": item})
+				r.flushUpdates(c)
+				r.mu.Unlock()
+				close(sent)
+			})
+			if e != nil {
+				r.mu.Lock()
+				if c.admitting {
+					r.flushUpdates(c)
 				}
 				r.mu.Unlock()
-			}()
+				select {
+				case <-sent:
+				default:
+					done <- e
+				}
+				if !errors.Is(e, acp.ErrRequestRejected) && !errors.Is(e, acp.ErrAuthenticationRequired) {
+					r.retire(c.Workspace, client)
+				}
+				r.finish(c, turn, antigravityOutcome("", e))
+				return
+			}
+			r.finish(c, turn, antigravityOutcome(stop, nil))
+		}()
+		select {
+		case <-sent:
+			return map[string]any{"turn": map[string]any{"id": turn, "status": "inProgress"}}, true, nil
+		case e := <-done:
+			return nil, true, e
+		case <-ctx.Done():
 			return nil, true, errors.New("Antigravity turn delivery is uncertain; refresh before retrying")
 		}
+	case "turn/steer":
+		for _, key := range []string{"references", "model", "effort", "reasoning", "attachments"} {
+			if _, ok := p[key]; ok {
+				return nil, true, errors.New("unsupported Antigravity steer option")
+			}
+		}
+		text, turn := str("text"), str("turn_id")
+		if strings.TrimSpace(text) == "" || len(text) > 1024*1024 || turn == "" {
+			return nil, true, errors.New("invalid Antigravity steer")
+		}
+		r.mu.Lock()
+		client := r.clients[c.Workspace]
+		if client == nil || c.active != turn || c.admitting {
+			r.mu.Unlock()
+			return nil, true, errors.New("Antigravity turn is unavailable for steering")
+		}
+		c.admitting = true
+		r.mu.Unlock()
+		sent := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			promptCtx, cancelPrompt := context.WithCancel(r.ctx)
+			defer cancelPrompt()
+			timer := time.AfterFunc(20*time.Second, cancelPrompt)
+			defer timer.Stop()
+			e := client.SteerWithSent(promptCtx, c.Native, turn, text, func() {
+				timer.Stop()
+				r.mu.Lock()
+				c.segment++
+				itemID := fmt.Sprintf("user-%s-%d", turn, c.segment)
+				c.messages = append(c.messages, message{ID: itemID, Role: "user", Text: text, Turn: turn})
+				emitEvent(c.emit, "item/completed", map[string]any{"threadId": id, "turnId": turn, "item": map[string]any{"id": itemID, "type": "userMessage", "content": []any{map[string]any{"type": "text", "text": text}}}})
+				r.flushUpdates(c)
+				r.mu.Unlock()
+				close(sent)
+			})
+			if e != nil {
+				select {
+				case <-sent:
+				default:
+					r.mu.Lock()
+					if c.admitting {
+						r.flushUpdates(c)
+					}
+					r.mu.Unlock()
+					done <- e
+				}
+			}
+		}()
+		select {
+		case <-sent:
+			return map[string]any{"turnId": turn}, true, nil
+		case e := <-done:
+			return nil, true, e
+		case <-ctx.Done():
+			return nil, true, errors.New("Antigravity steer delivery is uncertain; refresh before retrying")
+		}
+
 	case "turn/interrupt":
 		turn := str("turn_id")
 		r.mu.Lock()
@@ -727,16 +1012,70 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 		return nil, true, errors.New("operation is not supported for Antigravity sessions")
 	}
 }
-func (r *Router) finish(c *chat, turn, status string) {
+
+type turnOutcome struct {
+	status string
+	notice *diagnostic.TurnNotice
+}
+
+func antigravityOutcome(stop string, err error) turnOutcome {
+	notice := diagnostic.TurnNotice{
+		Category: "turn_failed",
+		Message:  "Antigravity could not complete this turn. Review the conversation before trying again.",
+	}
+	if errors.Is(err, acp.ErrAuthenticationRequired) {
+		notice.Category = "unauthorized"
+		notice.Message = "Antigravity requires sign-in on the host. Sign in there and try again."
+	}
+	if err == nil {
+		switch stop {
+		case "end_turn":
+			return turnOutcome{status: "completed"}
+		case "cancelled":
+			return turnOutcome{status: "interrupted"}
+		case "max_tokens":
+			notice.Category = "response_token_limit"
+			notice.Message = "Antigravity reached the token limit before finishing. You can ask it to continue."
+		case "max_turn_requests":
+			notice.Category = "turn_request_limit"
+			notice.Message = "Antigravity reached the request limit for this turn. You can continue in a new message."
+		case "refusal":
+			notice.Category = "agent_refusal"
+			notice.Message = "Antigravity declined to continue this turn."
+		}
+	}
+	return turnOutcome{status: "failed", notice: &notice}
+}
+
+func (r *Router) finish(c *chat, turn string, outcome turnOutcome) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if c.active != turn {
 		return
 	}
+	if c.admitting {
+		c.finishPending = &outcome
+		return
+	}
+	r.finishLocked(c, turn, outcome)
+}
+
+func (r *Router) finishLocked(c *chat, turn string, outcome turnOutcome) {
+	for _, state := range c.commandCalls {
+		if !state.terminal {
+			m := &c.messages[state.index]
+			m.Status = "unknown"
+			if outcome.status == "interrupted" {
+				m.Status = "interrupted"
+			}
+			c.emitCommand(*m, "item/completed")
+		}
+	}
+	c.commandCalls = nil
 	for _, target := range c.calls {
 		if target.Status == "running" || target.Status == "pendingInit" {
 			target.Status = "unknown"
-			if status == "interrupted" {
+			if outcome.status == "interrupted" {
 				target.Status = "interrupted"
 			}
 			c.emitInvocation(turn, "completed", target)
@@ -749,7 +1088,17 @@ func (r *Router) finish(c *chat, turn, status string) {
 			emitEvent(c.emit, "decision/resolved", map[string]any{"decision_id": id})
 		}
 	}
-	emitEvent(c.emit, "turn/completed", map[string]any{"threadId": c.ID, "turn": map[string]any{"id": turn, "status": status}})
+	for i := len(c.messages) - 1; i >= 0 && c.messages[i].Turn == turn; i-- {
+		if c.messages[i].Role == "user" {
+			c.messages[i].Status = outcome.status
+			c.messages[i].Notice = outcome.notice
+		}
+	}
+	params := map[string]any{"threadId": c.ID, "turn": map[string]any{"id": turn, "status": outcome.status}}
+	if outcome.notice != nil {
+		params["notice"] = outcome.notice
+	}
+	emitEvent(c.emit, "turn/completed", params)
 	c.active = ""
 }
 
@@ -779,6 +1128,8 @@ func (r *Router) retire(workspace string, client *acp.Client) {
 	for _, c := range r.chats {
 		if c.Workspace == workspace {
 			c.loaded = false
+			r.clearUsageLocked(c)
+			c.usageModel = ""
 		}
 	}
 	r.mu.Unlock()

@@ -14,9 +14,12 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "stream-performance") { streamingPerformanceSmoke(); return }
         if (args.getString("preview") == "composer-responsiveness") { composerResponsivenessSmoke(args); return }
         if (args.getString("preview") == "native-session-controls") { nativeSessionControlsSmoke(); return }
+        if (args.getString("preview") == "codex-goal") { codexGoalSmoke(); return }
         if (args.getString("preview") == "opencode-capabilities") { openCodeCapabilitiesSmoke(); return }
         if (args.getString("preview") == "opencode-projects-read") { openCodeCapabilitiesSmoke(projectsRead = true); return }
         if (args.getString("preview") == "session-management") { sessionManagementSmoke(); return }
+        if (args.getString("preview") == "antigravity-titles") { antigravityTitleSmoke(); return }
+        if (args.getString("preview") == "antigravity-context") { antigravityContextSmoke(); return }
         if (args.getString("preview") == "plan-review") { planReviewSmoke(); return }
         if (args.getString("preview") == "prompt-drafts") { promptDraftSmoke(args); return }
         if (args.getString("preview") == "agent-activity") { agentActivitySmoke(); return }
@@ -38,6 +41,7 @@ class TransportSmoke : Instrumentation() {
         if (args.getString("preview") == "shared-agent-chats") { sharedAgentChatsSmoke(); return }
 
         if (args.getString("preview") == "antigravity-options") { antigravityOptionsSmoke(); return }
+        if (args.getString("preview") == "antigravity-attachments") { antigravityAttachmentSmoke(); return }
         if (args.getString("preview") == "chat-ui") { chatUiSmoke(); return }
         if (args.getString("preview") == "markdown-table") { markdownTableSmoke(); return }
         if (args.getString("preview") == "command-timeline") { commandTimelineSmoke(); return }

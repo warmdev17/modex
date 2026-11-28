@@ -21,7 +21,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -61,14 +60,10 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import org.json.JSONObject
 
-internal enum class ChatIcon { Menu, New, Send, More, Close, Model, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Error, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
+internal enum class ChatIcon { Menu, New, Send, More, Close, ModelChoice, Folder, Attach, File, Image, Phone, Computer, Skill, Plugin, ChevronRight, ChevronDown, Down, Stop, Error, Terminal, Settings, Activity, Archive, Restore, Fork, Delete, Edit, Copy, SelectText, Disconnect }
 
 @Composable
 internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color = LocalContentColor.current) {
-    if (icon == ChatIcon.Model) {
-        Icon(painterResource(R.drawable.ic_openai), description, Modifier.size(22.dp), tint = color)
-        return
-    }
     Canvas(Modifier.size(22.dp).semantics { if (description != null) contentDescription = description }) {
         val u = size.width / 24
         fun line(x: Float, y: Float, x2: Float, y2: Float) = drawLine(color, Offset(x*u,y*u), Offset(x2*u,y2*u), 1.8f*u, StrokeCap.Round)
@@ -93,7 +88,6 @@ internal fun ChatGlyph(icon: ChatIcon, description: String? = null, color: Color
             ChatIcon.Activity -> { line(3f,12f,7f,12f); line(7f,12f,10f,5f); line(10f,5f,14f,19f); line(14f,19f,17f,12f); line(17f,12f,21f,12f) }
             ChatIcon.Terminal -> { line(3f,4f,21f,4f); line(21f,4f,21f,20f); line(21f,20f,3f,20f); line(3f,20f,3f,4f); line(7f,8f,11f,12f); line(11f,12f,7f,16f); line(13f,16f,17f,16f) }
             ChatIcon.Settings -> { line(4f,6f,8f,6f); line(12f,6f,20f,6f); line(4f,12f,14f,12f); line(18f,12f,20f,12f); line(4f,18f,6f,18f); line(10f,18f,20f,18f); for ((x,y) in listOf(10f to 6f,16f to 12f,8f to 18f)) drawCircle(color, 2f*u, Offset(x*u,y*u), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.8f*u)) }
-            ChatIcon.Model -> Unit
             ChatIcon.ModelChoice -> { line(6f,6f,18f,6f); line(18f,6f,18f,18f); line(18f,18f,6f,18f); line(6f,18f,6f,6f); for (v in listOf(9f,12f,15f)) { line(v,3f,v,6f); line(v,18f,v,21f); line(3f,v,6f,v); line(18f,v,21f,v) } }
             ChatIcon.Attach -> { line(5f,12f,19f,12f); line(12f,5f,12f,19f) }
             ChatIcon.File -> { line(5f,3f,14f,3f); line(14f,3f,19f,8f); line(19f,8f,19f,21f); line(19f,21f,5f,21f); line(5f,21f,5f,3f); line(14f,3f,14f,8f); line(14f,8f,19f,8f) }
@@ -158,9 +152,17 @@ internal fun ChatWorkspace(
     agyOptionsError: String = "", agyOptionsUncertain: Boolean = false,
     onRefreshAgyOptions: () -> Unit = {}, onSetAgyOption: (String, String) -> Unit = { _, _ -> },
     sessionCapabilities: BackendCapabilities = backendCapabilities,
+    goal: Goal? = null, goalLoading: Boolean = false, goalWorking: Boolean = false,
+    goalUncertain: Boolean = false, goalError: String = "",
+    onGoalRefresh: () -> Unit = {}, onGoalSet: (String, String, String) -> Unit = { _, _, _ -> }, onGoalClear: () -> Unit = {},
 ) {
     val antigravity = sessionAgent == ANTIGRAVITY_AGENT
-    val agyModelLabel = agyOptions.firstOrNull { it.id == "model" }?.currentLabel.orEmpty()
+    val attachmentsEnabled = !antigravity || sessionCapabilities.agyAttachments
+    val attachmentsVisible = attachmentsEnabled || attachments.isNotEmpty()
+    val agyAttachmentWarning = if (antigravity) antigravityAttachmentError(attachments, attachmentsEnabled) else ""
+    val waitingToSendFiles = antigravity && busy && attachments.isNotEmpty()
+    val agyModel = agyOptions.firstOrNull { it.id == "model" }
+    val agyModelLabel = agyModel?.currentLabel.orEmpty()
     val agyThinking = agyOptions.firstOrNull { it.id == "thought_level" }
     val agentLabel = chatAgents.firstOrNull { it.id == sessionAgent }?.label ?: if (antigravity) "Antigravity" else sessionCapabilities.label
     var deleting by remember(host, archived) { mutableStateOf("") }
@@ -259,6 +261,7 @@ internal fun ChatWorkspace(
         modelInput = sessionModel; effortInput = sessionEffort.ifBlank { defaultEffort(sessionModel) }; showModel = true
     }
     var showSessionStatus by remember(selected) { mutableStateOf(false) }
+    var showGoal by remember(host, selected) { mutableStateOf(false) }
     val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
     val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" || it.role == "agent_activity" } }
     val agents = remember(messages, activeTurnId, connected, historyLoading) {
@@ -281,7 +284,7 @@ internal fun ChatWorkspace(
     val queuedQuestions = remember(messages, sessionAgent, backendCapabilities.backend) {
         if (sessionAgent == CODEX_AGENT && backendCapabilities.backend == "codex") queuedQuestionCards(messages) else emptyList()
     }
-    LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
+    LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false; showGoal = false } }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
     val modeActionEnabled = canSwitch && selected.isNotBlank() && selectedDecisions.isEmpty() && !modeChanging && !sessionStatusLoading && (!busy || modeUncertain)
@@ -381,6 +384,7 @@ internal fun ChatWorkspace(
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
                     ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         if (sessionCapabilities.permissionProfiles) DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true; onSessionPermissions("") })
+                        if (sessionCapabilities.goals && sessionAgent == CODEX_AGENT) DropdownMenuItem(text = { Text("Goal") }, leadingIcon = { ChatGlyph(ChatIcon.Activity) }, enabled = selected.isNotBlank(), onClick = { menu = false; showGoal = true; onGoalRefresh() })
                         if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, onClick = { menu = false; onHome() })
                         DropdownMenuItem(text = { Text("Connection settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, onClick = { menu = false; onConnection() })
                         if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, leadingIcon = { ChatGlyph(ChatIcon.Disconnect) }, onClick = { menu = false; onDisconnect() })
@@ -425,7 +429,7 @@ internal fun ChatWorkspace(
                     if (sessionCapabilities.takeover && takeoverSession.isNotBlank()) TextButton(onClick = { showTakeover = true }, enabled = connected && !historyLoading) { Text("Take over on phone") }
                 }
             }
-            if (sessionCapabilities.sessionStatus && usageWarning.isNotBlank() && selected.isNotBlank()) {
+            if (!antigravity && sessionCapabilities.sessionStatus && usageWarning.isNotBlank() && selected.isNotBlank()) {
                 Surface(color = Mocha.Mantle, shape = RoundedCornerShape(10.dp),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = ::openStatus)) {
                     Text(usageWarning, Modifier.padding(12.dp), color = Mocha.Red, style = MaterialTheme.typography.bodyMedium)
@@ -550,11 +554,16 @@ internal fun ChatWorkspace(
                 else (sessionModel.ifBlank { "Loading model…" } + " · " + sessionEffort.ifBlank { defaultEffort(sessionModel).ifBlank { "Reasoning unavailable" } }),
                 connected && selected.isNotBlank() && (!antigravity || backendCapabilities.agySessionOptions),
                 ::openModel,
-                connected && !historyLoading && selected.isNotBlank() && (!busy || (!antigravity && activeTurnId.isNotBlank() && !stopping)) &&
+                connected && !historyLoading && selected.isNotBlank() && (!busy || (activeTurnId.isNotBlank() && !stopping && (!antigravity || sessionCapabilities.agySteer))) &&
+                    !waitingToSendFiles && agyAttachmentWarning.isEmpty() &&
                     !steerSending && !attachmentWorking && !modeChanging && !permissionsWorking && !planResponding && (!antigravity || !agyOptionsUncertain),
-                if (antigravity) emptyList() else attachments, !antigravity && attachmentWorking, attachmentProgress, if (antigravity) "" else attachmentError,
-                !antigravity && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
+                if (attachmentsVisible) attachments else emptyList(), attachmentsEnabled && attachmentWorking, attachmentProgress,
+                agyAttachmentWarning.ifEmpty { if (attachmentsVisible) attachmentError else "" },
+                attachmentsEnabled && connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
+                connected && selected.isNotBlank() && !steerSending && !attachmentWorking,
                 onPhoneFiles, onRemoteFiles, onRemoveAttachment, loadAttachment, { preview = it },
+                modelBrand = if (antigravity) modelBrand(agyModel?.current.orEmpty(), agyModelLabel)
+                    else modelBrand(sessionModel, models.firstOrNull { it.model == sessionModel }?.name.orEmpty()),
                 modelColor = reasoningColor(if (antigravity) agyThinking?.current.orEmpty() else sessionEffort.ifBlank { defaultEffort(sessionModel) }),
                 focus = focus, steerSending = steerSending, stopping = stopping, stopEnabled = connected && !historyLoading && busy, onStop = onStop,
                 draftKey = selected, referenceCatalog = referenceCatalog, referencesLoading = referencesLoading, referenceStatus = referenceStatus,
@@ -574,7 +583,11 @@ internal fun ChatWorkspace(
             }
         }
     }
-    if (sessionCapabilities.sessionStatus && showSessionStatus) SessionStatusDialog(sessionStatus, sessionStatusLoading, sessionStatusError, onSessionStatus) { showSessionStatus = false }
+    if (sessionCapabilities.sessionStatus && showSessionStatus) SessionStatusDialog(sessionStatus, sessionStatusLoading, sessionStatusError, antigravity, onSessionStatus) { showSessionStatus = false }
+    if (sessionCapabilities.goals && sessionAgent == CODEX_AGENT && showGoal) GoalDialog(
+        goal, goalLoading, goalWorking, goalUncertain, goalError, connected,
+        onGoalRefresh, onGoalSet, onGoalClear,
+    ) { showGoal = false }
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -622,7 +635,7 @@ internal fun ChatWorkspace(
             }
             if (backendCapabilities.projects) Text(newWorkspace.ifBlank { "Outside projects" }, style = MaterialTheme.typography.labelSmall, color = Mocha.Subtext)
             if (newChatAgent != ANTIGRAVITY_AGENT) {
-                ModelPicker(newChatModels, newChatModelCatalogStatus, model, { model = it; newEffort = defaultEffort(it, newChatModels) })
+                ModelPicker(newChatModels, newChatModelCatalogStatus, model) { model = it; newEffort = defaultEffort(it, newChatModels) }
                 ReasoningControl(newChatModels.firstOrNull { it.model == model }, newEffort) { newEffort = it }
                 if (newChatCapabilities.permissionProfiles && newChatAgent == CODEX_AGENT) Column(Modifier.selectableGroup()) {
                     permissionModes.forEach { (mode, label) ->
@@ -666,25 +679,22 @@ internal fun ChatWorkspace(
         agyOptions, agyOptionsLoading, agyOptionsError, connected && !busy && !historyLoading && !agyOptionsUncertain,
         onSetAgyOption, onRefreshAgyOptions, onClose = { showModel = false },
     )
-    if (showModel && !antigravity) AlertDialog(
-        onDismissRequest = { showModel = false },
-        title = { Text("Model for next turn") },
-        text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("$agentLabel applies this model to the next turn and later turns in this session.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
-            ModelPicker(models, modelCatalogStatus, modelInput, { modelInput = it; effortInput = defaultEffort(it) })
-            ReasoningControl(models.firstOrNull { it.model == modelInput.trim() }, effortInput) { effortInput = it }
-
-        } },
-        confirmButton = { TextButton(enabled = modelInput.isNotBlank() && validModelId(modelInput), onClick = {
+    if (showModel && !antigravity) ModelSettingsDialog(
+        onClose = { showModel = false },
+        actions = { TextButton(enabled = modelInput.isNotBlank() && validModelId(modelInput), onClick = {
             onModelChoice(modelInput.trim(), effortInput)
             showModel = false
         }) { Text("Use model") } },
-        dismissButton = { TextButton(onClick = { showModel = false }) { Text("Cancel") } }
-    )
+        dismiss = { TextButton(onClick = { showModel = false }) { Text("Cancel") } },
+    ) {
+        Text("$agentLabel applies this model to the next turn and later turns in this session.", color = Mocha.Subtext, style = MaterialTheme.typography.bodySmall)
+        ModelPicker(models, modelCatalogStatus, modelInput) { modelInput = it; effortInput = defaultEffort(it) }
+        ReasoningControl(models.firstOrNull { it.model == modelInput.trim() }, effortInput) { effortInput = it }
+    }
 }
 
 @Composable
-private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error: String, refresh: () -> Unit, close: () -> Unit) {
+private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error: String, antigravity: Boolean, refresh: () -> Unit, close: () -> Unit) {
     fun known(value: String) = value.ifBlank { "Unavailable" }
     fun number(value: Long?) = value?.let(java.text.NumberFormat.getIntegerInstance()::format) ?: "Unavailable"
     fun sandbox(value: String) = when (value) {
@@ -717,19 +727,24 @@ private fun SessionStatusDialog(status: SessionStatus?, loading: Boolean, error:
                     if (context != null) "${number(status.contextTokens)} used / ${number(status.contextWindow)} tokens" else null,
                     showBar = false,
                 )
-                SessionRateLimitRow("5h limit", status.usageWindow(5 * 60L))
-                SessionRateLimitRow("Weekly limit", status.usageWindow(7 * 24 * 60L))
-                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
-                Text("Mode: ${if (status.mode == "plan") "Plan" else if (status.mode == "default") "Default" else "Unavailable"}")
-                Text("Model: ${known(status.model)}")
-                Text("Reasoning: ${known(status.effort)}")
-                Text("Workspace: ${known(status.workspace)}")
-                Text("Provider: ${known(status.provider)}")
-                Text("Sandbox: ${sandbox(status.sandbox)}")
-                Text("Approvals: ${known(status.approvalPolicy)}")
-                Text("Reviewer: ${known(status.approvalsReviewer)}")
-                Text("Session total: ${if (status.totalTokens != null) "${number(status.totalTokens)} tokens" else "Unavailable"}")
-                Text("Limits: ${listOf(status.limitName, status.planType).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Unavailable" }}")
+                if (antigravity) {
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
+                    Text("Workspace: ${known(status.workspace)}")
+                } else {
+                    SessionRateLimitRow("5h limit", status.usageWindow(5 * 60L))
+                    SessionRateLimitRow("Weekly limit", status.usageWindow(7 * 24 * 60L))
+                    HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Mocha.Overlay)
+                    Text("Mode: ${if (status.mode == "plan") "Plan" else if (status.mode == "default") "Default" else "Unavailable"}")
+                    Text("Model: ${known(status.model)}")
+                    Text("Reasoning: ${known(status.effort)}")
+                    Text("Workspace: ${known(status.workspace)}")
+                    Text("Provider: ${known(status.provider)}")
+                    Text("Sandbox: ${sandbox(status.sandbox)}")
+                    Text("Approvals: ${known(status.approvalPolicy)}")
+                    Text("Reviewer: ${known(status.approvalsReviewer)}")
+                    Text("Session total: ${if (status.totalTokens != null) "${number(status.totalTokens)} tokens" else "Unavailable"}")
+                    Text("Limits: ${listOf(status.limitName, status.planType).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "Unavailable" }}")
+                }
             } }
         } },
         confirmButton = { TextButton(onClick = close) { Text("Close") } },
@@ -771,8 +786,8 @@ private fun SessionUsageRow(label: String, remaining: Int?, detail: String?, sho
 private fun PromptComposer(
     prompt: String, onChange: (String, PromptReference?) -> Unit, busy: Boolean, model: String, modelEnabled: Boolean, onModel: () -> Unit, enabled: Boolean,
     attachments: List<Attachment>, attachmentWorking: Boolean, attachmentProgress: String, attachmentError: String,
-    attachEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
-    modelColor: Color, focus: FocusRequester, steerSending: Boolean, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
+    attachEnabled: Boolean, removeEnabled: Boolean, onPhoneFiles: () -> Unit, onRemoteFiles: () -> Unit, onRemove: (String) -> Unit, loadAttachment: suspend (Attachment) -> java.io.File, onPreview: (Attachment) -> Unit,
+    modelBrand: ModelBrand, modelColor: Color, focus: FocusRequester, steerSending: Boolean, stopping: Boolean, stopEnabled: Boolean, onStop: () -> Unit,
     draftKey: String, referenceCatalog: ReferenceCatalog, referencesLoading: Boolean, referenceStatus: String,
     referencesAvailable: Boolean, referenceEnabled: Boolean, chosenReferences: List<PromptReference>,
     onRemoveReference: (PromptReference) -> Unit, onRefreshReferences: () -> Unit,
@@ -853,9 +868,9 @@ private fun PromptComposer(
                         selected = false, onClick = { onPreview(file) },
                         label = { Text(file.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         leadingIcon = { ChatGlyph(if (file.kind == "image") ChatIcon.Image else ChatIcon.File) },
-                        trailingIcon = { if (attachEnabled) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
+                        trailingIcon = { if (removeEnabled) IconButton(onClick = { onRemove(file.path) }) { ChatGlyph(ChatIcon.Close, "Remove ${file.name}") } },
                         modifier = Modifier.heightIn(min = 48.dp).widthIn(max = 260.dp), shape = RoundedCornerShape(6.dp)
-                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (attachEnabled) ({ onRemove(file.path) }) else null)
+                    ) else AttachmentTile(file, loadAttachment, { onPreview(file) }, if (removeEnabled) ({ onRemove(file.path) }) else null)
                 }
             }
             if (attachmentWorking) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -888,7 +903,7 @@ private fun PromptComposer(
                         contentPadding = PaddingValues(horizontal = 4.dp), modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = "Choose model" }
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Start) {
-                            ChatGlyph(ChatIcon.Model)
+                            ModelLogo(modelBrand)
                             Spacer(Modifier.width(6.dp))
                             Text(model, modifier = Modifier.weight(1f, fill = false), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelMedium)
                         }

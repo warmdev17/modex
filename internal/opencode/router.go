@@ -19,6 +19,7 @@ type managedWorkspace struct {
 	client    *Client
 	synth     *Synthesizer
 	decisions *Decisions
+	stream    *Stream
 }
 
 var versionPattern = regexp.MustCompile(`^v?2\.([0-9]+)\.[0-9]+(?:\+[0-9A-Za-z.-]+)?$`)
@@ -96,7 +97,7 @@ func (r *Router) workspace(path string) (*managedWorkspace, error) {
 	// shortcut: poll anchored history until native events reliably identify their turn.
 	stream.Filter = func(string, json.RawMessage, string) bool { return false }
 
-	w := &managedWorkspace{client: client, synth: synth, decisions: decisions}
+	w := &managedWorkspace{client: client, synth: synth, decisions: decisions, stream: stream}
 	r.workspaces[path] = w
 	go func() { _ = stream.Run(r.ctx) }()
 	return w, nil
@@ -390,6 +391,13 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			}
 		}
 		return raw, nil
+	}
+	if w.stream != nil && (cmd.Method == "turn/start" || cmd.Method == "turn/steer") {
+		w.stream.nativeMu.Lock()
+		defer w.stream.nativeMu.Unlock()
+		if err := w.stream.reconcileNativeLocked(ctx, chat.Native); err != nil {
+			return nil, true, err
+		}
 	}
 	forward := func(method string, raw json.RawMessage) { r.emitEvent(workspace, method, raw) }
 	value, err := handleEvents(ctx, workspace, cmd, call, forward, w.synth)

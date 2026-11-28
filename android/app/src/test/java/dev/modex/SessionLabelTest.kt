@@ -2,6 +2,7 @@ package dev.modex
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class SessionLabelTest {
@@ -11,5 +12,11 @@ class SessionLabelTest {
     @Test fun unnamedUsesPreviewThenShortId() {
         assertEquals("first question", sessionLabel(JSONObject("""{"preview":"first question"}""")))
         assertEquals("Untitled session · 12345678", sessionLabel(JSONObject("""{"id":"123456789"}""")))
+    }
+    @Test fun nativeTitlesEnforceTheHostContract() {
+        assertEquals("Modex", sessionTitle(" Modex "))
+        assertNull(sessionTitle(7))
+        assertNull(sessionTitle("bad\nname"))
+        assertNull(sessionTitle("é".repeat(257)))
     }
 }

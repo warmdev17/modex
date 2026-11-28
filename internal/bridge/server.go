@@ -60,6 +60,11 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 	}
 	allowed := map[string]bool{}
 	switch cmd.Method {
+	case "threads/goal/get", "threads/goal/set", "threads/goal/clear":
+		allowed["thread_id"], allowed["workspace"] = true, true
+		if cmd.Method == "threads/goal/set" {
+			allowed["objective"], allowed["status"], allowed["token_budget"] = true, true, true
+		}
 	case "threads/permissions":
 		allowed["thread_id"], allowed["workspace"], allowed["profile"] = true, true, true
 	case "threads/mode", "threads/status":
@@ -92,6 +97,7 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		allowed["workspace"] = true
 	case "threads/list", "models/list", "projects/list":
 		if cmd.Method == "threads/list" {
+			allowed["workspace"] = true
 			allowed["all_workspaces"] = true
 			allowed["archived"] = true
 		}
@@ -143,6 +149,17 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		if json.Unmarshal(raw, &workspace) != nil || !filepath.IsAbs(workspace) || strings.ContainsAny(workspace, "\r\n\x00") || len(workspace) > 32768 {
 			return nil, errors.New("workspace must be an absolute path")
 		}
+		if cmd.Method == "threads/list" {
+			var err error
+			workspace, err = filepath.EvalSymlinks(workspace)
+			if err != nil {
+				return nil, errors.New("workspace is unavailable")
+			}
+			info, err := os.Stat(workspace)
+			if err != nil || !info.IsDir() {
+				return nil, errors.New("workspace is unavailable")
+			}
+		}
 		cwd = workspace
 	}
 	safeError := func(err error) error {
@@ -169,6 +186,8 @@ func HandleEvents(ctx context.Context, cwd string, cmd Command, call EventCaller
 		}
 	}
 	switch cmd.Method {
+	case "threads/goal/get", "threads/goal/set", "threads/goal/clear":
+		return threadGoal(cmd.Method, p, cwd, fetch)
 	case "threads/permissions":
 		return sessionPermissions(p, cwd, fetch)
 	case "threads/archive", "threads/unarchive", "threads/delete", "threads/fork":
@@ -835,10 +854,22 @@ func ServeCommands(ctx context.Context, in io.Reader, out io.Writer, handler Com
 			handle(cmd)
 		}
 	}()
+	var checks sync.WaitGroup
+	checkSlots := make(chan struct{}, 3)
 	for scanner.Scan() {
 		cmd, err := DecodeCommand(scanner.Bytes())
 		if err != nil {
 			respond(cmd, nil, err)
+			continue
+		}
+		if cmd.Method == "cli/agents/check" {
+			select {
+			case checkSlots <- struct{}{}:
+				checks.Add(1)
+				go func() { defer checks.Done(); defer func() { <-checkSlots }(); handle(cmd) }()
+			default:
+				respond(cmd, nil, errors.New("agent check queue full; request not dispatched"))
+			}
 			continue
 		}
 		if cmd.Method == "decision/respond" || cmd.Method == "turn/interrupt" {
@@ -853,6 +884,7 @@ func ServeCommands(ctx context.Context, in io.Reader, out io.Writer, handler Com
 	}
 	close(commands)
 	<-done
+	checks.Wait()
 	if err := scanner.Err(); err != nil {
 		return err
 	}

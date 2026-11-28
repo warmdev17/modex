@@ -57,7 +57,7 @@ internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAge
     val keys = agents.firstOrNull { it.id == agent }?.capabilities.orEmpty()
     return BackendCapabilities(
         backend = agent,
-        sessionStatus = "session_status" in keys,
+        sessionStatus = "session_status" in keys || (agent == ANTIGRAVITY_AGENT && host.agyContextUsage),
         planMode = "plan_mode" in keys,
         permissionProfiles = "permission_profiles" in keys,
         sessionLifecycle = "session_lifecycle" in keys,
@@ -65,9 +65,13 @@ internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAge
         projectCreation = host.projectCreation,
         references = "references" in keys,
         takeover = "takeover" in keys,
+        goals = agent == CODEX_AGENT && "goals" in keys,
         agentDiscovery = host.agentDiscovery,
         runtimeRouting = host.runtimeRouting,
         agySessionOptions = agent == ANTIGRAVITY_AGENT && host.agySessionOptions,
+        agyAttachments = agent == ANTIGRAVITY_AGENT && host.agyAttachments,
+        agySteer = agent == ANTIGRAVITY_AGENT && host.agySteer,
+        agyContextUsage = agent == ANTIGRAVITY_AGENT && host.agyContextUsage,
     )
 }
 
@@ -112,12 +116,20 @@ internal fun newThreadParams(
 internal fun turnStartParams(thread: String, text: String, model: String, effort: String = "", attachments: List<Attachment> = emptyList(), references: List<PromptReference> = emptyList(), agent: String = CODEX_AGENT): JSONObject =
     JSONObject().put("thread_id", thread).put("text", text).apply {
         require(agent in CHAT_AGENT_IDS)
-        if (agent == ANTIGRAVITY_AGENT) return@apply
+        if (agent == ANTIGRAVITY_AGENT) {
+            if (attachments.isNotEmpty()) put("attachments", org.json.JSONArray().apply { attachments.forEach { put(it.toJson()) } })
+            return@apply
+        }
         if (references.isNotEmpty()) put("references", org.json.JSONArray().apply { references.forEach { put(it.selectionJson()) } })
         require(validModelId(model) && validEffort(effort))
         if (attachments.isNotEmpty()) put("attachments", org.json.JSONArray().apply { attachments.forEach { put(it.toJson()) } })
         if (model.isNotBlank()) put("model", model.trim())
         if (effort.isNotBlank()) put("effort", effort)
+    }
+
+internal fun turnSteerParams(thread: String, turn: String, text: String, workspace: String): JSONObject =
+    JSONObject().put("thread_id", thread).put("turn_id", turn).put("text", text).apply {
+        if (workspace.isNotBlank()) put("workspace", workspace)
     }
 
 internal fun BackendCapabilities.supportedNewThreadParams(model: String, mode: String, workspace: String = "", projectId: String = ""): JSONObject =

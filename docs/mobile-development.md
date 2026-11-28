@@ -14,7 +14,7 @@ The current owner installation uses the local development certificate. A develop
 
 A source tag may identify a verified feature commit; this does not merge it to main. Keep every original commit when integration is requested. A later production versionCode must exceed every earlier development release code too.
 
-For private previews, open **From connected computer** in the chat attachment menu, select the preview button beside the APK, then tap **Save to Downloads**. Modex reads the file over SFTP and saves it to Android Downloads. On Android 8–9, use **Save as…** and choose Downloads in the system picker. Then open the APK from Files and confirm the update with Android's package installer. Use the GitHub/browser link for the first upgrade from a release without Downloads support. The picker accepts files up to 20 MiB.
+Stage private preview APKs in `.modex/previews/` under the main Modex checkout on the connected host. On Android, open **From connected computer** in the chat attachment menu, tap the path edit icon, enter the full host directory path and tap **Go**. Preview the APK and tap **Save to Downloads** to save it to Android Downloads over SFTP. On Android 8–9, use **Save as…** and choose Downloads in the system picker. Then open the APK from Files and confirm the update with Android's package installer. Use the GitHub/browser link for the first upgrade from a release without Downloads support. The picker accepts files up to 20 MiB.
 
 ## Service continuity today
 
