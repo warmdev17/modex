@@ -112,6 +112,25 @@ func TestCLIPickerCodexDoesNotWaitForOtherReadiness(t *testing.T) {
 	}
 }
 
+func TestCLIPickerCanBrowseCheckingAgentButCannotLaunch(t *testing.T) {
+	p := readyCLIFullscreenPicker(t, []cliAgent{{ID: "antigravity", Label: "Antigravity", Checking: true}}, "/work", func(context.Context, cliAgent, string) (json.RawMessage, error) {
+		return json.RawMessage(`{"data":[]}`), nil
+	})
+	pressCLIPickerKey(t, p, tea.KeyEnter)
+	if !strings.Contains(p.View(), "New conversation") {
+		t.Fatal("saved sessions blocked by readiness")
+	}
+	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if p.choice.Workspace != "" {
+		t.Fatal("unverified runtime launched")
+	}
+	p.Update(cliPickerAgentMsg{id: "antigravity", agent: cliAgent{ID: "antigravity", Label: "Antigravity", Ready: true}})
+	p.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if p.choice.Workspace != "/work" {
+		t.Fatal("verified runtime remained blocked")
+	}
+}
+
 func TestCLIFullscreenPickerIgnoresAbandonedSessionList(t *testing.T) {
 	p := readyCLIFullscreenPicker(t, []cliAgent{
 		{ID: "codex", Label: "Codex", Ready: true},

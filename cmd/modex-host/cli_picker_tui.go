@@ -204,7 +204,7 @@ func (p *cliFullscreenPicker) agentKey(key tea.KeyType) tea.Cmd {
 	case tea.KeyDown:
 		p.agentIndex = min(len(p.agents)-1, p.agentIndex+1)
 	case tea.KeyEnter:
-		if p.agents[p.agentIndex].Ready {
+		if p.agents[p.agentIndex].Ready || p.agents[p.agentIndex].Checking {
 			p.cursors = []string{""}
 			return p.loadPage()
 		}
@@ -244,6 +244,9 @@ func (p *cliFullscreenPicker) sessionKey(key tea.KeyType) tea.Cmd {
 			return p.loadPage()
 		}
 	case tea.KeyEnter:
+		if !p.agents[p.agentIndex].Ready {
+			return nil
+		}
 		if p.sessionIndex == 0 {
 			p.choice = cliChoice{Workspace: p.cwd}
 		} else {
@@ -316,6 +319,13 @@ func (p *cliFullscreenPicker) View() string {
 				hint += " · PgDn Next"
 			}
 			footer = append(footer, cliScreenRow{hint, cliScreenMuted})
+		}
+		if !p.agents[p.agentIndex].Ready {
+			notice := "Checking runtime · opening is available after verification."
+			if !p.agents[p.agentIndex].Checking {
+				notice = p.agents[p.agentIndex].Reason + " · Esc Back to recheck"
+			}
+			footer = append([]cliScreenRow{{cliLabel(notice), cliScreenMuted}}, footer...)
 		}
 	}
 	if len(p.cursors) == 0 && len(p.agents) > 0 && p.screen.height >= 12 {
