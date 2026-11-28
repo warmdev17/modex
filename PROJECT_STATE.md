@@ -37,7 +37,12 @@ status/usage, Pause and Resume. See the
   SHA-256 `5d11547f0fdc98f88385d0cf6497c6c88ee2a5866241b74011bde9d7a756214a`.
   Package/signature verification passed against the established signer.
   Stamped host `77a0e40` passed isolated real Codex goal reconnect and
-  mixed-runtime supervisor smokes. Host activation is the final operation.
+  mixed-runtime supervisor smokes. Installed host SHA-256
+  `fa4874b6bde9d7270c1516efa8f020cc9b3107e0a410d958252363e2ea9c75aa`.
+  Previous host is `/tmp/modex-goals-backup.YzxLUq/modex-host.previous`.
+  A 30-second external restart is the final activation operation;
+  live service adoption must be checked after it runs. Android must reset
+  its session cursor and reconnect. Delayed restart can interrupt active turns.
   Branch remains local, no PR/merge or public release published.
 - Physical Android, large-font/TalkBack and provider-backed active goal
   completion were not tested. Native paused goal tests send no inference.
