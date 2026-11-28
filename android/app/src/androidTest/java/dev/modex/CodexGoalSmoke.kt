@@ -121,6 +121,7 @@ internal fun Instrumentation.codexGoalSmoke() {
         val activity = startActivitySync(Intent(targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         var renderedGoal by mutableStateOf<Goal?>(null)
         var action = ""
+        var clearConfirmed = false
         var submittedObjective = ""
         var submittedBudget = ""
         runOnMainSync {
@@ -137,7 +138,7 @@ internal fun Instrumentation.codexGoalSmoke() {
                     action = status.ifBlank { "create" }; submittedObjective = objective; submittedBudget = budget
                     renderedGoal = Goal(thread, objective.ifBlank { "Ship goal modal" }, status.ifBlank { "active" }, budget.toLongOrNull() ?: 1200, 345, 67, 1, 2)
                 },
-                onGoalClear = { action = "clear"; renderedGoal = null },
+                onGoalClear = { action = "clear"; if (clearConfirmed) renderedGoal = null },
             ) } }
         }
         waitForIdleSync()
@@ -163,15 +164,19 @@ internal fun Instrumentation.codexGoalSmoke() {
             check(target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) { "Could not tap $text" }
             waitForIdleSync()
         }
-        fun type(hint: String, value: String) {
+        fun editor(hint: String): AccessibilityNodeInfo {
             fun containsLabel(node: AccessibilityNodeInfo): Boolean =
                 node.text?.contains(hint) == true || node.contentDescription?.contains(hint) == true ||
                     node.hintText?.contains(hint) == true ||
                     (0 until node.childCount).any { node.getChild(it)?.let(::containsLabel) == true }
-            val target = find { it.isEditable && containsLabel(it) } ?: error("Missing $hint field")
+            return find { it.isEditable && containsLabel(it) } ?: error("Missing $hint field")
+        }
+        fun type(hint: String, value: String) {
+            val target = editor(hint)
             val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value) }
             check(target.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args))
             waitForIdleSync()
+            check(find { it.isEditable && it.text?.toString() == value } != null) { "Field did not show entered text" }
         }
 
         touch("Connection menu"); touch("Goal")
@@ -192,10 +197,39 @@ internal fun Instrumentation.codexGoalSmoke() {
         check(action == "paused" && node("Paused") != null)
         touch("Resume")
         check(action == "active" && node("Active") != null)
+        touch("Edit goal")
+        type("Objective", "Keep draft until confirmed")
+        touch("Cancel edit")
+        touch("Clear goal"); touch("Clear")
+        check(node("Active") != null) { "Unconfirmed clear removed the goal" }
+        touch("Edit goal")
+        check(editor("Objective").text.toString() == "Ship goal modal")
+        type("Objective", "Draft from edit")
+        touch("Cancel edit")
+        runOnMainSync { clearConfirmed = true }
         touch("Clear goal"); touch("Clear")
         check(action == "clear" && node("No goal is configured for this chat.") != null)
+        check(editor("Objective").text.isNullOrBlank()) { "Confirmed clear retained objective draft" }
+        check(editor("Token budget (optional)").text.isNullOrBlank()) { "Confirmed clear retained budget draft" }
 
-        output.putString("result", "PASS: Codex goal create/budget, live/stale isolation, uncertain refresh, pause/resume, clear and focused modal")
+        type("Objective", "Another draft")
+        type("Token budget (optional)", "900")
+        runOnMainSync { renderedGoal = Goal(thread, "External goal", "paused", 900, 0, 0, 3, 3) }
+        waitForIdleSync()
+        touch("Edit goal")
+        type("Objective", "Old edit")
+        runOnMainSync { renderedGoal = renderedGoal?.copy(tokensUsed = 10, updatedAt = 4) }
+        waitForIdleSync()
+        check(node("10 / 900 tokens") != null) { "Usage update did not render" }
+        val edited = editor("Objective").text.toString()
+        check(edited == "Old edit") { "Usage update erased an in-progress edit: $edited" }
+        runOnMainSync { renderedGoal = null }
+        waitForIdleSync()
+        check(node("Create goal") != null) { "External clear retained edit mode" }
+        check(editor("Objective").text.isNullOrBlank()) { "External clear retained objective draft" }
+        check(editor("Token budget (optional)").text.isNullOrBlank()) { "External clear retained budget draft" }
+
+        output.putString("result", "PASS: Codex goal lifecycle, confirmed/external clear resets objective and budget, unconfirmed clear preserves goal")
         finish(-1, output)
     } catch (failure: Throwable) {
         output.putString("result", "FAIL: Codex goal: ${failure.message}")

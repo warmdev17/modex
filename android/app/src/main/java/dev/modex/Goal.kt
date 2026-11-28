@@ -133,10 +133,10 @@ internal fun GoalDialog(
     onClear: () -> Unit,
     onClose: () -> Unit,
 ) {
-    var objective by rememberSaveable { mutableStateOf("") }
-    var budget by rememberSaveable { mutableStateOf("") }
-    var editing by rememberSaveable { mutableStateOf(false) }
-    var confirmClear by rememberSaveable { mutableStateOf(false) }
+    var objective by rememberSaveable(goal?.threadId) { mutableStateOf("") }
+    var budget by rememberSaveable(goal?.threadId) { mutableStateOf("") }
+    var editing by rememberSaveable(goal?.threadId) { mutableStateOf(false) }
+    var confirmClear by rememberSaveable(goal?.threadId) { mutableStateOf(false) }
     val canAct = connected && !loading && !working && !uncertain
     if (confirmClear && goal != null) AlertDialog(
         onDismissRequest = { confirmClear = false },
