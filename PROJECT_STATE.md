@@ -1,5 +1,18 @@
 # Modex project state
 
+## Deferred Codex completion-state mismatch
+
+Reported 2026-11-28 on `feat/native-agent-tui`, source `f413e63`.
+In one Codex run, the native CLI reported `Worked · 2m 32s`, while the
+same conversation on Android reported `Failed · 6m 20s`. This is recorded
+for later investigation and has not yet been independently reproduced.
+
+- Compare the native Codex completion event with the Android journal entry,
+  turn identity, terminal status, and duration timestamps for the same run.
+- Acceptance: one terminal outcome and elapsed duration are projected
+  consistently after completion, reconnect, and history replay.
+- No code change or verification has been performed for this report.
+
 ## Native agent terminals and durable AGY login
 
 Updated 2026-11-28T09:35:41+07:00 on `feat/native-agent-tui`.
