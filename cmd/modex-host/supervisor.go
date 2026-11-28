@@ -138,7 +138,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 			<-done
 		}
 	}()
-	endpoint := supervisorEndpoint{Address: listener.Addr().String(), Token: randomID(), Instance: randomID(), Workspace: cwd, NativeSocket: nativeSocket}
+	endpoint := supervisorEndpoint{Address: listener.Addr().String(), Token: randomID(), Instance: randomID(), Workspace: cwd, NativeSocket: nativeSocket, CLIRelay: b.kind == "codex"}
 	server := supervisor.NewServer(ctx, endpoint.Token, endpoint.Instance, input, stop)
 	server.Backend = b.kind
 	server.Capabilities = []string{"projects_read"}
@@ -151,6 +151,11 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 			params["ssh_connection"] = sshConnection
 		}
 		return json.NewEncoder(input).Encode(map[string]any{"id": supervisor.AttachmentCommandID, "method": "client/attached", "params": params})
+	}
+	if b.kind == "codex" {
+		server.OnCLIContext = func(sshConnection string) error {
+			return json.NewEncoder(input).Encode(map[string]any{"id": supervisor.AttachmentCommandID, "method": "client/attached", "params": map[string]any{"cli_ssh": true, "ssh_connection": sshConnection}})
+		}
 	}
 	go func() {
 		scanner := bufio.NewScanner(output)
@@ -166,7 +171,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 				}
 				continue
 			}
-			if server.Journal.Append(json.RawMessage(scanner.Bytes())) != nil {
+			if server.Publish(json.RawMessage(scanner.Bytes())) != nil {
 				break
 			}
 		}

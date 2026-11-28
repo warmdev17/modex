@@ -47,6 +47,21 @@ XDG_DATA_HOME="$profile/data" XDG_STATE_HOME="$profile/state" \
 
 Refresh the agent list after signing in.
 
+## Shared terminal sessions
+
+Run `modex cli`, choose a ready agent, then open a conversation or start
+a new one in the current workspace. Codex opens its native terminal UI.
+OpenCode and Antigravity open the Modex terminal chat. Keep Android
+connected and open the same conversation to watch replies and handle
+waiting input from either device. Use `/older` to load earlier messages,
+`/stop` to interrupt a turn, and `/quit` to leave the terminal while
+the supervisor keeps running.
+
+The picker uses RGB accents for the terminal theme and respects
+`NO_COLOR`. Existing sessions can also be opened with
+`modex cli --thread <id>`. For an OpenCode or Antigravity session, run
+from that workspace or pass its directory with `--workspace`.
+
 ## Antigravity in development builds
 
 Over SSH, Modex starts Antigravity with the connection context from

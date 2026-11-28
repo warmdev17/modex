@@ -47,6 +47,19 @@ XDG_DATA_HOME="$profile/data" XDG_STATE_HOME="$profile/state" \
 
 Làm mới danh sách agent sau khi đăng nhập.
 
+## Dùng chung phiên trên terminal
+
+Chạy `modex cli`, chọn agent đã sẵn sàng rồi mở chat cũ hoặc tạo chat
+trong workspace hiện tại. Codex mở giao diện terminal riêng. OpenCode
+và Antigravity mở chat trong terminal của Modex. Mở cùng chat trên
+Android để theo dõi câu trả lời hoặc xử lý yêu cầu đang chờ từ hai đầu.
+Dùng `/older` để xem tin cũ hơn, `/stop` để dừng lượt và `/quit` để
+thoát terminal khi supervisor vẫn chạy.
+
+Bộ chọn dùng màu RGB theo theme terminal và hỗ trợ `NO_COLOR`. Có thể
+mở thẳng phiên bằng `modex cli --thread <id>`. Với OpenCode hoặc
+Antigravity, chạy từ workspace của phiên hoặc chỉ định `--workspace`.
+
 ## Antigravity trong bản phát triển
 
 Khi kết nối qua SSH, Modex chuyển ngữ cảnh từ OpenSSH để Antigravity

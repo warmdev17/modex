@@ -3,6 +3,7 @@ import getpass
 import json
 import os
 from pathlib import Path
+import select
 import shutil
 import socket
 import subprocess
@@ -201,6 +202,8 @@ for line in sys.stdin:
                                     self.assertEqual(params["turn"]["status"], "completed")
                                     break
                             self.assertIn(marker, "".join(answer), "native AGY did not answer through the real SSH attachment")
+                            if os.environ.get("MODEX_TEST_SHARED_CLI"):
+                                self.check_native_shared_cli(base, root, chat["id"], receive, call)
                     process.stdin.close()
                     self.assertEqual(process.wait(timeout=5), 0)
                 finally:
@@ -221,6 +224,48 @@ for line in sys.stdin:
                 time.sleep(.02)
             self.assertFalse((state / "endpoint.json").exists())
             self.assertEqual((state / "owner.lock").read_text(), "modex-flock-v1\n")
+
+    def check_native_shared_cli(self, base, workspace, thread_id, receive, call):
+        cli = subprocess.Popen(base + ["--cli", "--workspace", str(workspace), "--thread", thread_id],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        output = bytearray()
+
+        def wait_text(text, count=1):
+            deadline = time.monotonic() + 40
+            while output.count(text) < count:
+                remaining = max(0, deadline - time.monotonic())
+                self.assertTrue(select.select([cli.stdout], [], [], remaining)[0], f"CLI did not show {text!r}")
+                chunk = os.read(cli.stdout.fileno(), 8192)
+                self.assertTrue(chunk, "CLI exited")
+                output.extend(chunk)
+
+        try:
+            wait_text(b"Antigravity")
+            target = {"thread_id": thread_id, "workspace": str(workspace)}
+            phone_marker = "MODEX_PHONE_TO_CLI_OK"
+            call(25, "turn/start", dict(target, text=f"Reply exactly {phone_marker}. Do not use tools."))
+            wait_text(phone_marker.encode(), 2)  # User message and AGY response.
+            wait_text(b"Turn completed.")
+            cli_marker = "MODEX_CLI_TO_PHONE_OK"
+            cli.stdin.write(f"Reply exactly {cli_marker}. Do not use tools.\n".encode())
+            cli.stdin.flush()
+            reply = []
+            deadline = time.monotonic() + 40
+            while cli_marker not in "".join(reply):
+                message = receive(max(.01, deadline - time.monotonic()))
+                params = message.get("params", {})
+                if params.get("threadId") == thread_id and message.get("event") == "item/agentMessage/delta":
+                    reply.append(params["delta"])
+            cli.stdin.write(b"/quit\n")
+            cli.stdin.flush()
+            self.assertEqual(cli.wait(timeout=5), 0)
+            self.assertIn("config", call(26, "status"))
+        finally:
+            cli.stdin.close()
+            if cli.poll() is None:
+                cli.terminate()
+                cli.wait(timeout=5)
+            cli.stdout.close()
 
 
 if __name__ == "__main__":

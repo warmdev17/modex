@@ -44,3 +44,24 @@ func TestAttachmentContextOnlyUsesInternalLifecycle(t *testing.T) {
 		t.Fatal("legacy attachment retained context")
 	}
 }
+
+func TestPhoneSSHContextTakesPrecedenceOverCLI(t *testing.T) {
+	var current string
+	var lifecycle int
+	handler := attachmentContext(func(value string) { current = value }, func(_ context.Context, _ bridge.Command, _ func(string, json.RawMessage)) (any, error) {
+		lifecycle++
+		return nil, nil
+	})
+	check := func(params, want string, forwards int) {
+		t.Helper()
+		cmd := bridge.Command{ID: supervisor.AttachmentCommandID, Method: "client/attached", Params: json.RawMessage(params)}
+		if _, err := handler(context.Background(), cmd, nil); err != nil || current != want || lifecycle != forwards {
+			t.Fatalf("context=%q, lifecycle=%d, err=%v", current, lifecycle, err)
+		}
+	}
+	check(`{"cli_ssh":true,"ssh_connection":"terminal"}`, "terminal", 0)
+	check(`{"attached":true,"ssh_connection":"phone"}`, "phone", 1)
+	check(`{"cli_ssh":true,"ssh_connection":"terminal-2"}`, "phone", 1)
+	check(`{"attached":false}`, "terminal-2", 2)
+	check(`{"cli_ssh":true}`, "", 2)
+}

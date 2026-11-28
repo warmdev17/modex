@@ -87,7 +87,7 @@ func run() error {
 	profile := flag.String("profile", "", "Named profile (not yet supported; fails explicitly)")
 	cli := flag.Bool("cli", false, "Open a native Codex TUI on the shared supervisor backend (Linux/macOS)")
 	nativeSocket := flag.String("native-socket", "", "Private native TUI gateway socket (internal --serve option)")
-	thread := flag.String("thread", "", "Existing session UUID for --cli; omit to choose by title or create new")
+	thread := flag.String("thread", "", "Existing session ID for --cli; omit to choose an agent and conversation")
 	serve := flag.Bool("serve", false, "Serve Modex commands over stdin/stdout for the lifetime of this connection")
 	background := flag.Bool("background", false, "Start a detached supervisor (Linux/macOS)")
 	supervise := flag.Bool("supervise", false, "Run a persistent foreground supervisor (Linux/macOS)")

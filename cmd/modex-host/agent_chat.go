@@ -40,20 +40,35 @@ func serveAgentChats(ctx context.Context, in io.Reader, out io.Writer, cwd, agy,
 }
 
 func attachmentContext(set func(string), next bridge.CommandHandler) bridge.CommandHandler {
+	// The bridge serializes lifecycle commands before normal client requests.
+	var phone, terminal string
 	return func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
 		if cmd.ID == supervisor.AttachmentCommandID && cmd.Method == "client/attached" {
 			var p struct {
 				Attached      bool   `json:"attached"`
 				SSHConnection string `json:"ssh_connection"`
+				CLISSH        bool   `json:"cli_ssh"`
 			}
 			if json.Unmarshal(cmd.Params, &p) != nil {
 				set("")
 				return nil, errors.New("invalid attachment context")
 			}
-			if !p.Attached {
-				p.SSHConnection = ""
+			if p.CLISSH {
+				terminal = p.SSHConnection
+			} else {
+				phone = ""
+				if p.Attached {
+					phone = p.SSHConnection
+				}
 			}
-			set(p.SSHConnection)
+			selected := phone
+			if selected == "" {
+				selected = terminal
+			}
+			set(selected)
+			if p.CLISSH {
+				return map[string]bool{"updated": true}, nil
+			}
 			cmd.Params, _ = json.Marshal(struct {
 				Attached bool `json:"attached"`
 			}{p.Attached})

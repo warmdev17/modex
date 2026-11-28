@@ -19,6 +19,8 @@ import (
 
 const MaxFrame = 4 * 1024 * 1024
 const AttachmentCommandID = 2147483646
+const cliIDStart = 2000000000
+const cliIDEnd = 2147483644
 
 type Hello struct {
 	Token         string `json:"token"`
@@ -26,22 +28,29 @@ type Hello struct {
 	Cursor        uint64 `json:"cursor"`
 	Stop          bool   `json:"stop,omitempty"`
 	Heartbeat     bool   `json:"heartbeat,omitempty"`
+	CLI           bool   `json:"cli,omitempty"`
 	SSHConnection string `json:"ssh_connection,omitempty"`
 }
 
 type Server struct {
-	Journal         *Journal
-	Backend         string
-	Capabilities    []string
-	ctx             context.Context
-	token, instance string
-	child           io.Writer
-	stop            context.CancelFunc
-	mu              sync.Mutex
-	attached        bool
-	OnAttachment    func(bool, string) error
-	childMu         sync.Mutex
-	leaseTimeout    time.Duration
+	Journal          *Journal
+	Backend          string
+	Capabilities     []string
+	ctx              context.Context
+	token, instance  string
+	child            io.Writer
+	stop             context.CancelFunc
+	mu               sync.Mutex
+	attached         bool
+	OnAttachment     func(bool, string) error
+	OnCLIContext     func(string) error
+	cli              *cliLease
+	nextCLIID        int
+	decisions        map[string]json.RawMessage
+	decisionBytes    int
+	decisionOverflow bool
+	childMu          sync.Mutex
+	leaseTimeout     time.Duration
 }
 
 type leaseReader struct {
@@ -115,6 +124,10 @@ func (s *Server) Handle(conn net.Conn) {
 		s.stop()
 		return
 	}
+	if hello.CLI {
+		s.handleCLI(ctx, cancel, conn, scanner, hello, send)
+		return
+	}
 	if (hello.Cursor > 0 && hello.Instance != s.instance) || (hello.Instance != "" && hello.Instance != s.instance) {
 		reject("supervisor instance changed; do not reuse cursor")
 		return
@@ -152,12 +165,12 @@ func (s *Server) Handle(conn net.Conn) {
 	}
 	defer func() {
 		cancel()
-		s.mu.Lock()
-		defer s.mu.Unlock()
 		if attachment(false) != nil {
 			s.stop()
 		}
+		s.mu.Lock()
 		s.attached = false
+		s.mu.Unlock()
 	}()
 	if attachment(true) != nil {
 		s.stop()
@@ -190,7 +203,7 @@ func (s *Server) Handle(conn net.Conn) {
 				}
 			}
 			command, err := bridge.DecodeCommand(scanner.Bytes())
-			if err != nil || command.Method == "client/attached" || command.ID == AttachmentCommandID {
+			if err != nil || command.Method == "client/attached" || (command.ID >= cliIDStart && command.ID <= cliIDEnd) || command.ID == AttachmentCommandID {
 				return
 			}
 			s.childMu.Lock()

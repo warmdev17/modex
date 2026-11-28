@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,13 +20,83 @@ import (
 )
 
 func runSharedCLI(cwd, binary, home, id, dir string) error {
-	if id != "" && !validTakeoverThread(id) {
-		return errors.New("--thread must be an exact Codex session UUID")
-	}
 	endpoint, err := readEndpoint(dir)
 	if err != nil {
 		return fmt.Errorf("supervisor unavailable in %s; start modex service or modex-host first", dir)
 	}
+	if validTakeoverThread(id) || !endpoint.CLIRelay && id == "" {
+		return runNativeCodex(cwd, binary, home, id, endpoint)
+	}
+	if !endpoint.CLIRelay {
+		return errors.New("the running supervisor needs an update to open Antigravity or OpenCode in the CLI")
+	}
+	ctx := context.Background()
+	client, err := dialLocalCLI(ctx, endpoint)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	input := bufio.NewReader(os.Stdin)
+	openChat := func(agent cliAgent, choice cliChoice) error {
+		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		defer stop()
+		return runAgentCLIChat(ctx, input, os.Stdout, client, agent.ID, agent.Label, choice.Workspace, choice.ID)
+	}
+	if id != "" {
+		var agent cliAgent
+		switch {
+		case strings.HasPrefix(id, "agy:"):
+			agent = cliAgent{ID: "antigravity", Label: "Antigravity"}
+		case strings.HasPrefix(id, "oc:"):
+			agent = cliAgent{ID: "opencode", Label: "OpenCode"}
+		default:
+			return errors.New("--thread must identify a Codex, OpenCode or Antigravity session")
+		}
+		return openChat(agent, cliChoice{ID: id, Workspace: cwd})
+	}
+	discover, cancel := context.WithTimeout(ctx, 30*time.Second)
+	fmt.Fprintln(os.Stdout, "Discovering agent runtimes…")
+	raw, err := client.Call(discover, "agents/list", map[string]string{"workspace": cwd})
+	cancel()
+	if err != nil {
+		return err
+	}
+	var catalogue struct {
+		Data []cliAgent `json:"data"`
+	}
+	if json.Unmarshal(raw, &catalogue) != nil || len(catalogue.Data) == 0 {
+		return errors.New("the host returned no agent runtimes")
+	}
+	picker := newCLIPicker(input, os.Stdout)
+	for {
+		agent, err := picker.chooseAgent(catalogue.Data)
+		if err != nil {
+			return err
+		}
+		choice, err := picker.chooseSession(ctx, agent, cwd, func(ctx context.Context, cursor string) (json.RawMessage, error) {
+			ctx, done := context.WithTimeout(ctx, 20*time.Second)
+			defer done()
+			params := map[string]any{"agent": agent.ID, "limit": 20, "all_workspaces": true}
+			if cursor != "" {
+				params["cursor"] = cursor
+			}
+			return client.Call(ctx, "threads/list", params)
+		})
+		if errors.Is(err, errCLIPickerBack) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if agent.ID == "codex" {
+			client.Close()
+			return runNativeCodex(choice.Workspace, binary, home, choice.ID, endpoint)
+		}
+		return openChat(agent, choice)
+	}
+}
+
+func runNativeCodex(cwd, binary, home, id string, endpoint supervisorEndpoint) error {
 	socket := endpoint.NativeSocket
 	if socket == "" {
 		return errors.New("running supervisor predates shared CLI support; stop it when idle and restart with the updated host")
@@ -36,7 +108,7 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 	if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm()&0077 != 0 {
 		return errors.New("native supervisor socket is unavailable or not private")
 	}
-	if id == "" {
+	if id == "" && !endpoint.CLIRelay {
 		fmt.Fprintln(os.Stdout, "Modex · "+cliLabel(cwd))
 		id, err = pickCLIThread(context.Background(), os.Stdin, os.Stdout, func(ctx context.Context, cursor string) (json.RawMessage, error) {
 			ctx, cancel := context.WithTimeout(ctx, 20*time.Second)

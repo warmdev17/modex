@@ -2,9 +2,11 @@
 import json
 import os
 from pathlib import Path
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -31,6 +33,9 @@ if kind == "opencode":
     prompt_file = stored.with_name("prompt-fixture.txt")
     waiting = stored.with_name("waiting")
     stopped = stored.with_name("stopped")
+
+    def prompts():
+        return json.loads(prompt_file.read_text()) if prompt_file.exists() else []
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *args):
@@ -64,8 +69,9 @@ if kind == "opencode":
                 self.send_json({"data": [{"id": "fixture", "providerID": "local-fixture"}]})
             elif path == "/api/session/oc-native":
                 session = json.loads(stored.read_text())
-                if prompt_file.exists():
-                    session.update(outcome="succeeded", time={"busy": 1, "idle": 3})
+                count = len(prompts())
+                if count:
+                    session.update(outcome="succeeded", time={"busy": count * 3 - 2, "idle": count * 3})
                 if waiting.exists():
                     session.update(outcome=None, time={"busy": 4, "idle": 3})
                 if stopped.exists():
@@ -75,15 +81,15 @@ if kind == "opencode":
                 self.send_json({"data": []})
             elif path == "/api/session/oc-native/message":
                 messages = []
-                if prompt_file.exists():
-                    messages = [
-                        {"id": "idle", "type": "idle", "outcome": "succeeded"},
-                        {"id": "answer", "type": "assistant", "content": [
-                            {"type": "text", "text": "OpenCode reply fixture"}],
-                         "time": {"created": 2, "completed": 3}},
-                        {"id": "prompt", "type": "user", "text": prompt_file.read_text(),
-                         "time": {"created": 1}},
-                    ]
+                for index, text in reversed(list(enumerate(prompts(), 1))):
+                    messages.extend([
+                        {"id": f"idle-{index}", "type": "idle", "outcome": "succeeded"},
+                        {"id": f"answer-{index}", "type": "assistant", "content": [
+                            {"type": "text", "text": "OpenCode reply: " + text}],
+                         "time": {"created": index * 3 - 1, "completed": index * 3}},
+                        {"id": f"prompt-{index}", "type": "user", "text": text,
+                         "time": {"created": index * 3 - 2}},
+                    ])
                 if waiting.exists() or stopped.exists():
                     messages.insert(0, {"id": "prompt-stop", "type": "user", "text": "Wait for Stop",
                                         "time": {"created": 4}})
@@ -97,12 +103,16 @@ if kind == "opencode":
         def do_POST(self):
             if self.path == "/api/session/oc-native/prompt":
                 prompt = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                stopped.unlink(missing_ok=True)
                 if prompt["text"] == "Wait for Stop":
                     waiting.touch()
                     prompt_id = "prompt-stop"
                 else:
-                    prompt_file.write_text(prompt["text"])
-                    prompt_id = "prompt"
+                    history = prompts() + [prompt["text"]]
+                    temporary = prompt_file.with_suffix(".pending")
+                    temporary.write_text(json.dumps(history))
+                    temporary.replace(prompt_file)
+                    prompt_id = f"prompt-{len(history)}"
                 self.send_json({"data": {"id": prompt_id, "type": "user"}})
                 return
             if self.path == "/api/session/oc-native/interrupt":
@@ -129,6 +139,7 @@ else:
     thread = {"id": "codex-fixture", "cwd": workspace, "name": "Codex fixture",
               "projectId": "shared-project", "turns": []}
     agy_prompt = None
+    agy_permission = None
     edit_record = Path(workspace) / ".edit-fixture"
 
     def edit_update(update, status):
@@ -140,9 +151,21 @@ else:
         print(json.dumps({"jsonrpc": "2.0", "method": "session/update",
                           "params": {"sessionId": "agy-native", "update": value}}), flush=True)
 
+    def text_update(role, text):
+        value = {"sessionUpdate": role + "_message_chunk", "content": {"type": "text", "text": text}}
+        print(json.dumps({"jsonrpc": "2.0", "method": "session/update",
+                          "params": {"sessionId": "agy-native", "update": value}}), flush=True)
+
     for line in sys.stdin:
         request = json.loads(line)
         method = request.get("method")
+        if kind == "agy" and request.get("id") == "permission-fixture" and method is None:
+            if request["result"]["outcome"].get("optionId") == "allow":
+                text_update("agent", "Antigravity permission answered from the terminal.")
+            print(json.dumps({"jsonrpc": "2.0", "id": agy_permission,
+                              "result": {"stopReason": "end_turn"}}), flush=True)
+            agy_permission = None
+            continue
         if kind == "agy" and method == "session/cancel" and agy_prompt is not None:
             print(json.dumps({"jsonrpc": "2.0", "id": agy_prompt,
                               "result": {"stopReason": "cancelled"}}), flush=True)
@@ -152,14 +175,27 @@ else:
             continue
         if kind == "agy":
             if method == "session/prompt":
-                if request["params"]["prompt"][0]["text"] != "Show edit fixture":
+                text = request["params"]["prompt"][0]["text"]
+                if text == "sync-prompt-with-approval":
+                    agy_permission = request["id"]
+                    print(json.dumps({"jsonrpc": "2.0", "id": "permission-fixture",
+                                      "method": "session/request_permission", "params": {
+                        "sessionId": "agy-native", "toolCall": {"title": "Confirm fixture permission"},
+                        "options": [{"optionId": "allow", "kind": "allow_once"},
+                                    {"optionId": "deny", "kind": "reject_once"}]}}), flush=True)
+                    continue
+                elif text.startswith("sync-"):
+                    text_update("agent", "Antigravity reply: " + text)
+                    result = {"stopReason": "end_turn"}
+                elif text != "Show edit fixture":
                     agy_prompt = request["id"]
                     continue
-                edit_record.touch()
-                edit_update("tool_call", "pending")
-                edit_update("tool_call_update", "completed")
-                edit_update("tool_call_update", "completed")
-                result = {"stopReason": "end_turn"}
+                else:
+                    edit_record.touch()
+                    edit_update("tool_call", "pending")
+                    edit_update("tool_call_update", "completed")
+                    edit_update("tool_call_update", "completed")
+                    result = {"stopReason": "end_turn"}
             else:
                 if method == "session/load" and edit_record.exists():
                     edit_update("tool_call", "completed")
@@ -185,6 +221,96 @@ else:
 
 @unittest.skipUnless(HOST and os.name == "posix", "requires a built Unix modex-host")
 class SharedAgentSupervisorTests(unittest.TestCase):
+    def exercise_cli(self, control, workspace, phone, agent, thread_id):
+        label = "Antigravity" if agent == "antigravity" else "OpenCode"
+        target = {"thread_id": thread_id, "workspace": str(workspace)}
+        phone.events.clear()
+        if agent == "antigravity":
+            phone.call("turn/start", dict(target, text="sync-prompt-with-approval"))
+            deadline = time.monotonic() + 10
+            while True:
+                event = phone.events.popleft() if phone.events else phone.receive(deadline)
+                if event.get("event") == "decision/required":
+                    self.assertEqual(event["params"]["thread_id"], thread_id)
+                    break
+        cli = subprocess.Popen(control + ["--cli", "--workspace", str(workspace), "--thread", thread_id],
+                               cwd=workspace, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True)
+        frames = queue.Queue()
+
+        def read():
+            while True:
+                chunk = os.read(cli.stdout.fileno(), 8192)
+                frames.put(chunk.decode("utf-8", "replace") if chunk else None)
+                if not chunk:
+                    return
+
+        reader = threading.Thread(target=read, daemon=True)
+        reader.start()
+        output = ""
+
+        def wait_for(expected):
+            nonlocal output
+            deadline = time.monotonic() + 18
+            while expected not in output:
+                try:
+                    chunk = frames.get(timeout=max(0, deadline - time.monotonic()))
+                except queue.Empty:
+                    self.fail(f"Terminal did not show {expected!r}: {output[-1200:]}")
+                if chunk is None:
+                    self.fail(f"Terminal exited before {expected!r}: {output[-1200:]}")
+                output += chunk
+
+        def enter(text):
+            cli.stdin.write(text + "\n")
+            cli.stdin.flush()
+
+        def phone_completed():
+            deadline = time.monotonic() + 15
+            while True:
+                event = phone.events.popleft() if phone.events else phone.receive(deadline)
+                params = event.get("params", {})
+                if event.get("event") == "turn/completed" and params.get("threadId") == thread_id:
+                    self.assertEqual(params["turn"]["status"], "completed")
+                    return
+
+        try:
+            wait_for(label)
+            if agent == "antigravity":
+                wait_for("Confirm fixture permission")
+                enter("accept")
+                wait_for("Antigravity permission answered from the terminal.")
+                phone_completed()
+            cli_prompt = "sync-terminal-" + agent
+            enter(cli_prompt)
+            wait_for(label + " reply: " + cli_prompt)
+            phone_completed()
+            history = phone.call("threads/read", dict(target, include_turns=True, limit=20))
+            self.assertTrue(any(row.get("role") == "user" and row.get("text") == cli_prompt
+                                for row in history["messages"]))
+
+            phone_prompt = "sync-phone-" + agent
+            phone.call("turn/start", dict(target, text=phone_prompt))
+            wait_for(label + " reply: " + phone_prompt)
+            phone_completed()
+            history = phone.call("threads/read", dict(target, include_turns=True, limit=20))
+            self.assertTrue(any(row.get("role") == "assistant" and phone_prompt in row.get("text", "")
+                                for row in history["messages"]))
+            enter("/quit")
+            self.assertEqual(cli.wait(timeout=5), 0)
+            self.assertIn("config", phone.call("status"))
+            resumed = subprocess.run(control + ["--cli", "--workspace", str(workspace), "--thread", thread_id],
+                                     cwd=workspace, input="/quit\n", capture_output=True, text=True, timeout=12)
+            self.assertEqual(resumed.returncode, 0, resumed.stderr)
+            self.assertIn(label + " reply: " + phone_prompt, resumed.stdout)
+        finally:
+            if cli.poll() is None:
+                cli.terminate()
+                cli.wait(timeout=5)
+            cli.stdin.close()
+            reader.join(timeout=2)
+            cli.stdout.close()
+
     def test_chat_identity_and_restart(self):
         with tempfile.TemporaryDirectory(prefix="modex-shared-agent-smoke-") as directory:
             root = Path(directory)
@@ -304,6 +430,8 @@ class SharedAgentSupervisorTests(unittest.TestCase):
                 outside.mkdir()
                 with self.assertRaisesRegex(RuntimeError, "request_rejected:threads/read"):
                     client.call("threads/read", dict(target, workspace=str(outside)))
+                self.exercise_cli(control, workspace, client, "antigravity", chats["antigravity"])
+                self.exercise_cli(control, workspace, client, "opencode", chats["opencode"])
             finally:
                 if client is not None:
                     client.close()
