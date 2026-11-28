@@ -2,7 +2,8 @@
 
 ## Native agent terminals and durable AGY login
 
-Updated 2026-11-28 on `feat/native-agent-tui`. Source `f413e63`.
+Updated 2026-11-28T09:35:41+07:00 on `feat/native-agent-tui`.
+Source `f413e63`.
 See the [plan](docs/superpowers/plans/2026-11-28-native-agent-tui.md).
 The fullscreen picker now opens installed AGY and OpenCode TUIs.
 OpenCode uses the existing managed server and native session through a
@@ -31,9 +32,12 @@ AGY terminal, discovery and ACP share durable file token storage.
   `6b4760d0981fc31a3e357d427ceec2c9aec5d5c70bd93bd7a04afee1568da4cc`.
   Previous binary backed up at
   `/tmp/modex-native-tui.7PBGh9/modex-host.previous`.
-  The running host still needs delayed activation and a version check.
-  Android keeps preview 55. Reset its session cursor and reconnect after
-  restart. Branch is local and clean after its state commit.
+  The running service restarted at 09:32:12 +07 and matched `f413e63`
+  by version and checksum. Installed binary checks reopened both vendor
+  TUIs in fresh shells, with real vendor controls present and no login
+  screens. A separate supervisor was used because the user's existing
+  CLI occupied the production CLI lease. Android keeps preview 55.
+  Reset its session cursor and reconnect after restart. Branch is local.
 
 ## Fullscreen Modex CLI
 
