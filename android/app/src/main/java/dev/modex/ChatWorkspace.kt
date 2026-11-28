@@ -152,6 +152,9 @@ internal fun ChatWorkspace(
     agyOptionsError: String = "", agyOptionsUncertain: Boolean = false,
     onRefreshAgyOptions: () -> Unit = {}, onSetAgyOption: (String, String) -> Unit = { _, _ -> },
     sessionCapabilities: BackendCapabilities = backendCapabilities,
+    goal: Goal? = null, goalLoading: Boolean = false, goalWorking: Boolean = false,
+    goalUncertain: Boolean = false, goalError: String = "",
+    onGoalRefresh: () -> Unit = {}, onGoalSet: (String, String, String) -> Unit = { _, _, _ -> }, onGoalClear: () -> Unit = {},
 ) {
     val antigravity = sessionAgent == ANTIGRAVITY_AGENT
     val attachmentsEnabled = !antigravity || sessionCapabilities.agyAttachments
@@ -258,6 +261,7 @@ internal fun ChatWorkspace(
         modelInput = sessionModel; effortInput = sessionEffort.ifBlank { defaultEffort(sessionModel) }; showModel = true
     }
     var showSessionStatus by remember(selected) { mutableStateOf(false) }
+    var showGoal by remember(host, selected) { mutableStateOf(false) }
     val reasoningTimeline = remember(messages) { thinkingTimeline(messages) }
     val timeline = remember(reasoningTimeline) { reasoningTimeline.filterNot { it.role == "reasoning" || it.role == "agent_activity" } }
     val agents = remember(messages, activeTurnId, connected, historyLoading) {
@@ -280,7 +284,7 @@ internal fun ChatWorkspace(
     val queuedQuestions = remember(messages, sessionAgent, backendCapabilities.backend) {
         if (sessionAgent == CODEX_AGENT && backendCapabilities.backend == "codex") queuedQuestionCards(messages) else emptyList()
     }
-    LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false } }
+    LaunchedEffect(selected) { if (selected.isBlank()) { showSettings = false; showModel = false; showGoal = false } }
     var menu by remember { mutableStateOf(false) }
     val canSwitch = connected && !historyLoading
     val modeActionEnabled = canSwitch && selected.isNotBlank() && selectedDecisions.isEmpty() && !modeChanging && !sessionStatusLoading && (!busy || modeUncertain)
@@ -380,6 +384,7 @@ internal fun ChatWorkspace(
                     IconButton(onClick = { menu = true }) { ChatGlyph(ChatIcon.More,"Connection menu") }
                     ModexDropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         if (sessionCapabilities.permissionProfiles) DropdownMenuItem(text = { Text("Session settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, enabled = selected.isNotBlank(), onClick = { menu = false; showSettings = true; onSessionPermissions("") })
+                        if (sessionCapabilities.goals && sessionAgent == CODEX_AGENT) DropdownMenuItem(text = { Text("Goal") }, leadingIcon = { ChatGlyph(ChatIcon.Activity) }, enabled = selected.isNotBlank(), onClick = { menu = false; showGoal = true; onGoalRefresh() })
                         if (onHome != null) DropdownMenuItem(text = { Text("All hosts") }, leadingIcon = { ChatGlyph(ChatIcon.Computer) }, onClick = { menu = false; onHome() })
                         DropdownMenuItem(text = { Text("Connection settings") }, leadingIcon = { ChatGlyph(ChatIcon.Settings) }, onClick = { menu = false; onConnection() })
                         if (connected || connecting) DropdownMenuItem(text = { Text("Disconnect") }, leadingIcon = { ChatGlyph(ChatIcon.Disconnect) }, onClick = { menu = false; onDisconnect() })
@@ -579,6 +584,10 @@ internal fun ChatWorkspace(
         }
     }
     if (sessionCapabilities.sessionStatus && showSessionStatus) SessionStatusDialog(sessionStatus, sessionStatusLoading, sessionStatusError, antigravity, onSessionStatus) { showSessionStatus = false }
+    if (sessionCapabilities.goals && sessionAgent == CODEX_AGENT && showGoal) GoalDialog(
+        goal, goalLoading, goalWorking, goalUncertain, goalError, connected,
+        onGoalRefresh, onGoalSet, onGoalClear,
+    ) { showGoal = false }
     if (newChat) AlertDialog(
         onDismissRequest = { newChat = false }, title = { Text("New conversation") },
         text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {

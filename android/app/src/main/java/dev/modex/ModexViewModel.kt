@@ -68,15 +68,18 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     private val historyRequests = mutableMapOf<Long, HistoryRequest>()
     private data class LifecycleRequest(val target: String, val generation: Long, val selection: Long, val activity: Long)
     private data class SessionRequest(val thread: String, val generation: Long, val settingsRevision: Long, val quotaRevision: Long = 0, val contextRevision: Long = 0)
+    private data class GoalRequest(val thread: String, val generation: Long, val revision: Long, val mutation: Boolean)
     private var listGeneration = 0L
     private var selectionGeneration = 0L
     private val listRequests = mutableMapOf<Long, Long>()
     private val sharedThreadPages = RuntimeThreadPages(CHAT_AGENT_IDS)
     private val lifecycleRequests = mutableMapOf<Long, LifecycleRequest>()
     private val sessionRequests = mutableMapOf<Long, SessionRequest>()
+    private val goalRequests = mutableMapOf<Long, GoalRequest>()
     private var settingsRevision = 0L
     private var quotaRevision = 0L
     private var contextRevision = 0L
+    private var goalRevision = 0L
     private var quotaSnapshot by mutableStateOf<JSONObject?>(null)
     private var quotaFailure by mutableStateOf("")
     val usageWarning: String get() = usageLimitWarning(quotaSnapshot).ifBlank { quotaFailure }
@@ -137,6 +140,11 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
     var permissionsWorking by mutableStateOf(false); private set
     var permissionsMessage by mutableStateOf(""); private set
     var modeUncertain by mutableStateOf(false); private set
+    internal var goal by mutableStateOf<Goal?>(null); private set
+    var goalLoading by mutableStateOf(false); private set
+    var goalWorking by mutableStateOf(false); private set
+    var goalUncertain by mutableStateOf(false); private set
+    var goalError by mutableStateOf(""); private set
     internal var hostChoice by mutableStateOf(ModelChoice()); private set
     internal var modelChoices by mutableStateOf(emptyMap<String,ModelChoice>()); private set
     internal var chatAgents by mutableStateOf(listOf(ChatAgent(CODEX_AGENT, "Codex", true))); private set
@@ -272,6 +280,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     if (r.getString("method") == "plans/respond") handledPlans += r.getString("tag")
                     if (r.getString("method") == "decision/respond") answeringDecisionIds += r.getString("tag")
                     if (r.getString("method") == "threads/mode") modeChanging = true
+                    if (r.getString("method") in setOf("threads/goal/set", "threads/goal/clear")) goalUncertain = true
                 }
             }
         } catch (_: Exception) { error = "Saved host could not be unlocked. Open Edit host to enter the details and import the SSH key again." }
@@ -391,6 +400,8 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         sessions.clearSelection()
         sessionSettings = ""; sessionStatus = null; sessionStatusLoading = false; sessionStatusError = ""; modeChanging = false; modeUncertain = false; takeoverThread = ""
         sessionRequests.clear()
+        goal = null; goalLoading = false; goalWorking = false; goalUncertain = false; goalError = ""; goalRevision++
+        goalRequests.clear()
         agyOptions = emptyList(); agyOptionRequest = null; agyOptionsError = ""; agyOptionsUncertain = false
         permissionProfiles = emptyList()
         permissionsWorking = false
@@ -467,7 +478,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         backendCapabilities = capabilities
                         if (!capabilities.sessionLifecycle) archived = false
                         if (recovering) {
-                            val uncertain = pending.values.any { it.first in setOf("turn/start", "turn/steer", "turn/interrupt", "decision/respond", "plans/respond", "threads/permissions") }
+                            val uncertain = pending.values.any { it.first in setOf("turn/start", "turn/steer", "turn/interrupt", "decision/respond", "plans/respond", "threads/permissions", "threads/goal/set", "threads/goal/clear") }
                             invalidateSessionRequests()
                             clearJournalState(targetJournal)
                             if (uncertain) error = "Session reconnected. Review the conversation before repeating any action whose result was unclear."
@@ -676,6 +687,77 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             sessionRequests[it] = SessionRequest(selected, selectionGeneration, settingsRevision, quotaRevision, contextRevision)
         } ?: run { sessionStatusLoading = false }
     }
+    fun refreshGoal() {
+        if (!sessionCapabilities.goals || sessionAgent != CODEX_AGENT || !connected || selected.isBlank() ||
+            ownedThread != selected || goalLoading || goalWorking || switching()) return
+        goalLoading = true; goalError = ""
+        request("threads/goal/get", goalThreadParams(selected, selectedWorkspace), selected)?.let {
+            goalRequests[it] = GoalRequest(selected, selectionGeneration, goalRevision, mutation = false)
+        } ?: run { goalLoading = false }
+    }
+
+    fun setGoal(objective: String = "", budget: String = "", status: String = "") {
+        if (!sessionCapabilities.goals || sessionAgent != CODEX_AGENT || !connected || selected.isBlank() ||
+            ownedThread != selected || goalLoading || goalWorking || goalUncertain || historyLoading || switching()) return
+        val params = runCatching { goalSetParams(selected, selectedWorkspace, objective, budget, status) }.getOrNull() ?: return
+        goalWorking = true; goalError = ""
+        request("threads/goal/set", params, selected)?.let {
+            goalRequests[it] = GoalRequest(selected, selectionGeneration, goalRevision, mutation = true)
+        } ?: run { goalWorking = false }
+    }
+
+    fun clearGoal() {
+        if (!sessionCapabilities.goals || sessionAgent != CODEX_AGENT || !connected || selected.isBlank() ||
+            ownedThread != selected || goal == null || goalLoading || goalWorking || goalUncertain || historyLoading || switching()) return
+        goalWorking = true; goalError = ""
+        request("threads/goal/clear", goalThreadParams(selected, selectedWorkspace), selected)?.let {
+            goalRequests[it] = GoalRequest(selected, selectionGeneration, goalRevision, mutation = true)
+        } ?: run { goalWorking = false }
+    }
+
+    private fun applyGoalResponse(id: Long, method: String, request: GoalRequest?, frame: JSONObject) {
+        if (request == null || !connected || request.thread != selected || request.generation != selectionGeneration || ownedThread != selected) {
+            goalLoading = goalRequests.values.any { !it.mutation && it.thread == selected && it.generation == selectionGeneration }
+            goalWorking = goalRequests.values.any { it.mutation && it.thread == selected && it.generation == selectionGeneration }
+            return
+        }
+        if (request.mutation) goalWorking = false else goalLoading = false
+        if (frame.has("error")) {
+            goalError = if (request.mutation) "Goal change was not confirmed. Refresh before trying another change."
+                else "Goal status is unavailable. Check the connection and update modex-host if needed."
+            goalUncertain = true
+            return
+        }
+        val result = frame.optJSONObject("result")
+        if (result == null) {
+            goalError = if (request.mutation) "Goal change was not confirmed. Refresh before trying another change."
+                else "Goal status is unavailable. Refresh to try again."
+            goalUncertain = true
+            return
+        }
+        try {
+            when (method) {
+                "threads/goal/get", "threads/goal/set" -> {
+                    val reported = readGoalResult(result, request.thread)
+                    if (method == "threads/goal/set" && reported == null) throw IllegalArgumentException("Missing goal")
+                    if (request.revision == goalRevision) {
+                        goal = reported
+                        goalRevision++
+                    }
+                }
+                "threads/goal/clear" -> {
+                    require(result.opt("cleared") is Boolean)
+                    if (request.revision == goalRevision) { goal = null; goalRevision++ }
+                }
+            }
+            goalUncertain = false
+            goalError = ""
+        } catch (_: Exception) {
+            goalError = if (request.mutation) "Goal change was not confirmed. Refresh before trying another change."
+                else "Goal status is unavailable. Refresh to try again."
+            goalUncertain = true
+        }
+    }
     fun refreshAntigravityOptions() = requestAntigravityOptions()
 
     fun setAntigravityOption(id: String, value: String) = requestAntigravityOptions(id, value)
@@ -786,6 +868,9 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                         } else if (method == "threads/options" || method == "threads/options/set") {
                             pending.remove(id)
                             applyAntigravityOptions(id, tag, null)
+                        } else if (method in setOf("threads/goal/get", "threads/goal/set", "threads/goal/clear")) {
+                            pending.remove(id)
+                            applyGoalResponse(id, method, goalRequests.remove(id), JSONObject())
                         } else error = "Delivery uncertain. Reconnect and observe before retrying."
                     }
                 }
@@ -803,6 +888,10 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
             val operationAgent = threadAgents[operation.second] ?: if (operation.second == selected) sessionAgent else threadAgent(JSONObject().put("id", operation.second))
             if (operation.first == "threads/options" || operation.first == "threads/options/set") {
                 applyAntigravityOptions(id, operation.second, frame.optJSONObject("result"))
+                return
+            }
+            if (operation.first in setOf("threads/goal/get", "threads/goal/set", "threads/goal/clear")) {
+                applyGoalResponse(id, operation.first, goalRequests.remove(id), frame)
                 return
             }
             val catalogueRequest = if (operation.first in listOf("agents/list", "models/list")) catalogueRequests.take(id) else null
@@ -1078,6 +1167,7 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
                     loadSessionCatalogue(sessionAgent, selectedWorkspace)
                     refreshAntigravityOptions()
                     refreshReferences(false)
+                    refreshGoal()
                     projectMembership = projectMembership + readProjectMembership(JSONArray().put(openedThread))
                     threadWorkspaces = threadWorkspaces + (selected to selectedWorkspace)
                     threads = (listOf(selected) + threads).distinct()
@@ -1162,6 +1252,16 @@ class ModexViewModel(application: Application, storageName: String = "host") : A
         val event = frame.optString("event")
         if (event == "thread/name/updated") {
             rememberAntigravityTitle(params.optString("threadId"), params.opt("threadName"))
+        }
+        if (sessionCapabilities.goals && sessionAgent == CODEX_AGENT && params.optString("threadId") == selected && ownedThread == selected) {
+            when (event) {
+                "thread/goal/updated" -> runCatching { readNativeGoal(params) }.getOrNull()?.let {
+                    goal = it; goalRevision++; goalUncertain = false; goalError = ""
+                }
+                "thread/goal/cleared" -> {
+                    goal = null; goalRevision++; goalUncertain = false; goalError = ""
+                }
+            }
         }
         if (event == "thread/tokenUsage/updated" && backendCapabilities.agyContextUsage &&
             sessionAgent == ANTIGRAVITY_AGENT && params.optString("threadId") == selected && ownedThread == selected &&

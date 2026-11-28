@@ -14,6 +14,7 @@ internal data class BackendCapabilities(
     val projectCreation: Boolean,
     val references: Boolean,
     val takeover: Boolean,
+    val goals: Boolean = false,
     val agentDiscovery: Boolean = false,
     val agySessionOptions: Boolean = false,
     val agyAttachments: Boolean = false,
@@ -33,6 +34,7 @@ internal data class BackendCapabilities(
         "projects/create" -> projectCreation
         "references/list" -> references
         "threads/takeover" -> takeover
+        "threads/goal/get", "threads/goal/set", "threads/goal/clear" -> goals
         else -> true
     }
 
@@ -56,6 +58,7 @@ internal data class BackendCapabilities(
                 "projects" in keys,
                 "references" in keys,
                 "takeover" in keys,
+                goals = backend == "codex" && "goals" in keys,
                 agentDiscovery = backend == "codex" && ("agent_discovery" in keys || "runtime_routing" in keys),
                 runtimeRouting = backend == "codex" && "runtime_routing" in keys,
                 agySessionOptions = backend == "codex" && "antigravity_session_options" in keys,

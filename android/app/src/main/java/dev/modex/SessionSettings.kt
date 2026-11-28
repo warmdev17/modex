@@ -65,6 +65,7 @@ internal fun runtimeCapabilities(host: BackendCapabilities, agents: List<ChatAge
         projectCreation = host.projectCreation,
         references = "references" in keys,
         takeover = "takeover" in keys,
+        goals = agent == CODEX_AGENT && "goals" in keys,
         agentDiscovery = host.agentDiscovery,
         runtimeRouting = host.runtimeRouting,
         agySessionOptions = agent == ANTIGRAVITY_AGENT && host.agySessionOptions,

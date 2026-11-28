@@ -84,6 +84,23 @@ class ProtocolTest {
         assertTrue(newHost.supports("threads/status"))
     }
 
+    @Test fun goalsRequireTheExplicitCodexRuntimeCapability() {
+        val oldHost = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery"]}"""))
+        val host = BackendCapabilities.fromReady(JSONObject("""{"backend":"codex","capabilities":["agent_discovery","goals"]}"""))
+        val agents = listOf(
+            ChatAgent(OPENCODE_AGENT, "OpenCode", true, capabilities = setOf("goals")),
+            ChatAgent(ANTIGRAVITY_AGENT, "Antigravity", true, capabilities = setOf("goals")),
+        )
+
+        assertFalse(oldHost.goals)
+        assertTrue(host.goals)
+        for (method in listOf("threads/goal/get", "threads/goal/set", "threads/goal/clear")) {
+            assertTrue(method, host.supports(method))
+            assertFalse(method, runtimeCapabilities(host, agents, OPENCODE_AGENT).supports(method))
+            assertFalse(method, runtimeCapabilities(host, agents, ANTIGRAVITY_AGENT).supports(method))
+        }
+    }
+
     @Test fun explicitBackendDisablesMalformedOrMissingOptionalCapabilitiesAndReplacementDoesNotLeak() {
         val journal = JournalState()
         journal.hello(JSONObject("""{"ready":true,"instance":"one","backend":"codex","capabilities":["references","takeover"]}"""))
