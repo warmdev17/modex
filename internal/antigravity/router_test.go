@@ -106,6 +106,11 @@ func TestRouterACPFixture(t *testing.T) {
 			case "model":
 				model, level = req.Params.Value, "high"
 			case "thought_level":
+				if os.Getenv("MODEX_ROUTER_ECHO_PREVIOUS_OPTIONS") == "1" {
+					_ = out.Encode(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{
+						"sessionId": req.Params.Session, "update": map[string]any{"sessionUpdate": "config_option_update", "configOptions": options()},
+					}})
+				}
 				level = req.Params.Value
 			default:
 				os.Exit(4)
@@ -191,6 +196,7 @@ func TestSessionOptionsRestoreAcknowledgedSettings(t *testing.T) {
 	call("threads/options/set", map[string]any{"thread_id": id, "id": "model", "value": "fixture-alt"})
 	call("threads/options/set", map[string]any{"thread_id": id, "id": "thought_level", "value": "low"})
 	r.Close()
+	t.Setenv("MODEX_ROUTER_ECHO_PREVIOUS_OPTIONS", "1")
 	r = New(context.Background(), bin, root, state)
 	options := call("threads/options", map[string]any{"thread_id": id})
 	raw, _ := json.Marshal(options)

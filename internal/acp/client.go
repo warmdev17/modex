@@ -656,8 +656,12 @@ func (c *Client) handleUpdate(raw json.RawMessage, emit func(Update)) {
 		c.mu.Lock()
 		session := c.sessions[event.ID]
 		if session != nil && event.Update.ConfigOptions != nil {
-			session.options = parseOptions(event.Update.ConfigOptions)
-			session.optionsVersion++
+			options := parseOptions(event.Update.ConfigOptions)
+			// AGY can echo the previous acknowledgement during the next change.
+			if !reflect.DeepEqual(session.options, options) {
+				session.options = options
+				session.optionsVersion++
+			}
 		}
 		var model string
 		if session != nil {
