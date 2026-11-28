@@ -1,5 +1,40 @@
 # Modex project state
 
+## Native agent terminals and durable AGY login
+
+Updated 2026-11-28 on `feat/native-agent-tui`. Source `f413e63`.
+See the [plan](docs/superpowers/plans/2026-11-28-native-agent-tui.md).
+The fullscreen picker now opens installed AGY and OpenCode TUIs.
+OpenCode uses the existing managed server and native session through a
+private CLI-only descriptor. Missing host provider accounts are imported
+through an OS pipe using supported OpenCode export/import commands.
+AGY terminal, discovery and ACP share durable file token storage.
+
+- Go 1.23.12 full race suite, `go vet ./...`, private-descriptor
+  and credential-pipe checks, native adoption and AGY reservation tests
+  passed. Independent review's native/phone attribution race reproduced
+  before the fix and passed after reconciling native backlog before phone
+  submission. The mixed-runtime supervisor smoke passed on the stamped
+  binary including arrow selection and native launch.
+- On `f413e63`, isolated supervisor and real PTYs opened AGY 1.5.17
+  existing and new conversations, then real OpenCode 2.4.1. None asked
+  for login. Managed model discovery included the saved OpenCode OAuth
+  provider after import. Two fresh shells loaded ACP history and changed
+  model/thinking without login. No provider inference was submitted.
+- AGY reserves the conversation while its native TUI is attached.
+  Close it before reopening on Android to reload native history.
+  OpenCode adopts watched native turns for Android. Unseen native
+  backlog recovery is bounded to 100 messages. Physical Android,
+  expired-token refresh and long-running OAuth rotation were outside
+  these checks. OpenCode import preserves existing account IDs.
+- Installed host SHA-256
+  `6b4760d0981fc31a3e357d427ceec2c9aec5d5c70bd93bd7a04afee1568da4cc`.
+  Previous binary backed up at
+  `/tmp/modex-native-tui.7PBGh9/modex-host.previous`.
+  The running host still needs delayed activation and a version check.
+  Android keeps preview 55. Reset its session cursor and reconnect after
+  restart. Branch is local and clean after its state commit.
+
 ## Fullscreen Modex CLI
 
 Updated 2026-11-28 on `feat/fullscreen-cli`. Source `49c3a32`.

@@ -14,6 +14,6 @@ handoff and imports missing host provider accounts.
 - [x] Adopt registered OpenCode native turns for Android, using existing
   scoped reconciliation and decision handling. Release watches on exit
   and CLI lease teardown.
-- [ ] Verify actual vendor TUIs, new and existing conversations, fresh
+- [x] Verify actual vendor TUIs, new and existing conversations, fresh
   shells and provider import. Run the affected regression and race checks,
   then install the verified host.
