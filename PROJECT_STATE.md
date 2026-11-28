@@ -1,5 +1,46 @@
 # Modex project state
 
+## Responsive project CLI picker
+
+Updated 2026-11-28 on `feat/cli-project-picker`, source `dfdb049`
+with backend `52b2b5c` and initial UI `9c20781`. See the
+[plan](docs/superpowers/plans/2026-11-28-cli-project-picker.md).
+
+- Initial Codex choice is available without waiting for optional runtime
+  discovery. Private per-agent readiness checks run in a bounded lane,
+  preserving ordinary action serialization and Android discovery behavior.
+  Checking agents allow browsing saved chats but cannot open/start one
+  before readiness has been verified.
+- Session lists explicitly scope the canonical invocation directory for
+  all three runtimes. Picker also filters foreign roots and caches pages
+  within the invocation. `r` refreshes cached lists/checks; errors stay
+  retryable. Native vendor TUI launch is unchanged.
+- Agent icons, aligned readiness states, runtime descriptions and project
+  path use existing terminal palette. ASCII fallback honors locale priority.
+  Independent review's cached-page rapid-key race and LANG fallback findings
+  were reproduced and fixed with permanent regressions.
+- Final `go test -race -p 2 ./... -count=1 -timeout=150s`, `go vet ./...`
+  and diff check passed with umask 022. Probe-lane limit and retry recovery
+  regressions passed. Native Codex paused goal regression passed too.
+- Stamped `dfdb049` binary passed `scripts/test_shared_agent_supervisor.py`
+  (real PTY vendor fixture launch, resize/restore, RGB and NO_COLOR) and
+  `scripts/test_cli_picker_performance.py` against baseline `77a0e40`.
+  Same 2s AGY delay: old roster 2.3743s/session 2.3906s, new roster
+  0.0240s/session 0.0398s. Primary reviewed the captured terminal output at
+  `/tmp/modex-cli-project-picker-final.txt`. Independent review passed.
+- Primary took over the bounded benchmark fixture after the devops
+  assignment made no file progress. All implementation and evidence are
+  committed. No Android/APK change or public publishing.
+- Installed binary SHA-256
+  `2658ae0b7fb0142ab87e677a29a7ddc742302fb86ca41aff68ab0d6fb4e59dfb`.
+  Previous binary `/tmp/modex-cli-picker-backup.oQBweL/modex-host.previous`.
+  External 30-second restart is the final operation. Runtime adoption needs
+  confirmation after that job runs; Android must reset session cursor and
+  reconnect. No uncertain prompts/decisions are replayed.
+- Native provider inference, physical Android and non-Linux runtime were
+  outside this host/CLI check. Cold optional-runtime authentication still
+  takes its genuine discovery time, independently of the picker.
+
 ## Codex goal management
 
 Updated 2026-11-28 on `feat/codex-goals`, source `77a0e40`.

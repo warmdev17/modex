@@ -76,6 +76,14 @@ Run `modex cli` in a terminal. Use ↑/↓ to choose an agent and a session,
 Enter to open it, and Esc to go back. A new conversation uses the current
 workspace. Codex opens its native terminal UI.
 
+The picker shows agent icons and checks optional runtimes independently;
+Codex can be selected while those checks finish. Conversations are scoped
+to the directory where you run `modex cli` (or explicit `--workspace`),
+including symlink resolution. The selected project path stays visible.
+Returning to a previously loaded page reuses it for this picker invocation.
+Press `r` to reload sessions or recheck the selected agent. A failed list
+stays on screen for retry. Icons fall back to ASCII in non-UTF-8 locales.
+
 OpenCode and Antigravity open their installed native terminal interfaces.
 OpenCode attaches to Modex's managed server and native session. Missing
 provider credentials are imported from the host's existing OpenCode

@@ -70,6 +70,14 @@ Làm mới danh sách agent sau khi đăng nhập.
 
 ## Dùng chung phiên trên terminal
 
+Bộ chọn CLI hiện icon và kiểm tra từng agent độc lập. Có thể chọn Codex
+khi AGY/OpenCode vẫn đang kiểm tra. Danh sách chat chỉ thuộc thư mục chạy
+`modex cli` hoặc `--workspace` đã chỉ định, có phân giải đường dẫn symlink.
+Đường dẫn project luôn hiện trong bộ chọn. Quay lại trang đã tải sẽ dùng
+cache trong lần mở CLI đó; bấm `r` để tải lại session hoặc kiểm tra lại agent
+đang chọn. Lỗi tải giữ nguyên màn hình để thử lại. Terminal không dùng
+UTF-8 sẽ hiện icon ASCII.
+
 Chạy `modex cli` trong terminal. Dùng ↑/↓ để chọn agent và phiên, Enter
 để mở, Esc để quay lại. Chat mới dùng workspace hiện tại. Codex mở giao
 diện terminal riêng.

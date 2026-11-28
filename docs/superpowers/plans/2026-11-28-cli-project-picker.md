@@ -12,13 +12,13 @@ loading its sessions. No synthetic ready status based on executable alone.
 
 ## Tasks
 
-- [ ] Backend owner: private `cli/agents/check` accepts `{workspace,agent}`
+- [x] Backend owner: private `cli/agents/check` accepts `{workspace,agent}`
   and returns `{data:[one verified agent]}`. Bound concurrency to three
   discovery requests, isolate from serialized actions, reject public clients.
   Reuse probes, make AGY respect selected canonical workspace/request context.
   Allow `workspace` on per-agent `threads/list` with canonical scoping and
   preserve Android `all_workspaces` behavior. Add regression tests first.
-- [ ] Primary: initial fullscreen rows show Codex ready and others Checking;
+- [x] Primary: initial fullscreen rows show Codex ready and others Checking;
   per-agent checks update independently. No change in native launch paths.
   CLI list explicitly requests its canonical cwd and no all-workspace flag.
   Defensively filter foreign workspace rows. Cache pages for this picker
@@ -27,11 +27,20 @@ loading its sessions. No synthetic ready status based on executable alone.
   glyphs, with ASCII fallback for dumb/non-UTF8 terminals, always named labels.
   Show project identity, selected-agent details, ready/checking/unavailable,
   new-chat and empty states with consistent focus/footer spacing.
-- [ ] Independent review and verification: Go race/vet, controlled delayed
+- [x] Independent review and verification: Go race/vet, controlled delayed
   readiness proving Codex/session selection doesn't wait for AGY, scope
   tests with mixed roots/cursors/symlink cwd, real PTY keyboard/resize/NO_COLOR
   and native launch. Measure before/after using same fixture and real binary.
   Install exact tested host and schedule delayed restart only at final step.
+
+Verification: `go test -race -p 2 ./... -count=1 -timeout=150s` and
+`go vet ./...` passed with umask 022. The shared-runtime real PTY fixture
+passed native AGY/OpenCode launches, terminal restore and NO_COLOR. Timing
+fixture injected the same 2-second AGY delay in both versions: baseline
+roster 2.3733s, candidate 0.0237s, candidate session list 0.0399s. These are
+controlled fixture measurements rather than provider/network guarantees.
+Review found and verified fixes for rapid cache-selection and locale fallback.
+Checking agents allow browsing but never opening until readiness is verified.
 
 Checks must prove project filtering for all three agents, not only Codex.
 No Android/APK change, no unsolicited PR/merge/release.
