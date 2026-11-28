@@ -11,6 +11,7 @@ import time
 import unittest
 
 CLIENT = os.environ.get("MODEX_CLIENT_BINARY")
+AGY = os.environ.get("MODEX_TEST_AGY")
 
 
 @unittest.skipUnless(CLIENT and shutil.which("sshd") and os.name == "posix", "requires built client and Unix OpenSSH server")
@@ -92,8 +93,37 @@ for line in sys.stdin:
  print(json.dumps({'id':r['id'],'result':result}),flush=True)
 """)
         fake.chmod(0o700)
+        agy = root / "fake-agy"
+        port = command[command.index("--port") + 1]
+        agy.write_text("#!/usr/bin/env python3\n" + f"expected_port = {port!r}\n" + """import json, os, sys
+connection = os.environ.get("SSH_CONNECTION", "").split()
+authenticated = (len(connection) == 4 and connection[0] == connection[2] == "127.0.0.1"
+                 and connection[1].isdigit() and connection[3] == expected_port)
+if "-p" in sys.argv:
+    print(json.dumps({"status": "SUCCESS" if authenticated else "MISSING_SSH_CONTEXT"}))
+    sys.exit(0)
+for line in sys.stdin:
+    request = json.loads(line)
+    result = {}
+    method = request.get("method")
+    if method == "initialize":
+        result = {"protocolVersion": 1, "agentInfo": {"name": "Antigravity ACP Server", "version": "1"},
+                  "agentCapabilities": {"loadSession": True, "sessionCapabilities": {"list": {}}}}
+    if method == "session/new":
+        if not authenticated:
+            print(json.dumps({"jsonrpc":"2.0","id":request["id"],
+                              "error":{"code":-32000,"message":"Missing SSH context"}}), flush=True)
+            continue
+        result = {"sessionId": "ssh-test-session"}
+    print(json.dumps({"jsonrpc":"2.0","id":request["id"],"result":result}), flush=True)
+""")
+        agy.chmod(0o700)
         base = [str(host_binary), "--state-dir", str(state)]
-        started = subprocess.run(base + ["--background", "--workspace", str(root), "--codex", str(fake)], capture_output=True, text=True, timeout=40)
+        service_env = dict(os.environ)
+        service_env.pop("SSH_CONNECTION", None)
+        started = subprocess.run(base + ["--background", "--workspace", str(root), "--codex", str(fake),
+                                         "--agy", AGY or str(agy), "--opencode", str(root / "missing-opencode")],
+                                 env=service_env, capture_output=True, text=True, timeout=40)
         self.assertEqual(started.returncode, 0, started.stderr)
         try:
             remote_command = command[:]
@@ -120,21 +150,62 @@ for line in sys.stdin:
                     worker.start()
                     ack = frames.get(timeout=10)
                     self.assertTrue(ack["ready"])
+                    self.assertNotIn("ssh_connection", json.dumps(ack))
                     if instance:
                         self.assertEqual(ack["instance"], instance)
                     instance = ack["instance"]
-                    process.stdin.write(json.dumps({"id": request_id, "method": "status"}) + "\n")
-                    process.stdin.flush()
-                    while True:
-                        frame = frames.get(timeout=10)
+                    events = []
+                    def receive(timeout=10):
+                        nonlocal cursor
+                        frame = frames.get(timeout=timeout)
+                        self.assertNotIn("ssh_connection", json.dumps(frame))
                         self.assertEqual(frame["seq"], cursor + 1)
                         cursor = frame["seq"]
-                        if frame["message"].get("id") == request_id:
-                            self.assertEqual(frame["message"]["result"]["config"]["provider"], "fixture")
-                            break
+                        return frame["message"]
+
+                    def call(identifier, method, params=None):
+                        process.stdin.write(json.dumps({"id": identifier, "method": method, "params": params or {}}) + "\n")
+                        process.stdin.flush()
+                        while True:
+                            message = receive()
+                            if message.get("id") == identifier:
+                                self.assertIn("result", message, f"{method} was rejected")
+                                return message["result"]
+                            events.append(message)
+                    self.assertEqual(call(request_id, "status")["config"]["provider"], "fixture")
+                    if request_id == 10:
+                        agents = call(20, "agents/list")["data"]
+                        self.assertTrue(next(agent for agent in agents if agent["id"] == "antigravity")["ready"],
+                                        "AGY readiness did not inherit the genuine attach context")
+                        chat = call(21, "threads/start", {"agent": "antigravity"})["thread"]
+                        self.assertEqual(chat["agent"], "antigravity")
+                        if AGY:
+                            target = {"thread_id": chat["id"], "workspace": str(root)}
+                            call(22, "threads/options/set", dict(target, id="model", value="gemini-4-hydrogen"))
+                            call(23, "threads/options/set", dict(target, id="thought_level", value="medium"))
+                            marker = "MODEX_AGY_SSH_CONTEXT_OK"
+                            turn = call(24, "turn/start", dict(target, text=f"Reply exactly {marker}. Do not use tools."))["turn"]["id"]
+                            answer = []
+                            deadline = time.monotonic() + 45
+                            pending = iter(events)
+                            while True:
+                                message = next(pending, None)
+                                if message is None:
+                                    message = receive(max(.01, deadline - time.monotonic()))
+                                params = message.get("params", {})
+                                if params.get("threadId") != chat["id"]:
+                                    continue
+                                if message.get("event") == "item/agentMessage/delta":
+                                    answer.append(params["delta"])
+                                if message.get("event") == "turn/completed" and params["turn"]["id"] == turn:
+                                    self.assertEqual(params["turn"]["status"], "completed")
+                                    break
+                            self.assertIn(marker, "".join(answer), "native AGY did not answer through the real SSH attachment")
                     process.stdin.close()
                     self.assertEqual(process.wait(timeout=5), 0)
                 finally:
+                    if not process.stdin.closed:
+                        process.stdin.close()
                     if process.poll() is None:
                         process.kill()
                         process.wait()

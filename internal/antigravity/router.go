@@ -94,6 +94,22 @@ type Router struct {
 	clients                  map[string]*acp.Client
 	pending                  map[string]pending
 	loadErr                  error
+	sshConnection            string
+}
+
+func (r *Router) SetSSHConnection(value string) {
+	r.mu.Lock()
+	r.sshConnection = value
+	r.mu.Unlock()
+}
+
+// childEnvironment is called with r.mu held.
+func (r *Router) childEnvironment() []string {
+	env := os.Environ()
+	if r.sshConnection != "" {
+		env = append(env, "SSH_CONNECTION="+r.sshConnection)
+	}
+	return env
 }
 
 func New(ctx context.Context, binary, defaultWorkspace, stateDir string) *Router {
@@ -252,7 +268,7 @@ func (r *Router) client(workspace string) (*acp.Client, error) {
 	}
 	var c *acp.Client
 	var e error
-	c, e = acp.StartWithPermissions(r.ctx, r.binary, workspace, func(u acp.Update) { r.update(workspace, &c, u) }, func(p acp.PermissionRequest) bool { return r.permission(workspace, p) })
+	c, e = acp.StartWithEnvironment(r.ctx, r.binary, workspace, r.childEnvironment(), func(u acp.Update) { r.update(workspace, &c, u) }, func(p acp.PermissionRequest) bool { return r.permission(workspace, p) })
 	if e != nil {
 		return nil, e
 	}
@@ -544,6 +560,9 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 	return client, nil
 }
 func (r *Router) readiness() map[string]any {
+	r.mu.Lock()
+	env := r.childEnvironment()
+	r.mu.Unlock()
 	entry := map[string]any{"id": "antigravity", "label": "Antigravity", "ready": false}
 	ctx, cancel := context.WithTimeout(r.ctx, 8*time.Second)
 	defer cancel()
@@ -559,6 +578,7 @@ func (r *Router) readiness() map[string]any {
 	}
 	cmd := exec.CommandContext(ctx, path, "-p", "/model", "--output-format", "json")
 	cmd.Dir = workspace
+	cmd.Env = env
 	var output bytes.Buffer
 	cmd.Stdout = &limitedWriter{dst: &output, remaining: 65536}
 	if e = cmd.Run(); e != nil {
@@ -572,7 +592,7 @@ func (r *Router) readiness() map[string]any {
 		entry["reason"] = "Antigravity is unavailable or requires sign-in on the host"
 		return entry
 	}
-	c, e := acp.Start(ctx, path, workspace, nil)
+	c, e := acp.StartWithEnvironment(ctx, path, workspace, env, nil, nil)
 	if e != nil {
 		entry["reason"] = "Antigravity ACP is unavailable"
 		return entry

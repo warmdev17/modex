@@ -4,13 +4,55 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
+
+	"github.com/warmdev/modex/internal/supervisor"
 )
+
+func TestSupervisorClientSendsSSHEnvironmentInPrivateHello(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("private state ACL support pending")
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeEndpoint(dir, supervisorEndpoint{Address: listener.Addr().String(), Token: "secret", Instance: "instance"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_CONNECTION", "192.0.2.1 1234 192.0.2.2 22")
+	hello := make(chan supervisor.Hello, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var h supervisor.Hello
+		if json.NewDecoder(conn).Decode(&h) != nil {
+			return
+		}
+		hello <- h
+		_ = json.NewEncoder(conn).Encode(map[string]bool{"stopping": true})
+	}()
+	if err := supervisorClient(dir, 0, "", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-hello; got.SSHConnection != "192.0.2.1 1234 192.0.2.2 22" || got.Token != "secret" {
+		t.Fatalf("hello = %+v", got)
+	}
+}
 
 func TestSupervisorStateExclusiveAndPrivate(t *testing.T) {
 	if runtime.GOOS == "windows" {

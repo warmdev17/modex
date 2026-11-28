@@ -143,7 +143,11 @@ func Start(ctx context.Context, binary, cwd string, onUpdate func(Update)) (*Cli
 
 // StartWithPermissions delivers permission requests on the RPC reader; callbacks must return promptly and must not call the client.
 func StartWithPermissions(ctx context.Context, binary, cwd string, onUpdate func(Update), onPermission func(PermissionRequest) bool) (*Client, error) {
-	return startWithPermissions(ctx, binary, []string{"acp", "--disable-telemetry"}, cwd, os.Environ(), onUpdate, onPermission)
+	return StartWithEnvironment(ctx, binary, cwd, os.Environ(), onUpdate, onPermission)
+}
+
+func StartWithEnvironment(ctx context.Context, binary, cwd string, env []string, onUpdate func(Update), onPermission func(PermissionRequest) bool) (*Client, error) {
+	return startWithPermissions(ctx, binary, []string{"acp", "--disable-telemetry"}, cwd, env, onUpdate, onPermission)
 }
 
 func start(ctx context.Context, binary string, args []string, cwd string, env []string, onUpdate func(Update)) (*Client, error) {

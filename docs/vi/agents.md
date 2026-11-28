@@ -49,6 +49,9 @@ Làm mới danh sách agent sau khi đăng nhập.
 
 ## Antigravity trong bản phát triển
 
+Khi kết nối qua SSH, Modex chuyển ngữ cảnh từ OpenSSH để Antigravity
+dùng luồng xác thực SSH của nó và thông tin đăng nhập sẵn có trên host.
+
 Khi cả host và Android hỗ trợ tùy chọn phiên Antigravity, bộ chọn trong
 chat hiển thị các model và mức suy nghĩ do ACP cung cấp. Có thể đổi khi chat
 đang rảnh. Modex lưu lựa chọn đã được xác nhận theo từng chat và đối chiếu

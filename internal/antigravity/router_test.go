@@ -1146,3 +1146,47 @@ func TestFileDiffShowsOmissionAndLiteralMarker(t *testing.T) {
 		t.Fatalf("history: %s", b)
 	}
 }
+
+func TestAttachmentContextAppliesOnlyToFutureProcesses(t *testing.T) {
+	root, bin, state := stage3RouterFixture(t)
+	log := filepath.Join(t.TempDir(), "env")
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\nprintf '%s\\n' \"${SSH_CONNECTION-unset}\" >> " + strconv.Quote(log) + "\nif [ \"$1\" = '-p' ]; then printf '%s' '{\"status\":\"SUCCESS\"}'; exit; fi\nMODEX_ROUTER_FIXTURE=1 exec " + strconv.Quote(exe) + " -test.run=^TestRouterACPFixture$\n"
+	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSH_CONNECTION", "inherited")
+	r := New(context.Background(), bin, root, state)
+	defer r.Close()
+	r.SetSSHConnection("first")
+	first, err := r.client(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.SetSSHConnection("second")
+	again, err := r.client(root)
+	if err != nil || again != first {
+		t.Fatalf("existing client changed: %v", err)
+	}
+	other := t.TempDir()
+	if _, err := r.client(other); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.readiness()["ready"]; got != true {
+		t.Fatalf("readiness: %v", got)
+	}
+	r.SetSSHConnection("")
+	if _, err := r.client(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(data), "first\nsecond\nsecond\nsecond\ninherited\n"; got != want {
+		t.Fatalf("child contexts: %q, want %q", got, want)
+	}
+}

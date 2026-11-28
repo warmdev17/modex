@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/netip"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,13 +18,15 @@ import (
 )
 
 const MaxFrame = 4 * 1024 * 1024
+const AttachmentCommandID = 2147483646
 
 type Hello struct {
-	Token     string `json:"token"`
-	Instance  string `json:"instance,omitempty"`
-	Cursor    uint64 `json:"cursor"`
-	Stop      bool   `json:"stop,omitempty"`
-	Heartbeat bool   `json:"heartbeat,omitempty"`
+	Token         string `json:"token"`
+	Instance      string `json:"instance,omitempty"`
+	Cursor        uint64 `json:"cursor"`
+	Stop          bool   `json:"stop,omitempty"`
+	Heartbeat     bool   `json:"heartbeat,omitempty"`
+	SSHConnection string `json:"ssh_connection,omitempty"`
 }
 
 type Server struct {
@@ -34,7 +39,7 @@ type Server struct {
 	stop            context.CancelFunc
 	mu              sync.Mutex
 	attached        bool
-	OnAttachment    func(bool) error
+	OnAttachment    func(bool, string) error
 	childMu         sync.Mutex
 	leaseTimeout    time.Duration
 }
@@ -58,6 +63,30 @@ func NewServer(ctx context.Context, token, instance string, child io.Writer, sto
 }
 
 func (s *Server) Attached() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.attached }
+
+func validSSHConnection(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) != 4 {
+		return ""
+	}
+	for _, i := range []int{0, 2} {
+		if _, err := netip.ParseAddr(fields[i]); err != nil {
+			return ""
+		}
+	}
+	for _, i := range []int{1, 3} {
+		for _, c := range fields[i] {
+			if c < '0' || c > '9' {
+				return ""
+			}
+		}
+		port, err := strconv.ParseUint(fields[i], 10, 16)
+		if err != nil || port == 0 {
+			return ""
+		}
+	}
+	return strings.Join(fields, " ")
+}
 
 func (s *Server) Handle(conn net.Conn) {
 	defer conn.Close()
@@ -115,7 +144,11 @@ func (s *Server) Handle(conn net.Conn) {
 		}
 		s.childMu.Lock()
 		defer s.childMu.Unlock()
-		return s.OnAttachment(value)
+		ssh := ""
+		if value {
+			ssh = validSSHConnection(hello.SSHConnection)
+		}
+		return s.OnAttachment(value, ssh)
 	}
 	defer func() {
 		cancel()
@@ -156,7 +189,8 @@ func (s *Server) Handle(conn net.Conn) {
 					continue
 				}
 			}
-			if _, err := bridge.DecodeCommand(scanner.Bytes()); err != nil {
+			command, err := bridge.DecodeCommand(scanner.Bytes())
+			if err != nil || command.Method == "client/attached" || command.ID == AttachmentCommandID {
 				return
 			}
 			s.childMu.Lock()
@@ -164,7 +198,7 @@ func (s *Server) Handle(conn net.Conn) {
 				s.childMu.Unlock()
 				return
 			}
-			_, err := s.child.Write(append(append([]byte(nil), scanner.Bytes()...), '\n'))
+			_, err = s.child.Write(append(append([]byte(nil), scanner.Bytes()...), '\n'))
 			s.childMu.Unlock()
 			if err != nil {
 				s.stop()

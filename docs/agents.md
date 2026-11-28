@@ -49,6 +49,10 @@ Refresh the agent list after signing in.
 
 ## Antigravity in development builds
 
+Over SSH, Modex starts Antigravity with the connection context from
+OpenSSH so AGY can choose its usual SSH authentication path. It uses
+the credentials already available to the host user.
+
 When both the host and the Android app support Antigravity session options,
 the chat's model picker shows the model and thinking choices reported by ACP.
 Change them while the chat is idle. Modex remembers the confirmed choices for

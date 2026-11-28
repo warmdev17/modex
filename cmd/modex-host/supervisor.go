@@ -145,8 +145,12 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 	if b.kind == "codex" {
 		server.Capabilities = []string{"session_status", "plan_mode", "permission_profiles", "session_lifecycle", "projects", "references", "takeover", "agent_discovery", "runtime_routing", "antigravity_session_options", "antigravity_attachments", "antigravity_steer", "antigravity_context_usage"}
 	}
-	server.OnAttachment = func(attached bool) error {
-		return json.NewEncoder(input).Encode(map[string]any{"id": 2147483646, "method": "client/attached", "params": map[string]bool{"attached": attached}})
+	server.OnAttachment = func(attached bool, sshConnection string) error {
+		params := map[string]any{"attached": attached}
+		if sshConnection != "" {
+			params["ssh_connection"] = sshConnection
+		}
+		return json.NewEncoder(input).Encode(map[string]any{"id": supervisor.AttachmentCommandID, "method": "client/attached", "params": params})
 	}
 	go func() {
 		scanner := bufio.NewScanner(output)
@@ -156,7 +160,7 @@ func superviseHost(cwd string, b backendSpec, dir string) error {
 				ID    int             `json:"id"`
 				Error json.RawMessage `json:"error"`
 			}
-			if json.Unmarshal(scanner.Bytes(), &lifecycle) == nil && lifecycle.ID == 2147483646 {
+			if json.Unmarshal(scanner.Bytes(), &lifecycle) == nil && lifecycle.ID == supervisor.AttachmentCommandID {
 				if len(lifecycle.Error) > 0 {
 					break
 				}
@@ -302,7 +306,7 @@ func supervisorClient(dir string, cursor uint64, instance string, stop, heartbea
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if err = json.NewEncoder(conn).Encode(supervisor.Hello{Token: endpoint.Token, Instance: instance, Cursor: cursor, Stop: stop, Heartbeat: heartbeat}); err != nil {
+	if err = json.NewEncoder(conn).Encode(supervisor.Hello{Token: endpoint.Token, Instance: instance, Cursor: cursor, Stop: stop, Heartbeat: heartbeat, SSHConnection: os.Getenv("SSH_CONNECTION")}); err != nil {
 		return errors.New("supervisor handshake failed")
 	}
 	reader := bufio.NewReader(conn)

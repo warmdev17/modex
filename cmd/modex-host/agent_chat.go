@@ -13,6 +13,7 @@ import (
 	"github.com/warmdev/modex/internal/antigravity"
 	"github.com/warmdev/modex/internal/bridge"
 	"github.com/warmdev/modex/internal/opencode"
+	"github.com/warmdev/modex/internal/supervisor"
 )
 
 type agentChatRouter interface {
@@ -35,7 +36,30 @@ func serveAgentChats(ctx context.Context, in io.Reader, out io.Writer, cwd, agy,
 	defer router.Close()
 	oc := opencode.NewRouter(ctx, opencodeBinary, cwd, stateDir)
 	defer oc.Close()
-	return bridge.ServeCommands(ctx, in, out, agentCommandsWithOpenCode(cwd, codex, router, oc))
+	return bridge.ServeCommands(ctx, in, out, attachmentContext(router.SetSSHConnection, agentCommandsWithOpenCode(cwd, codex, router, oc)))
+}
+
+func attachmentContext(set func(string), next bridge.CommandHandler) bridge.CommandHandler {
+	return func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if cmd.ID == supervisor.AttachmentCommandID && cmd.Method == "client/attached" {
+			var p struct {
+				Attached      bool   `json:"attached"`
+				SSHConnection string `json:"ssh_connection"`
+			}
+			if json.Unmarshal(cmd.Params, &p) != nil {
+				set("")
+				return nil, errors.New("invalid attachment context")
+			}
+			if !p.Attached {
+				p.SSHConnection = ""
+			}
+			set(p.SSHConnection)
+			cmd.Params, _ = json.Marshal(struct {
+				Attached bool `json:"attached"`
+			}{p.Attached})
+		}
+		return next(ctx, cmd, emit)
+	}
 }
 
 func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter) bridge.CommandHandler {

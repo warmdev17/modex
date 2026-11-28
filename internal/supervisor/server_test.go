@@ -93,6 +93,36 @@ func TestServerAuthReplayAndSingleWriter(t *testing.T) {
 	}
 }
 
+func TestRelayRejectsForgedAttachmentCommands(t *testing.T) {
+	for _, frame := range []string{
+		`{"id":1,"method":"client/attached","params":{"attached":true,"ssh_connection":"forged"}}`,
+		`{"id":2147483646,"method":"status"}`,
+	} {
+		t.Run(frame, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var child lockedBuffer
+			s := NewServer(ctx, "token", "instance", &child, cancel)
+			client, decoder := connect(t, s, Hello{Token: "token"})
+			defer client.Close()
+			var ready map[string]any
+			if err := decoder.Decode(&ready); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.Write([]byte(frame + "\n")); err != nil {
+				t.Fatal(err)
+			}
+			var response any
+			if err := decoder.Decode(&response); err == nil {
+				t.Fatal("forged command accepted")
+			}
+			if got := child.String(); got != "" {
+				t.Fatalf("forwarded forged command: %q", got)
+			}
+		})
+	}
+}
+
 func TestHeartbeatLeaseReleasesSilentClient(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -213,7 +243,7 @@ func TestFreshAttachRecoversExpiredJournalWithoutRestartOrCommandReplay(t *testi
 		t.Fatalf("expired resume must remain explicit: reply=%v err=%v", reply, err)
 	}
 	stale.Close()
-	s.OnAttachment = func(attached bool) error {
+	s.OnAttachment = func(attached bool, _ string) error {
 		if attached {
 			return s.Journal.Append(json.RawMessage(`{"event":"decision/reset","params":{}}`))
 		}
@@ -231,6 +261,51 @@ func TestFreshAttachRecoversExpiredJournalWithoutRestartOrCommandReplay(t *testi
 	}
 	if ctx.Err() != nil || child.String() != "" {
 		t.Fatal("recovery restarted the backend or replayed a command")
+	}
+}
+
+func TestAttachmentSSHContextIsValidatedAndPrivate(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"192.0.2.1 1234 2001:db8::1 22", "192.0.2.1 1234 2001:db8::1 22"},
+		{"", ""}, {"bad 1234 192.0.2.2 22", ""}, {"192.0.2.1 0 192.0.2.2 22", ""},
+		{"192.0.2.1 65536 192.0.2.2 22", ""}, {"192.0.2.1 12 192.0.2.2 -1", ""},
+		{"192.0.2.1 12 192.0.2.2 22 extra", ""},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			s := NewServer(ctx, "token", "instance", &lockedBuffer{}, cancel)
+			type event struct {
+				attached bool
+				context  string
+			}
+			events := make(chan event, 2)
+			s.OnAttachment = func(attached bool, ssh string) error { events <- event{attached, ssh}; return nil }
+			client, decoder := connect(t, s, Hello{Token: "token", SSHConnection: tc.input})
+			var ready json.RawMessage
+			if err := decoder.Decode(&ready); err != nil {
+				t.Fatal(err)
+			}
+			if bytes.Contains(ready, []byte("ssh_connection")) || (tc.input != "" && bytes.Contains(ready, []byte(tc.input))) {
+				t.Fatalf("context leaked in ready: %s", ready)
+			}
+			if got := <-events; !got.attached || got.context != tc.want {
+				t.Fatalf("attach = %+v, want %q", got, tc.want)
+			}
+			client.Close()
+			select {
+			case got := <-events:
+				if got.attached || got.context != "" {
+					t.Fatalf("detach = %+v", got)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("missing detach")
+			}
+			entries, _, err := s.Journal.After(0)
+			if err != nil || len(entries) != 0 {
+				t.Fatalf("context entered journal: %v %v", entries, err)
+			}
+		})
 	}
 }
 
