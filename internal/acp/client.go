@@ -20,7 +20,7 @@ import (
 
 var ErrRequestRejected = errors.New("Antigravity rejected the ACP request")
 
-var ErrAuthenticationRequired = errors.New("Antigravity requires sign-in on the host with agy acp --login")
+var ErrAuthenticationRequired = errors.New("Antigravity requires sign-in on the host with AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login")
 
 type Info struct {
 	Name            string `json:"name"`
@@ -147,7 +147,7 @@ func StartWithPermissions(ctx context.Context, binary, cwd string, onUpdate func
 }
 
 func StartWithEnvironment(ctx context.Context, binary, cwd string, env []string, onUpdate func(Update), onPermission func(PermissionRequest) bool) (*Client, error) {
-	return startWithPermissions(ctx, binary, []string{"acp", "--disable-telemetry"}, cwd, env, onUpdate, onPermission)
+	return startWithPermissions(ctx, binary, []string{"acp", "--disable-telemetry"}, cwd, Environment(env), onUpdate, onPermission)
 }
 
 func start(ctx context.Context, binary string, args []string, cwd string, env []string, onUpdate func(Update)) (*Client, error) {

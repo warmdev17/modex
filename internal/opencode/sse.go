@@ -36,6 +36,9 @@ type Stream struct {
 	Filter              func(typ string, properties json.RawMessage, directory string) bool
 	ScopedPoll          bool
 
+	nativeMu sync.Mutex
+	native   map[string]*nativeWatch
+
 	seenMu    sync.Mutex
 	seen      map[string]bool
 	seenOrder []string
@@ -183,6 +186,16 @@ func (s *Stream) alreadySeen(id string) bool {
 
 func (s *Stream) poll(ctx context.Context) {
 	for {
+		s.nativeMu.Lock()
+		watched := make([]string, 0, len(s.native))
+		for id := range s.native {
+			watched = append(watched, id)
+		}
+		s.nativeMu.Unlock()
+		for _, id := range watched {
+			s.reconcileNative(ctx, id)
+		}
+
 		for _, sessionID := range s.synth.ActiveSessions() {
 			if ctx.Err() != nil {
 				return

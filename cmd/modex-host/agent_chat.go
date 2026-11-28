@@ -36,7 +36,20 @@ func serveAgentChats(ctx context.Context, in io.Reader, out io.Writer, cwd, agy,
 	defer router.Close()
 	oc := opencode.NewRouter(ctx, opencodeBinary, cwd, stateDir)
 	defer oc.Close()
-	return bridge.ServeCommands(ctx, in, out, attachmentContext(router.SetSSHConnection, agentCommandsWithOpenCode(cwd, codex, router, oc)))
+	handler := agentCommandsWithOpenCode(cwd, codex, router, oc)
+	handler = attachmentContext(router.SetSSHConnection, handler)
+	return bridge.ServeCommands(ctx, in, out, func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if cmd.ID == supervisor.AttachmentCommandID && cmd.Method == "client/attached" {
+			var p struct {
+				CLISSH bool `json:"cli_ssh"`
+			}
+			if json.Unmarshal(cmd.Params, &p) == nil && p.CLISSH {
+				oc.ReleaseNativeCLIs()
+				router.ReleaseNativeCLIs()
+			}
+		}
+		return handler(ctx, cmd, emit)
+	})
 }
 
 func attachmentContext(set func(string), next bridge.CommandHandler) bridge.CommandHandler {
@@ -83,6 +96,40 @@ func agentCommands(cwd string, codex bridge.EventCaller, router agentChatRouter)
 
 func agentCommandsWithOpenCode(cwd string, codex bridge.EventCaller, router agentChatRouter, oc *opencode.Router) bridge.CommandHandler {
 	return func(ctx context.Context, cmd bridge.Command, emit func(string, json.RawMessage)) (any, error) {
+		if cmd.Method == "cli/native" || cmd.Method == "cli/native/end" {
+			if !supervisor.CLIRequest(cmd.ID) {
+				return nil, errors.New("native terminal access requires the local CLI")
+			}
+			var p struct {
+				ThreadID  string `json:"thread_id"`
+				Workspace string `json:"workspace"`
+			}
+			if json.Unmarshal(cmd.Params, &p) != nil || !validCLIWorkspace(p.Workspace) {
+				return nil, errors.New("invalid native terminal request")
+			}
+			if strings.HasPrefix(p.ThreadID, "oc:") && oc != nil {
+				if cmd.Method == "cli/native/end" {
+					oc.ReleaseNativeCLI(p.ThreadID)
+					return map[string]bool{"released": true}, nil
+				}
+				return oc.NativeCLI(ctx, p.Workspace, p.ThreadID)
+			}
+			if strings.HasPrefix(p.ThreadID, "agy:") {
+				if cmd.Method == "cli/native/end" {
+					if native, ok := router.(interface{ ReleaseNativeCLI(string, string) }); ok {
+						native.ReleaseNativeCLI(p.Workspace, p.ThreadID)
+					}
+					return map[string]bool{"released": true}, nil
+				}
+				native, ok := router.(interface {
+					NativeCLI(context.Context, string, string) (map[string]string, error)
+				})
+				if ok {
+					return native.NativeCLI(ctx, p.Workspace, p.ThreadID)
+				}
+			}
+			return nil, errors.New("native terminal runtime is unavailable")
+		}
 		if oc != nil && cmd.Method == "agents/list" {
 			var p struct {
 				Workspace string `json:"workspace"`

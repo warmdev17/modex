@@ -55,11 +55,17 @@ Chạy `modex cli` trong terminal. Dùng ↑/↓ để chọn agent và phiên, 
 để mở, Esc để quay lại. Chat mới dùng workspace hiện tại. Codex mở giao
 diện terminal riêng.
 
-OpenCode và Antigravity mở màn chat toàn màn hình của Modex. Dùng
-Page Up hoặc Page Down để cuộn và Enter để gửi từ ô nhập. Dùng `/older`
-để tải tin cũ hơn, `/stop` để dừng lượt, Esc hoặc `/quit` để thoát chat
-khi supervisor vẫn chạy. Mở cùng chat trên Android để theo dõi câu trả
-lời và xử lý yêu cầu đang chờ từ cả hai thiết bị.
+OpenCode và Antigravity mở giao diện terminal gốc đã cài trên host.
+OpenCode kết nối vào đúng server và phiên native do Modex quản lý.
+Những tài khoản provider còn thiếu được nhập từ OpenCode trên host bằng
+lệnh export/import của OpenCode. Tài khoản đã có trong hồ sơ Modex giữ
+lựa chọn hiện tại.
+
+Khi TUI OpenCode mở, Modex theo dõi các lượt bắt đầu từ terminal để
+Android nhận hoạt động và trả lời yêu cầu đang chờ. Thoát TUI dừng theo
+dõi lượt mới, các lượt đã nhận vẫn tiếp tục chạy. Antigravity mở đúng
+cuộc trò chuyện native đã lưu và giữ phiên cho terminal. Đóng terminal
+đó trước khi mở lại cùng chat trên Android để tải lịch sử và gửi prompt.
 
 Giao diện dùng màu RGB theo nền terminal và hỗ trợ `NO_COLOR`. Khi đọc
 từ pipe, CLI giữ giao diện theo dòng. Mở thẳng phiên đã lưu bằng
@@ -68,10 +74,15 @@ workspace của phiên hoặc chỉ định `--workspace`.
 
 ## Antigravity trong bản phát triển
 
-Khi kết nối qua SSH, Modex chuyển ngữ cảnh từ OpenSSH để Antigravity
-dùng luồng xác thực SSH của nó và thông tin đăng nhập sẵn có trên host.
-Nếu bộ chọn yêu cầu đăng nhập, chạy `agy acp --login` trong terminal
-SSH bằng tài khoản chạy Modex trên host, rồi mở lại bộ chọn.
+Modex chạy terminal Antigravity, kiểm tra model và ACP với
+`AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1`. Các tiến trình dùng chung token
+AGY lưu trên file qua những lần mở shell và host mới. Nếu chưa từng
+đăng nhập vào kho này, chạy một lần bằng tài khoản của host, rồi mở
+lại bộ chọn.
+
+```sh
+AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login
+```
 
 Khi cả host và Android hỗ trợ tùy chọn phiên Antigravity, bộ chọn trong
 chat hiển thị các model và mức suy nghĩ do ACP cung cấp. Có thể đổi khi chat

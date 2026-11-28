@@ -750,7 +750,7 @@ func TestReadinessReportsMissingSSHLoginWithoutOpeningIt(t *testing.T) {
 	r := New(context.Background(), bin, t.TempDir(), t.TempDir())
 	defer r.Close()
 	entry := r.readiness()
-	if entry["ready"] != false || entry["reason"] != "Run agy acp --login on the host" {
+	if entry["ready"] != false || entry["reason"] != "Run AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login on the host" {
 		t.Fatalf("sign-in readiness: %v", entry)
 	}
 }

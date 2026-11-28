@@ -25,6 +25,25 @@ import time
 
 kind = Path(sys.argv[0]).name
 workspace = str(Path.cwd())
+if kind == "opencode" and "auth" in sys.argv:
+    if "export" in sys.argv:
+        print("{}")
+    else:
+        json.load(sys.stdin)
+    sys.exit(0)
+if "--conversation" in sys.argv or "--server" in sys.argv:
+    if kind == "agy":
+        assert sys.argv[sys.argv.index("--conversation") + 1] == "agy-native"
+        assert os.environ["AGY_CLI_FORCE_FILE_TOKEN_STORAGE"] == "1"
+        print("Native Antigravity terminal", flush=True)
+    else:
+        assert sys.argv[sys.argv.index("--session") + 1] == "oc-native"
+        assert os.environ["OPENCODE_PASSWORD"]
+        print("Native OpenCode terminal", flush=True)
+    for line in sys.stdin:
+        if line.strip() == "/quit":
+            sys.exit(0)
+    sys.exit(0)
 if kind == "opencode":
     if "--version" in sys.argv:
         print("opencode v2.4.1")
@@ -360,24 +379,12 @@ class SharedAgentSupervisorTests(unittest.TestCase):
             os.write(master, b"\x1b[B" * (2 if agent == "opencode" else 1) + b"\r")
             expect("New conversation")
             os.write(master, b"\x1b[B\r")
-            expect("Message " + label)
-            os.write(master, b"sync-fullscreen-prompt\r")
-            expect(label + " reply: sync-fullscreen-prompt")
-            expect("Turn completed.")
-            target = {"thread_id": thread_id, "workspace": str(workspace)}
-            history = phone.call("threads/read", dict(target, include_turns=True, limit=20))
-            self.assertTrue(any(row.get("role") == "user" and row.get("text") == "sync-fullscreen-prompt"
-                                for row in history["messages"]))
-            phone.call("turn/start", dict(target, text="sync-fullscreen-from-phone"))
-            expect(label + " reply: sync-fullscreen-from-phone")
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 15, 68, 0, 0))
-            cli.send_signal(signal.SIGWINCH)
-            expect("┌" + "─" * 66 + "┐")
+            expect("Native " + label + " terminal")
             os.write(master, b"/quit\r")
             self.assertEqual(cli.wait(timeout=5), 0)
             while select.select([master], [], [], 0)[0]:
                 output.extend(os.read(master, 8192))
-            self.assertGreaterEqual(output.count(b"\x1b[?1049l"), 2)
+            self.assertGreaterEqual(output.count(b"\x1b[?1049l"), 1)
             if agent == "antigravity":
                 self.assertNotIn(b"48;2;", output)
             else:

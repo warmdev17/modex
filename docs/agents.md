@@ -56,12 +56,18 @@ Run `modex cli` in a terminal. Use ↑/↓ to choose an agent and a session,
 Enter to open it, and Esc to go back. A new conversation uses the current
 workspace. Codex opens its native terminal UI.
 
-OpenCode and Antigravity open the fullscreen Modex chat. Use Page Up or
-Page Down to scroll, and Enter to send from the composer. Use `/older`
-to load earlier messages, `/stop` to interrupt a turn, or Esc or `/quit`
-to leave the chat while the supervisor keeps running. Open the same
-conversation on Android to watch replies and handle requests on either
-device.
+OpenCode and Antigravity open their installed native terminal interfaces.
+OpenCode attaches to Modex's managed server and native session. Missing
+provider credentials are imported from the host's existing OpenCode
+account through its supported export/import commands. Existing accounts
+in the managed profile keep their selection.
+
+The OpenCode handoff watches that session for terminal-originated turns,
+so Android can receive its activity and answer pending requests. Exiting
+the terminal releases the watch while accepted turns keep running.
+Antigravity opens the saved native conversation and reserves it for the
+native terminal. Close that terminal before using the same chat on Android
+to refresh its history and send more prompts.
 
 The UI uses RGB accents for the terminal theme and respects `NO_COLOR`.
 Piped input keeps the line-oriented interface. Open a saved session
@@ -70,11 +76,15 @@ from the session's workspace or pass its directory with `--workspace`.
 
 ## Antigravity in development builds
 
-Over SSH, Modex starts Antigravity with the connection context from
-OpenSSH so AGY can choose its usual SSH authentication path. It uses
-the credentials already available to the host user.
-If the picker asks you to sign in, run `agy acp --login` as the Modex
-host user in an SSH terminal, then reopen the picker.
+Modex runs the Antigravity terminal, model discovery and ACP with
+`AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1`. They share AGY's durable token
+storage across new shells and host processes. If this storage has never
+been signed in, run the following once as the host user, then reopen
+the picker.
+
+```sh
+AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login
+```
 
 When both the host and the Android app support Antigravity session options,
 the chat's model picker shows the model and thinking choices reported by ACP.

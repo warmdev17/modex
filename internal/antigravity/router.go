@@ -62,6 +62,7 @@ type chat struct {
 	usageModel string
 	record
 	loaded                bool
+	nativeTerminal        bool
 	loading               bool
 	active                string
 	messages              []message
@@ -105,7 +106,7 @@ func (r *Router) SetSSHConnection(value string) {
 
 // childEnvironment is called with r.mu held.
 func (r *Router) childEnvironment() []string {
-	env := os.Environ()
+	env := acp.Environment(os.Environ())
 	if r.sshConnection != "" {
 		env = append(env, "SSH_CONNECTION="+r.sshConnection)
 	}
@@ -480,6 +481,10 @@ func (r *Router) load(ctx context.Context, c *chat) (*acp.Client, error) {
 		return nil, e
 	}
 	r.mu.Lock()
+	if c.nativeTerminal {
+		r.mu.Unlock()
+		return nil, errors.New("Antigravity native terminal is attached; close it to refresh this chat")
+	}
 	if c.titleDirty {
 		_ = r.saveLocked()
 	}
@@ -588,7 +593,7 @@ func (r *Router) readiness() map[string]any {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			entry["reason"] = "Antigravity model discovery timed out"
 		} else if bytes.Contains(bytes.ToLower(problems.Bytes()), []byte("sign in")) {
-			entry["reason"] = "Run agy acp --login on the host"
+			entry["reason"] = "Run AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 agy acp --login on the host"
 		}
 		return entry
 	}
@@ -866,7 +871,7 @@ func (r *Router) Handle(ctx context.Context, cmd bridge.Command, emit func(strin
 			return nil, true, err
 		}
 		r.mu.Lock()
-		if c.active != "" || c.setting || c.optionsDirty || !c.loaded || !client.SessionLoaded(c.Native) {
+		if c.active != "" || c.setting || c.nativeTerminal || c.optionsDirty || !c.loaded || !client.SessionLoaded(c.Native) {
 			r.mu.Unlock()
 			return nil, true, errors.New("session busy")
 		}

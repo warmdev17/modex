@@ -60,7 +60,7 @@ func (r *Router) handleOptions(ctx context.Context, c *chat, method string, para
 				}
 			}
 		}
-		if c.active != "" || c.setting || c.optionsDirty || !c.loaded {
+		if c.active != "" || c.setting || c.nativeTerminal || c.optionsDirty || !c.loaded {
 			r.mu.Unlock()
 			return nil, true, errors.New("Antigravity session is unavailable for changing options")
 		}

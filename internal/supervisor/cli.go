@@ -207,8 +207,11 @@ func (s *Server) handleCLI(ctx context.Context, cancel context.CancelFunc, conn 
 
 func cliAllowed(method string) bool {
 	switch method {
-	case "agents/list", "models/list", "threads/list", "threads/start", "threads/resume", "threads/read", "threads/status", "threads/options", "threads/options/set", "turn/start", "turn/interrupt", "decision/respond":
+	case "cli/native", "cli/native/end", "agents/list", "models/list", "threads/list", "threads/start", "threads/resume", "threads/read", "threads/status", "threads/options", "threads/options/set", "turn/start", "turn/interrupt", "decision/respond":
 		return true
 	}
 	return false
 }
+
+// CLIRequest identifies commands assigned by the authenticated local CLI relay.
+func CLIRequest(id int) bool { return id >= cliIDStart && id <= cliIDEnd }

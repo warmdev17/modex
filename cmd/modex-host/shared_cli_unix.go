@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/warmdev/modex/internal/acp"
 	"github.com/warmdev/modex/internal/bridge"
 )
 
@@ -45,7 +46,8 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 	input := bufio.NewReader(os.Stdin)
 	openChat := func(agent cliAgent, choice cliChoice) error {
 		if fullscreen {
-			return runCLIChatFullscreen(ctx, os.Stdin, os.Stdout, client, agent.ID, agent.Label, choice.Workspace, choice.ID)
+			stop()
+			return runNativeAgentCLI(context.Background(), client, agent.ID, choice)
 		}
 		chatCtx, stopChat := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		defer stopChat()
@@ -167,13 +169,83 @@ func runNativeCodex(cwd, binary, home, id string, endpoint supervisorEndpoint) e
 		cli.Env = append(cli.Env, "CODEX_HOME="+home)
 	}
 	cli.Stdin, cli.Stdout, cli.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return runCLICommand(cli)
+}
+
+func runNativeAgentCLI(ctx context.Context, client *localCLIClient, agent string, choice cliChoice) error {
+	if choice.ID == "" {
+		raw, err := client.Call(ctx, "threads/start", map[string]any{"workspace": choice.Workspace, "agent": agent})
+		if err != nil {
+			return err
+		}
+		var created struct {
+			Thread struct {
+				ID string `json:"id"`
+			} `json:"thread"`
+		}
+		if json.Unmarshal(raw, &created) != nil || !validCLISessionID(agent, created.Thread.ID) {
+			return errors.New("invalid native conversation")
+		}
+		choice.ID = created.Thread.ID
+	}
+	params := map[string]string{"workspace": choice.Workspace, "thread_id": choice.ID}
+	raw, err := client.Call(ctx, "cli/native", params)
+	if err != nil {
+		return err
+	}
+	var descriptor map[string]string
+	if json.Unmarshal(raw, &descriptor) != nil || descriptor["workspace"] != choice.Workspace || !filepath.IsAbs(descriptor["binary"]) || !validCLIIdentity(descriptor["session_id"]) {
+		return errors.New("invalid native terminal descriptor")
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = client.Call(ctx, "cli/native/end", params)
+	}()
+	var args []string
+	env := os.Environ()
+	switch agent {
+	case "antigravity":
+		args = []string{"--conversation", descriptor["session_id"]}
+		if model := descriptor["model"]; model != "" {
+			args = append(args, "--model", model)
+		}
+		if level := descriptor["thinking"]; level != "" {
+			args = append(args, "--effort", level)
+		}
+		env = acp.Environment(env)
+	case "opencode":
+		if !strings.HasPrefix(descriptor["server"], "http://127.0.0.1:") || descriptor["password"] == "" {
+			return errors.New("invalid OpenCode terminal endpoint")
+		}
+		args = []string{"--server", descriptor["server"], "--session", descriptor["session_id"], choice.Workspace}
+		filtered := make([]string, 0, len(env)+1)
+		for _, pair := range env {
+			if !strings.HasPrefix(pair, "OPENCODE_PASSWORD=") {
+				filtered = append(filtered, pair)
+			}
+		}
+		env = append(filtered, "OPENCODE_PASSWORD="+descriptor["password"])
+		if err := seedNativeOpenCodeAuth(ctx, descriptor["binary"], descriptor["server"], env); err != nil {
+			return err
+		}
+	default:
+		return errors.New("unsupported native terminal runtime")
+	}
+	cli := exec.Command(descriptor["binary"], args...)
+	cli.Dir, cli.Env = choice.Workspace, env
+	cli.Stdin, cli.Stdout, cli.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return runCLICommand(cli)
+}
+
+func runCLICommand(cli *exec.Cmd) error {
 	// Ctrl-C belongs to the TUI. Terminating this launcher must only close its TUI.
 	interrupts := make(chan os.Signal, 1)
 	signal.Notify(interrupts, os.Interrupt)
 	defer signal.Stop(interrupts)
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
-	if err = cli.Start(); err != nil {
+	if err := cli.Start(); err != nil {
 		return err
 	}
 	done := make(chan error, 1)
