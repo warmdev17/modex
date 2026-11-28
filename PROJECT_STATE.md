@@ -34,9 +34,11 @@ with backend `52b2b5c` and initial UI `9c20781`. See the
 - Installed binary SHA-256
   `2658ae0b7fb0142ab87e677a29a7ddc742302fb86ca41aff68ab0d6fb4e59dfb`.
   Previous binary `/tmp/modex-cli-picker-backup.oQBweL/modex-host.previous`.
-  External 30-second restart is the final operation. Runtime adoption needs
-  confirmation after that job runs; Android must reset session cursor and
-  reconnect. No uncertain prompts/decisions are replayed.
+  External restart succeeded. On 2026-11-28 at 12:51:03 +07 the active
+  service started PID 1467841; `/proc/1467841/exe --version` reports
+  `dfdb04901a81b71e437c83020a2ca2c3ac59b335` and its checksum matches
+  the installed, isolated-tested binary above. Android must reset session
+  cursor and reconnect. No uncertain prompts/decisions are replayed.
 - Native provider inference, physical Android and non-Linux runtime were
   outside this host/CLI check. Cold optional-runtime authentication still
   takes its genuine discovery time, independently of the picker.
