@@ -27,6 +27,27 @@ func TestCLIPickerChoosesReadyAgentAndExplainsUnavailable(t *testing.T) {
 	}
 }
 
+func TestCLIAgentIconsHavePlainTerminalFallback(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "C.UTF-8")
+	if (cliAgent{ID: "codex"}).icon() != "◇" {
+		t.Fatal("missing Codex glyph")
+	}
+	t.Setenv("LC_ALL", "C")
+	for _, agent := range []cliAgent{{ID: "codex"}, {ID: "antigravity"}, {ID: "opencode"}} {
+		icon := agent.icon()
+		if len(icon) != 3 || icon[0] != '[' || icon[2] != ']' {
+			t.Fatalf("nonportable fallback %q", icon)
+		}
+	}
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "en_US.ISO-8859-1")
+	if (cliAgent{ID: "codex"}).icon() != "[C]" {
+		t.Fatal("legacy locale ignored")
+	}
+}
+
 func TestCLIPickerChoosesRuntimeSessionWorkspace(t *testing.T) {
 	for _, tc := range []struct {
 		agent cliAgent
@@ -38,7 +59,7 @@ func TestCLIPickerChoosesRuntimeSessionWorkspace(t *testing.T) {
 		{cliAgent{ID: "opencode"}, `{"data":[{"id":"oc:123","workspace":"/open"}]}`, cliChoice{ID: "oc:123", Workspace: "/open"}},
 	} {
 		p := newCLIPicker(bufio.NewReader(strings.NewReader("1\n")), io.Discard)
-		got, err := p.chooseSession(context.Background(), tc.agent, "/fallback", func(context.Context, string) (json.RawMessage, error) {
+		got, err := p.chooseSession(context.Background(), tc.agent, tc.want.Workspace, func(context.Context, string) (json.RawMessage, error) {
 			return json.RawMessage(tc.raw), nil
 		})
 		if err != nil || got != tc.want {

@@ -26,10 +26,11 @@ var (
 )
 
 type cliAgent struct {
-	ID     string `json:"id"`
-	Label  string `json:"label"`
-	Reason string `json:"reason"`
-	Ready  bool   `json:"ready"`
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Reason   string `json:"reason"`
+	Ready    bool   `json:"ready"`
+	Checking bool   `json:"checking,omitempty"`
 }
 type cliChoice struct{ ID, Workspace string }
 type cliPicker struct {
@@ -74,7 +75,7 @@ func (p *cliPicker) chooseSession(ctx context.Context, agent cliAgent, cwd strin
 		if err != nil {
 			return cliChoice{}, err
 		}
-		page, err := parseCLISessionPage(agent, raw)
+		page, err := parseScopedCLISessionPage(agent, raw, cwd)
 		if err != nil {
 			return cliChoice{}, err
 		}
@@ -133,6 +134,9 @@ func (a cliAgent) displayName() string {
 
 func (a cliAgent) menuLabel() string {
 	label := a.displayName()
+	if a.Checking {
+		return label + " · Checking…"
+	}
 	if a.Ready {
 		return label
 	}
@@ -141,6 +145,48 @@ func (a cliAgent) menuLabel() string {
 		reason = "Unavailable"
 	}
 	return label + " — " + reason
+}
+
+func (a cliAgent) icon() string {
+	locale := os.Getenv("LC_ALL")
+	if locale == "" {
+		locale = os.Getenv("LC_CTYPE")
+	}
+	if locale == "" {
+		locale = os.Getenv("LANG")
+	}
+	plain := locale != "" && !strings.Contains(strings.ToUpper(locale), "UTF-8") && !strings.Contains(strings.ToUpper(locale), "UTF8")
+	if os.Getenv("TERM") == "dumb" || plain {
+		switch a.ID {
+		case "codex":
+			return "[C]"
+		case "opencode":
+			return "[O]"
+		case "antigravity":
+			return "[A]"
+		}
+	}
+	switch a.ID {
+	case "codex":
+		return "◇"
+	case "opencode":
+		return "▣"
+	case "antigravity":
+		return "✦"
+	}
+	return "·"
+}
+
+func (a cliAgent) description() string {
+	switch a.ID {
+	case "codex":
+		return "Codex terminal · shared native sessions"
+	case "opencode":
+		return "OpenCode terminal · managed local server"
+	case "antigravity":
+		return "Antigravity terminal · saved conversations"
+	}
+	return "Native agent terminal"
 }
 
 type cliSession struct{ ID, Name, Preview, CWD, Workspace string }
@@ -160,6 +206,25 @@ func parseCLISessionPage(agent cliAgent, raw json.RawMessage) (cliSessionPage, e
 			return cliSessionPage{}, errors.New("invalid session ID in list")
 		}
 	}
+	return page, nil
+}
+
+func parseScopedCLISessionPage(agent cliAgent, raw json.RawMessage, cwd string) (cliSessionPage, error) {
+	page, err := parseCLISessionPage(agent, raw)
+	if err != nil {
+		return page, err
+	}
+	data := make([]cliSession, 0, len(page.Data))
+	for _, session := range page.Data {
+		workspace := session.workspace(cwd)
+		if !validCLIWorkspace(workspace) {
+			return cliSessionPage{}, errors.New("invalid session workspace")
+		}
+		if filepath.Clean(workspace) == filepath.Clean(cwd) {
+			data = append(data, session)
+		}
+	}
+	page.Data = data
 	return page, nil
 }
 

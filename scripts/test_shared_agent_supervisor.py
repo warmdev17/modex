@@ -344,7 +344,7 @@ class SharedAgentSupervisorTests(unittest.TestCase):
         saved_terminal = termios.tcgetattr(slave)
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 84, 0, 0))
         label = "OpenCode" if agent == "opencode" else "Antigravity"
-        env = dict(os.environ, TERM="xterm-256color", COLORFGBG="15;0")
+        env = dict(os.environ, TERM="xterm-256color", COLORFGBG="15;0", LC_ALL="C.UTF-8")
         env.pop("NO_COLOR", None)
         env.pop("TERM_BACKGROUND", None)
         if agent == "antigravity":
@@ -376,6 +376,9 @@ class SharedAgentSupervisorTests(unittest.TestCase):
             expect("\x1b[?1049h")
             expect("Choose an agent")
             expect("OpenCode")
+            # Fast probes may already be ready in the first rendered roster.
+            consumed = 0
+            expect(label + " " * max(2, 20 - len(label)) + "Ready")
             os.write(master, b"\x1b[B" * (2 if agent == "opencode" else 1) + b"\r")
             expect("New conversation")
             os.write(master, b"\x1b[B\r")
@@ -394,7 +397,11 @@ class SharedAgentSupervisorTests(unittest.TestCase):
         finally:
             if cli.poll() is None:
                 cli.terminate()
-                cli.wait(timeout=5)
+                try:
+                    cli.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    cli.kill()
+                    cli.wait(timeout=5)
             os.close(slave)
             os.close(master)
 

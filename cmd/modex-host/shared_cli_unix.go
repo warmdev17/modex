@@ -21,6 +21,10 @@ import (
 )
 
 func runSharedCLI(cwd, binary, home, id, dir string) error {
+	cwd, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return err
+	}
 	endpoint, err := readEndpoint(dir)
 	if err != nil {
 		return fmt.Errorf("supervisor unavailable in %s; start modex service or modex-host first", dir)
@@ -65,25 +69,32 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 		}
 		return openChat(agent, cliChoice{ID: id, Workspace: cwd})
 	}
-	loadAgents := func(ctx context.Context) ([]cliAgent, error) {
+	checkAgent := func(ctx context.Context, id string) (cliAgent, error) {
 		discover, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
-		raw, err := client.Call(discover, "agents/list", map[string]string{"workspace": cwd})
+		raw, err := client.Call(discover, "cli/agents/check", map[string]string{"workspace": cwd, "agent": id})
 		if err != nil {
-			return nil, err
+			return cliAgent{}, err
 		}
 		var catalogue struct {
 			Data []cliAgent `json:"data"`
 		}
-		if json.Unmarshal(raw, &catalogue) != nil || len(catalogue.Data) == 0 {
-			return nil, errors.New("the host returned no agent runtimes")
+		if json.Unmarshal(raw, &catalogue) != nil || len(catalogue.Data) != 1 || catalogue.Data[0].ID != id {
+			return cliAgent{}, errors.New("the host returned an invalid agent runtime")
 		}
-		return catalogue.Data, nil
+		return catalogue.Data[0], nil
+	}
+	loadAgents := func(context.Context) ([]cliAgent, error) {
+		return []cliAgent{
+			{ID: "codex", Label: "Codex", Ready: true},
+			{ID: "antigravity", Label: "Antigravity", Checking: true},
+			{ID: "opencode", Label: "OpenCode", Checking: true},
+		}, nil
 	}
 	list := func(ctx context.Context, agent cliAgent, cursor string) (json.RawMessage, error) {
 		ctx, done := context.WithTimeout(ctx, 20*time.Second)
 		defer done()
-		params := map[string]any{"agent": agent.ID, "limit": 20, "all_workspaces": true}
+		params := map[string]any{"agent": agent.ID, "limit": 20, "workspace": cwd}
 		if cursor != "" {
 			params["cursor"] = cursor
 		}
@@ -98,7 +109,7 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 		return openChat(agent, choice)
 	}
 	if fullscreen {
-		agent, choice, err := pickCLIFullscreen(ctx, os.Stdin, os.Stdout, loadAgents, cwd, list)
+		agent, choice, err := pickCLIFullscreen(ctx, os.Stdin, os.Stdout, loadAgents, cwd, list, checkAgent)
 		if err != nil {
 			return err
 		}
@@ -108,6 +119,14 @@ func runSharedCLI(cwd, binary, home, id, dir string) error {
 	agents, err := loadAgents(ctx)
 	if err != nil {
 		return err
+	}
+	for i := range agents {
+		if agents[i].Checking {
+			agents[i], err = checkAgent(ctx, agents[i].ID)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	picker := newCLIPicker(input, os.Stdout)
 	for {
