@@ -1,5 +1,33 @@
 # Modex project state
 
+## Fullscreen Modex CLI
+
+Updated 2026-11-28 on `feat/fullscreen-cli`. Source `49c3a32`.
+See the [plan](docs/superpowers/plans/2026-11-28-fullscreen-cli.md).
+`modex cli` opens the alternate screen for discovery, agent and session
+selection, and shared Antigravity and OpenCode conversations. Use arrow
+keys and Enter for selection, Page Up and Page Down to read the
+transcript, and the fixed composer for prompts. Codex opens its native
+TUI. Pipes retain the line-oriented interface.
+
+- Go 1.23.12 race suite, `go vet ./...`, Darwin arm64 build, focused
+  keyboard and rendering tests, and `git diff --check` passed.
+- On the stamped binary, the shared supervisor and SSH transport tests
+  passed. The real PTY path covered both agents, arrow selection, RGB
+  and monochrome, bidirectional prompts through the phone protocol with
+  fixture runtimes, resizing, and restoration of terminal attributes.
+- The installed binary opened an existing real Antigravity conversation
+  in a 100 × 26 terminal through the live supervisor. Escape returned
+  to the shell. This live check used existing history and sent no
+  provider prompts. Physical Android was outside these checks.
+- Installed host SHA-256
+  `0b123375487357efcc5ee741453adb3bd1ca11193275aa011a83fa980bd14cbc`.
+  Previous host backed up at
+  `/tmp/modex-cli-fullscreen.QrhSsx/modex-host.previous`.
+  The TUI is available to new CLI invocations immediately. Service
+  restart activation requires a separate live check. Android keeps
+  preview 55. Reset its session cursor and reconnect after restart.
+
 ## Antigravity option restore
 
 Updated 2026-11-28 on `feat/modex-shared-cli`. Host source `76e15c7`.
@@ -20,8 +48,8 @@ the existing conflict check.
   `ecea6b474b6db486284eb912c0cd56e5d5b6909919f1730647d77e7c6896007c`.
   Previous host backed up at
   `/tmp/modex-agy-restore.kucDV2/modex-host.previous`.
-  Delayed activation requires a live check. Android can keep preview 55.
-  Reset the Android session cursor and reconnect after restart.
+  The running service at `76e15c7` matched the verified version and
+  checksum before the fullscreen CLI rollout.
 
 ## Shared Modex CLI
 
