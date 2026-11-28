@@ -1,5 +1,37 @@
 # Modex project state
 
+## Shared Modex CLI
+
+Updated 2026-11-28 on `feat/modex-shared-cli`, source `e452df6`.
+See the [plan](docs/superpowers/plans/2026-11-28-shared-cli.md).
+`modex cli` selects an agent, then an existing or new session. The picker
+uses terminal-width frames, light/dark RGB accents and monochrome output
+for redirected output or `NO_COLOR`. Codex opens its native TUI.
+Antigravity and OpenCode use a private local supervisor connection, so the
+terminal and phone can both work in the same session.
+
+- On `e452df6`, `GOMAXPROCS=4 go test -race -p 2 ./... -count=1
+  -timeout=150s` with umask 022, `go vet ./...` and `git diff --check`
+  passed. Independent review was followed by regression checks for
+  attach-time stream duplication and queued forms.
+- `test_shared_agent_supervisor.py` passed phone/terminal prompts in
+  both directions, history reopen, permissions and phone lease survival
+  with fixture runtimes. `test_ssh_transport.py` with
+  `MODEX_TEST_AGY=/usr/sbin/agy` and `MODEX_TEST_SHARED_CLI=1` passed
+  the same-session prompt flow in both directions with real OpenSSH and
+  AGY 1.5.17. The framed picker passed at 44 columns in a pseudo-terminal
+  with both light and dark accents.
+- Installed OpenCode 2.4.1 passed discovery and model listing. OpenCode
+  Go inference and a physical Android device were outside the verified
+  flows. Android uses existing preview 55.
+- Verified host SHA-256
+  `e0bcb2e6daf7104761247247c35c8206da019108b8c3600958b45901051367a2`
+  and CLI SHA-256
+  `24ec4e1c2a13d57bec45fcb607d7949c82338a2287c6ac36bb52eb512f7bfc0d`.
+  Previous binaries backed up in `/tmp/modex-shared-cli.9gUTDL/`.
+  Delayed host activation requires a live check. Reset the Android
+  session cursor and reconnect after restart. Branch is local.
+
 ## Antigravity SSH authentication context
 
 Updated 2026-11-28T07:29:00+07:00 on `fix/antigravity-ssh-auth-context`.
@@ -24,8 +56,8 @@ An existing ACP process keeps its environment through reconnect.
   `5d9f96e98923acab1c22957a3a9884ae9880a7eed38f2d6a089db9e9846fae8d`.
   Previous host backed up at
   `/tmp/modex-agy-ssh.4uIMT2/modex-host.previous`.
-  Android continues to use preview 55. Delayed activation is unverified
-  at handoff. Reset the Android session cursor and reconnect after restart.
+  Android continues to use preview 55. The running host at `a4b1249`
+  was confirmed by version and checksum before the shared CLI update.
 
 ## Antigravity file diffs
 
