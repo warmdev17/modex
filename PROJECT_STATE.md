@@ -2,7 +2,7 @@
 
 ## Shared Modex CLI
 
-Updated 2026-11-28T08:18:40+07:00 on `feat/modex-shared-cli`.
+Updated 2026-11-28T08:20:35+07:00 on `feat/modex-shared-cli`.
 CLI source `e452df6` and host source `cdd19ba`.
 See the [plan](docs/superpowers/plans/2026-11-28-shared-cli.md).
 `modex cli` selects an agent, then an existing or new session. The picker
@@ -24,10 +24,12 @@ terminal and phone can both work in the same session.
   local Gemini 4 Hydrogen prompt returned a provider quota error.
 - `cdd19ba` uses `agy models` for readiness and reports
   `agy acp --login` when AGY requires sign-in. The hint was verified
-  with installed AGY over an isolated real SSH connection. Rerun
-  the native two-way smoke after the host user's SSH login is available.
-- The installed CLI at `e452df6` rendered both palettes in a live
-  pseudo-terminal and entered the OpenCode session picker. OpenCode
+  with installed AGY over an isolated real SSH connection and
+  reproduced after live host activation. Rerun the native two-way
+  smoke after the host user's SSH login is available.
+- The installed CLI at `e452df6` rendered both palettes at 54 columns
+  against the running `cdd19ba` host. Both Antigravity and OpenCode
+  showed existing and new sessions, with back and quit working. OpenCode
   2.4.1 passed two-way prompts and history reopen on the stamped
   `cdd19ba` host against a loopback model fixture. OpenCode Go
   inference and a physical Android device remain unverified.
@@ -36,11 +38,12 @@ terminal and phone can both work in the same session.
   `4ccee54f3baccf011b2884060c322aba15ccf200302a23bd86b3a5c42af7105a`
   and CLI SHA-256
   `24ec4e1c2a13d57bec45fcb607d7949c82338a2287c6ac36bb52eb512f7bfc0d`.
-  The running host at `e452df6` was verified by version and checksum.
+  The running host restarted at 08:19:17 +07 and matched `cdd19ba`
+  by version and checksum.
   Previous binaries are in `/tmp/modex-shared-cli.9gUTDL/`, with the
-  current host backup in its `readiness/` subdirectory. Host activation
-  for `cdd19ba` requires a live check. Reset the Android session cursor
-  and reconnect after restart. Branch is local.
+  previous shared CLI host backup in its `readiness/` subdirectory.
+  Reset the Android session cursor and reconnect after restart.
+  Branch is local.
 
 ## Antigravity SSH authentication context
 
